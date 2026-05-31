@@ -414,6 +414,210 @@
             color: var(--text-3);
             padding: 10px 0 4px;
         }
+
+        /* ══════════════════════════════════════════════════
+           BOTTOM NAVIGATION BAR — SOLO MÓVIL
+        ══════════════════════════════════════════════════ */
+        #bottom-nav {
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+
+            /* Ocultar sidebar en móvil */
+            aside {
+                display: none !important;
+            }
+
+            /* Ocultar global-nav (barra superior) en móvil */
+            #global-nav {
+                display: none !important;
+            }
+
+            /* Header compacto en móvil */
+            header {
+                padding: 0 14px !important;
+                height: 52px !important;
+            }
+            header h1 {
+                font-size: 13px !important;
+            }
+            header p {
+                display: none !important;
+            }
+            header .logo-img {
+                width: 34px !important;
+                height: 34px !important;
+            }
+
+            /* El botón de cierre de caja: más compacto */
+            #btn-cierre-caja {
+                padding: 6px 12px !important;
+                font-size: 11px !important;
+            }
+
+            /* El div flex que envuelve aside+main */
+            .layout-wrapper {
+                flex-direction: column;
+            }
+
+            /* Main ocupa todo el ancho */
+            main {
+                padding: 16px 14px !important;
+                padding-bottom: 90px !important; /* espacio para la bottom nav */
+            }
+
+            /* KPI grid: 2 columnas en móvil */
+            .kpi-grid {
+                grid-template-columns: 1fr 1fr !important;
+                gap: 10px !important;
+            }
+
+            /* Tablas en dos columnas: stack en móvil */
+            .tables-grid {
+                grid-template-columns: 1fr !important;
+                gap: 14px !important;
+            }
+
+            /* Formulario menú: columna única en móvil */
+            #form-nuevo-plato {
+                grid-template-columns: 1fr 1fr !important;
+                gap: 10px !important;
+            }
+            #form-nuevo-plato > div:nth-child(2) {
+                grid-column: span 2;
+            }
+            #form-nuevo-plato > div:last-child {
+                grid-column: span 2;
+            }
+
+            /* Grid de tarjetas menú: 2 columnas */
+            #contenedor-slots-menu {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 12px !important;
+            }
+
+            /* Layout personal: columna única */
+            .personal-grid {
+                grid-template-columns: 1fr !important;
+            }
+
+            /* Layout gastos operativos: columna única */
+            .gastos-grid {
+                grid-template-columns: 1fr !important;
+            }
+
+            /* Layout DIAN: columna única */
+            .dian-grid {
+                grid-template-columns: 1fr !important;
+            }
+
+            /* Layout inventario form: 2 columnas */
+            #form-nuevo-insumo {
+                grid-template-columns: 1fr 1fr !important;
+                gap: 10px !important;
+            }
+            #form-nuevo-insumo > div:last-child {
+                grid-column: span 2;
+            }
+
+            /* Mostrar bottom nav */
+            #bottom-nav {
+                display: flex;
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                z-index: 9000;
+                background: var(--surface);
+                border-top: 1.5px solid var(--border);
+                padding: 0;
+                padding-bottom: env(safe-area-inset-bottom, 0px);
+                box-shadow: 0 -4px 20px rgba(26,31,24,0.08);
+                height: 66px;
+                align-items: stretch;
+            }
+
+            .bnav-item {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 3px;
+                padding: 8px 4px;
+                cursor: pointer;
+                border: none;
+                background: transparent;
+                color: var(--text-3);
+                font-family: 'DM Sans', sans-serif;
+                font-size: 10px;
+                font-weight: 500;
+                text-decoration: none;
+                transition: color .18s;
+                position: relative;
+                -webkit-tap-highlight-color: transparent;
+            }
+
+            .bnav-item.bnav-active {
+                color: var(--olive);
+            }
+
+            .bnav-item.bnav-active::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 20%;
+                right: 20%;
+                height: 2.5px;
+                background: var(--olive);
+                border-radius: 0 0 4px 4px;
+            }
+
+            .bnav-icon {
+                font-size: 20px;
+                line-height: 1;
+                transition: transform .18s;
+            }
+
+            .bnav-item.bnav-active .bnav-icon {
+                transform: translateY(-1px);
+            }
+
+            .bnav-label {
+                font-size: 9.5px;
+                font-weight: 600;
+                letter-spacing: .2px;
+                white-space: nowrap;
+            }
+
+            /* KPI card: padding reducido en móvil */
+            .kpi-card {
+                padding: 14px 14px !important;
+            }
+            .kpi-card h3 {
+                font-size: 18px !important;
+            }
+
+            /* Cards: padding reducido */
+            .card {
+                padding: 16px !important;
+                border-radius: 14px !important;
+            }
+
+            /* Modal nómina: ocupa más pantalla */
+            .modal-box {
+                padding: 20px 16px !important;
+                border-radius: 16px !important;
+                max-height: 85vh !important;
+            }
+        }
+
+        @media (max-width: 400px) {
+            #contenedor-slots-menu {
+                grid-template-columns: 1fr !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -454,7 +658,7 @@
     </div>
     <div style="display:flex;align-items:center;gap:12px;">
         <span id="fecha-actual" class="mono" style="font-size:12px;color:var(--text-3);">—</span>
-        <button onclick="ejecutarCierreCaja()"
+        <button id="btn-cierre-caja" onclick="ejecutarCierreCaja()"
             style="background:var(--red-lt);color:var(--red);border:1.5px solid var(--red-bd);border-radius:999px;padding:7px 18px;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .2s;"
             onmouseover="this.style.background='rgba(192,57,43,.16)'"
             onmouseout="this.style.background='var(--red-lt)'">
@@ -463,7 +667,7 @@
     </div>
 </header>
 
-<div style="display:flex;">
+<div style="display:flex;" class="layout-wrapper">
 
 <!-- ════════════════════════════════════════════════════════
      SIDEBAR
@@ -517,7 +721,7 @@
 <section id="tab-dashboard" style="display:flex;flex-direction:column;gap:24px;">
 
     <!-- KPIs -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;" class="kpi-grid">
         <div class="kpi-card">
             <div>
                 <p style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;">Ventas Brutas</p>
@@ -550,7 +754,7 @@
     </div>
 
     <!-- Tablas -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;" class="tables-grid">
         <div class="card" style="padding:0;overflow:hidden;">
             <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
                 <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">🧾 Historial de Facturación</h3>
@@ -685,7 +889,7 @@
         </div>
     </div>
 
-    <div style="display:grid;grid-template-columns:320px 1fr;gap:20px;align-items:start;">
+    <div style="display:grid;grid-template-columns:320px 1fr;gap:20px;align-items:start;" class="personal-grid">
 
         <!-- Formulario agregar empleado -->
         <div class="card" style="flex-shrink:0;">
@@ -754,7 +958,7 @@
 <!-- ══════════════════════════════
      TAB: GASTOS OPERATIVOS
 ══════════════════════════════ -->
-<section id="tab-nomina" style="display:none;display:grid;grid-template-columns:1fr 2fr;gap:20px;align-items:start;">
+<section id="tab-nomina" style="display:none;display:grid;grid-template-columns:1fr 2fr;gap:20px;align-items:start;" class="gastos-grid">
 
     <div class="card">
         <h3 style="font-size:14px;font-weight:700;color:var(--text-1);margin-bottom:18px;">📝 Registrar Salida de Caja</h3>
@@ -864,7 +1068,7 @@
      TAB: FACTURACIÓN DIAN
 ══════════════════════════════ -->
 <section id="tab-dian" style="display:none;flex-direction:column;gap:20px;">
-    <div style="display:grid;grid-template-columns:2fr 3fr;gap:20px;">
+    <div style="display:grid;grid-template-columns:2fr 3fr;gap:20px;" class="dian-grid">
 
         <div class="dian-panel">
             <div class="dian-header">
@@ -994,7 +1198,26 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════
-     MODAL: DESGLOSE NÓMINA EMPLEADO
+     BOTTOM NAVIGATION BAR — SOLO MÓVIL
+════════════════════════════════════════════════════════ -->
+<nav id="bottom-nav" aria-label="Navegación principal">
+    <button class="bnav-item bnav-active" id="bnav-dashboard" onclick="cambiarTab('dashboard')" aria-label="Dashboard">
+        <span class="bnav-icon">📊</span>
+        <span class="bnav-label">Dashboard</span>
+    </button>
+    <button class="bnav-item" id="bnav-menu" onclick="cambiarTab('menu')" aria-label="Productos">
+        <span class="bnav-icon">🍳</span>
+        <span class="bnav-label">Productos</span>
+    </button>
+    <button class="bnav-item" id="bnav-personal" onclick="cambiarTab('personal')" aria-label="Nómina">
+        <span class="bnav-icon">👥</span>
+        <span class="bnav-label">Nómina</span>
+    </button>
+    <a class="bnav-item" href="index.html" aria-label="Cocina">
+        <span class="bnav-icon">🔥</span>
+        <span class="bnav-label">Cocina</span>
+    </a>
+</nav>
 ════════════════════════════════════════════════════════ -->
 <div id="modal-nomina" style="display:none;" class="modal-overlay" onclick="if(event.target===this)cerrarModalNomina()">
     <div class="modal-box">
@@ -1082,6 +1305,15 @@ function cambiarTab(dest) {
     }
     if (btnTarget) {
         btnTarget.className = btnTarget.className.replace('tab-inactive','').trim() + ' tab-active';
+    }
+
+    // Sincronizar Bottom Navigation Bar (móvil)
+    const bnavMap = { dashboard: 'bnav-dashboard', menu: 'bnav-menu', personal: 'bnav-personal', nomina: 'bnav-personal' };
+    document.querySelectorAll('.bnav-item').forEach(b => b.classList.remove('bnav-active'));
+    const bnavId = bnavMap[dest];
+    if (bnavId) {
+        const bnavEl = document.getElementById(bnavId);
+        if (bnavEl) bnavEl.classList.add('bnav-active');
     }
 
     if (dest === 'dashboard')  cargarDashboardReal();
