@@ -551,7 +551,8 @@ async function cargarSlotsMenuReal() {
     try {
         let query = supabaseClient
             .from('menu_items')
-            .select('*');
+            .select('id, name, description, price, item_type, is_active, portions_today, restaurant_id, category_id, created_at')
+            .order('name', { ascending: true });
 
         if (componenteFiltradoActual !== 'todos') {
             query = query.eq('item_type', componenteFiltradoActual);
@@ -572,18 +573,20 @@ async function cargarSlotsMenuReal() {
             return;
         }
 
-        // Ordenar numéricamente por product_code
+        // Ordenar por tipo y luego por nombre (sin depender de product_code)
         const itemsOrdenados = [...items].sort((a, b) => {
-            const cA = parseInt(a.product_code) || 9999;
-            const cB = parseInt(b.product_code) || 9999;
-            return cA - cB;
+            const orden = { protein: 1, executive_lunch: 1, side: 2, drink: 3, a_la_carte: 4, dessert: 5 };
+            const oA = orden[a.item_type] || 9;
+            const oB = orden[b.item_type] || 9;
+            if (oA !== oB) return oA - oB;
+            return (a.name || '').localeCompare(b.name || '', 'es');
         });
 
         itemsOrdenados.forEach((item, animIdx) => {
             const cfg           = MAPA_TIPO[item.item_type] || { label: item.item_type, icono: '🍽️', porciones: 20, badgeClass: '' };
             const nombreEscapado = (item.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            const codigo        = item.product_code || '—';
-            const rango         = getRangoByCodigo(item.product_code);
+            const codigo        = '—';
+            const rango         = { color: 'var(--text-3)' };
 
             contenedor.insertAdjacentHTML('beforeend', `
                 <div class="card menu-card" style="display:flex;flex-direction:column;gap:12px;animation-delay:${animIdx * 40}ms;">
@@ -674,10 +677,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 Toast.error('El tipo "sauce" no está disponible como tipo independiente.');
                 return;
             }
-            if (!product_code) {
-                Toast.error('El código de producto es obligatorio.');
-                return;
-            }
+            // product_code es opcional — la columna puede no existir en la BD
 
             try {
                 // Obtener o crear restaurante
@@ -731,7 +731,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (errCat) throw errCat;
                 if (!cat || !cat.id) throw new Error(`No se pudo obtener la categoría "${nombreCategoria}".`);
 
-                // Payload con product_code
+                // Payload base — sin product_code (columna opcional en el esquema)
                 const payload = {
                     restaurant_id: restaurantId,
                     category_id:   cat.id,
@@ -739,27 +739,41 @@ document.addEventListener('DOMContentLoaded', () => {
                     price,
                     item_type,
                     is_active:     true,
-                    product_code,
                 };
                 if (portions_today !== null) payload.portions_today = portions_today;
+                // product_code: agregar solo si la columna existe en la BD
+                if (product_code) payload.product_code = product_code;
 
                 const { error: errItem } = await supabaseClient
                     .from('menu_items')
                     .insert([payload]);
 
                 if (errItem) {
-                    if (errItem.code === '23505') {
-                        Toast.error(`Ya existe "${name}" en el catálogo o el código #${product_code} está duplicado.`);
+                    // Si falla por product_code inexistente, reintentar sin él
+                    if (errItem.code === '42703' && payload.product_code) {
+                        delete payload.product_code;
+                        const { error: errRetry } = await supabaseClient
+                            .from('menu_items').insert([payload]);
+                        if (errRetry) {
+                            if (errRetry.code === '23505') {
+                                Toast.error(`Ya existe un plato llamado "${name}" en el catálogo.`);
+                                return;
+                            }
+                            throw errRetry;
+                        }
+                    } else if (errItem.code === '23505') {
+                        Toast.error(`Ya existe un plato llamado "${name}" en el catálogo.`);
                         return;
+                    } else {
+                        throw errItem;
                     }
-                    throw errItem;
                 }
 
                 document.getElementById('menu-codigo').value   = '';
                 document.getElementById('menu-nombre').value   = '';
                 document.getElementById('menu-precio').value   = '';
                 document.getElementById('menu-porciones').value = '';
-                Toast.ok(`"${name}" (Código #${product_code}) registrado en el catálogo.`);
+                Toast.ok(`"${name}" registrado en el catálogo correctamente.`);
                 cargarSlotsMenuReal();
 
             } catch (err) {
