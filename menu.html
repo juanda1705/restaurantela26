@@ -14,6 +14,23 @@
     <!-- Supabase JS v2 — debe cargar ANTES que menu.js -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
+    <!-- ══ GUARD DE ACCESO PÚBLICO ══════════════════════════
+         menu.html es 100% pública. Nunca pide login.
+         Este script se ejecuta ANTES que cualquier otro.
+         Elimina claves de sesión interna (cocina/admin) que
+         pudieran haber quedado de una visita anterior.
+         Las claves de mesa del cliente se conservan intactas.
+    ══════════════════════════════════════════════════════ -->
+    <script>
+    (function() {
+        // Limpiar claves de autenticación interna de cocina/admin
+        ['user_role','auth_token','admin_session','cocina_session','staff_token']
+            .forEach(function(k){ sessionStorage.removeItem(k); });
+        // NUNCA redirigir desde menu.html hacia index.html
+        // El cliente del menú no necesita contraseña ni sesión
+    })();
+    </script>
+
     <!-- Tipografía editorial -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -691,6 +708,12 @@
             align-items: flex-end;
             justify-content: center;
             padding: 0;
+        }
+
+        /* Estado activo — menu.js lo activa con style.display='flex' */
+        #mesa-welcome-modal[style*="flex"] {
+            align-items: flex-end !important;
+            justify-content: center !important;
         }
 
         .wm-panel {
