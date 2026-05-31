@@ -1348,3 +1348,74 @@ async function cargarMenu() {
 // INICIO
 // ============================================================
 cargarMenu();
+
+// ─── CONSTANTE: ID de la mesa virtual para pedidos sin mesa física ────────────
+// Reemplaza este valor con el UUID real que generó Supabase en el paso 1
+const VIRTUAL_TABLE_ID = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx';
+
+// ─── FUNCIÓN: Enviar pedido a cocina ─────────────────────────────────────────
+async function enviarPedidoACocina({ modalidad, mesaId, clienteNombre, direccion, notas, items }) {
+  /**
+   * @param {string} modalidad     - 'mesa' | 'para_llevar' | 'domicilio'
+   * @param {string|null} mesaId   - UUID de la mesa física (null si no aplica)
+   * @param {string} clienteNombre - Nombre del cliente
+   * @param {string} direccion     - Dirección de entrega (vacía si es mesa o para llevar)
+   * @param {string} notas         - Instrucciones generales del pedido
+   * @param {Array}  items         - [{ menu_item_id, quantity, unit_price, notes }]
+   */
+
+  // Determinar el table_id correcto según la modalidad
+  const tableId = (modalidad === 'mesa' && mesaId) ? mesaId : VIRTUAL_TABLE_ID;
+
+  // Construir nota combinada: modalidad + dirección + notas del cliente
+  const notaFinal = [
+    `[${modalidad.toUpperCase().replace('_', ' ')}]`,
+    modalidad === 'domicilio' && direccion ? `Dirección: ${direccion}` : null,
+    notas || null,
+  ].filter(Boolean).join(' | ');
+
+  // Generar número de orden único
+  const orderNumber = `ORD-${Date.now()}`;
+
+  // 1. Insertar la orden principal
+  const { data: orden, error: errorOrden } = await supabase
+    .from('orders')
+    .insert({
+      restaurant_id: RESTAURANT_ID,   // tu constante global con el UUID del restaurante
+      table_id:      tableId,          // ← nunca será null
+      order_number:  orderNumber,
+      status:        'pending',
+      customer_name: clienteNombre || null,
+      notes:         notaFinal,
+      total_amount:  items.reduce((sum, i) => sum + i.unit_price * i.quantity, 0),
+    })
+    .select('id')
+    .single();
+
+  if (errorOrden) {
+    console.error('Error al crear la orden:', errorOrden.message);
+    throw new Error(`No se pudo enviar el pedido... ${errorOrden.message}`);
+  }
+
+  // 2. Insertar los ítems de la orden
+  const orderItems = items.map(item => ({
+    order_id:     orden.id,
+    menu_item_id: item.menu_item_id,
+    quantity:     item.quantity,
+    unit_price:   item.unit_price,
+    notes:        item.notes || null,
+    item_status:  'pending',
+  }));
+
+  const { error: errorItems } = await supabase
+    .from('order_items')
+    .insert(orderItems);
+
+  if (errorItems) {
+    console.error('Error al guardar los ítems:', errorItems.message);
+    throw new Error(`Orden creada pero falló al guardar los ítems: ${errorItems.message}`);
+  }
+
+  console.log(`✅ Pedido ${orderNumber} enviado a cocina — modalidad: ${modalidad}`);
+  return orden.id;
+}
