@@ -1,0 +1,1197 @@
+// ============================================================
+// RESTAURANTE LA 26 — LÓGICA DE CARTA DIGITAL
+// menu.js · Versión 4.0
+// Bucaramanga, Santander — Colombia
+//
+// CAMBIOS v4.0:
+//  - Acceso público: solo valida mesa/modalidad en sessionStorage o URL.
+//    NUNCA pide contraseña ni credenciales al cliente.
+//  - Soporte de modalidad "Para Llevar / Domicilio" con campos dinámicos:
+//    nombre del cliente, "Retiro en Restaurante" vs "Envío a Domicilio"
+//    y dirección de entrega obligatoria si es domicilio.
+//  - Elimina completamente el tipo 'sauce' como producto independiente.
+//  - INSERT en 'orders' incluye: table_id, customer_name, delivery_type,
+//    delivery_address y notes de despacho para la cocina.
+// ============================================================
+
+// ============================================================
+// CREDENCIALES SUPABASE
+// ============================================================
+const SUPABASE_URL      = "https://hxmodeduckuhvvspnkxd.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_ESxhljLgqWkGvrnKhvbeEg_iBqaGciv";
+
+const _supabase      = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = _supabase;
+
+// ============================================================
+// SLUG CANÓNICO — usado para resolver el restaurant_id
+// ============================================================
+const RESTAURANT_SLUG = "restaurante-la-26";
+
+// ============================================================
+// CATEGORÍAS REALES DE LA COCINA
+// Tipos válidos: protein | side | drink | a_la_carte
+// El tipo 'sauce' NO existe como componente independiente.
+// Las salsas siempre van integradas en la proteína.
+// ============================================================
+const CATEGORIAS = {
+    protein:    { label: 'Proteína con Salsa', icono: '🥩', orden: 1 },
+    side:       { label: 'Principio',          icono: '🍲', orden: 2 },
+    drink:      { label: 'Bebida',             icono: '🥤', orden: 3 },
+    a_la_carte: { label: 'A la Carta',         icono: '✨', orden: 4 },
+};
+
+// ============================================================
+// ESTADO GLOBAL
+// ============================================================
+let restaurantId    = null;
+let tableId         = null;
+let tableNumber     = null;
+let tableNombre     = null;   // Nombre del cliente capturado via QR / sessionStorage
+let modalidad       = null;   // 'mesa' | 'para_llevar' | 'domicilio' (sessionStorage)
+let tipoEntrega     = 'retiro'; // 'retiro' | 'domicilio' — selección del cliente en el form
+let dailyMenuId     = null;
+let slots           = [];     // platos disponibles cargados de Supabase
+let cart            = [];     // [{ slotId, cantidad }]
+let isSubmitting    = false;
+let filtroActual    = 'todos';
+
+// ============================================================
+// REFERENCIAS AL DOM
+// ============================================================
+const elLoader              = document.getElementById('app-loader');
+const elError               = document.getElementById('app-error');
+const elErrorMsg            = document.getElementById('error-message');
+const elMenu                = document.getElementById('app-menu');
+const elMenuSections        = document.getElementById('menu-sections');
+const elBadgeMesa           = document.getElementById('badge-mesa');
+const elConnDot             = document.getElementById('conn-dot');
+const elWelcomeBanner       = document.getElementById('welcome-banner');
+const elWelcomeText         = document.getElementById('welcome-text');
+const elCartBar             = document.getElementById('cart-bar');
+const elCartCount           = document.getElementById('cart-count');
+const elCartTotal           = document.getElementById('cart-total');
+const elOrderModal          = document.getElementById('order-modal');
+const elOrderForm           = document.getElementById('order-form');
+const elSummaryItems        = document.getElementById('summary-items');
+const elSummaryTotal        = document.getElementById('summary-total');
+const elSuccessModal        = document.getElementById('success-modal');
+const elSuccessOrder        = document.getElementById('success-order-no');
+const elCustomerName        = document.getElementById('customer-name');
+const elNombreWrapper       = document.getElementById('nombre-field-wrapper');
+const elCatsBar             = document.getElementById('cats-bar');
+const elDeliveryWrapper     = document.getElementById('delivery-fields-wrapper');
+const elDireccionWrapper    = document.getElementById('direccion-wrapper');
+const elDeliveryAddress     = document.getElementById('delivery-address');
+const elBtnRetiro           = document.getElementById('btn-retiro');
+const elBtnDomicilio        = document.getElementById('btn-domicilio');
+
+// ============================================================
+// HELPERS
+// ============================================================
+function formatCOP(valor) {
+    return '$' + Math.round(valor).toLocaleString('es-CO');
+}
+
+function todayISO() {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+}
+
+function generarNumeroOrden() {
+    const year = new Date().getFullYear();
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    return `ORD-LA26-${year}-${rand}`;
+}
+
+function calcularTotal() {
+    return cart.reduce((acc, item) => {
+        const slot = slots.find(s => s.id === item.slotId);
+        return acc + (slot ? slot.precio * item.cantidad : 0);
+    }, 0);
+}
+
+function calcularCantidadTotal() {
+    return cart.reduce((acc, item) => acc + item.cantidad, 0);
+}
+
+function slotsFiltrados() {
+    if (filtroActual === 'todos') return slots;
+    return slots.filter(s => s.itemType === filtroActual);
+}
+
+// ============================================================
+// CAPTURA Y PERSISTENCIA DE MESA / MODALIDAD
+//
+// ACCESO TOTALMENTE PÚBLICO — nunca pide contraseña ni redirige
+// al login de cocina (index.html).
+//
+// Flujo:
+//  1. Lee mesa/nombre/modalidad desde URL params (QR) o sessionStorage.
+//  2. Si no hay datos de ubicación, muestra el modal de bienvenida
+//     para que el cliente elija mesa o modalidad desde el propio menu.html.
+//  3. Devuelve el contexto o null si se delegó al modal.
+// ============================================================
+function capturarContexto() {
+    const params = new URLSearchParams(window.location.search);
+
+    // 1. URL tiene prioridad absoluta (viene del QR de la mesa)
+    const mesaUrl      = params.get('mesa');
+    const nombreUrl    = params.get('nombre');
+    const modalidadUrl = params.get('modalidad'); // 'para_llevar' | 'domicilio' | null
+
+    // 2. Fallback desde sessionStorage (persiste entre recargas)
+    const mesaSession      = sessionStorage.getItem('mesa_id');
+    const nombreSession    = sessionStorage.getItem('mesa_nombre');
+    const modalidadSession = sessionStorage.getItem('mesa_modalidad');
+
+    // Combinar — URL tiene prioridad
+    const mesaFinal      = mesaUrl      || mesaSession      || null;
+    const nombreFinal    = nombreUrl    || nombreSession    || '';
+    const modalidadFinal = modalidadUrl || modalidadSession || 'mesa';
+
+    // Sin mesa → mostrar el modal de bienvenida DENTRO de menu.html
+    // NUNCA redirigir a index.html (esa es la pantalla de cocina/admin)
+    if (!mesaFinal) {
+        MesaModal.mostrar();
+        return null;
+    }
+
+    // Persistir en sessionStorage para que sobreviva a recargas
+    sessionStorage.setItem('mesa_id',        mesaFinal);
+    sessionStorage.setItem('mesa_modalidad', modalidadFinal);
+    if (nombreFinal) sessionStorage.setItem('mesa_nombre', nombreFinal);
+
+    return {
+        mesa:      mesaFinal,
+        nombre:    nombreFinal,
+        modalidad: modalidadFinal,
+    };
+}
+
+// ============================================================
+// MODAL DE BIENVENIDA — Selección de mesa o modalidad
+//
+// Se muestra cuando el cliente entra a menu.html directamente
+// sin QR (sin mesa_id en URL ni sessionStorage).
+// NO redirige a index.html. Todo ocurre dentro de menu.html.
+// ============================================================
+const MesaModal = {
+
+    mostrar() {
+        // Ocultar loader mientras el cliente elige
+        if (elLoader) elLoader.style.display = 'none';
+        const modal = document.getElementById('mesa-welcome-modal');
+        if (modal) {
+            modal.style.display = 'flex';
+            // Focus en el primer campo
+            setTimeout(() => {
+                const inp = document.getElementById('wm-mesa-numero');
+                if (inp) inp.focus();
+            }, 300);
+        }
+    },
+
+    ocultar() {
+        const modal = document.getElementById('mesa-welcome-modal');
+        if (modal) modal.style.display = 'none';
+    },
+
+    // Cambia entre pestaña "Mesa" y "Para llevar / Domicilio"
+    cambiarTab(tab) {
+        const tabMesa   = document.getElementById('wm-tab-mesa');
+        const tabLlevar = document.getElementById('wm-tab-llevar');
+        const panelMesa = document.getElementById('wm-panel-mesa');
+        const panelLlevar = document.getElementById('wm-panel-llevar');
+        if (!tabMesa || !tabLlevar || !panelMesa || !panelLlevar) return;
+
+        if (tab === 'mesa') {
+            tabMesa.classList.add('wm-tab-active');
+            tabLlevar.classList.remove('wm-tab-active');
+            panelMesa.style.display   = 'flex';
+            panelLlevar.style.display = 'none';
+        } else {
+            tabLlevar.classList.add('wm-tab-active');
+            tabMesa.classList.remove('wm-tab-active');
+            panelLlevar.style.display = 'flex';
+            panelMesa.style.display   = 'none';
+        }
+    },
+
+    // Confirmar selección de mesa en el restaurante
+    confirmarMesa() {
+        const numEl   = document.getElementById('wm-mesa-numero');
+        const nombreEl = document.getElementById('wm-nombre-mesa');
+        const numVal  = numEl ? numEl.value.trim() : '';
+        const nombre  = nombreEl ? nombreEl.value.trim() : '';
+
+        if (!numVal) {
+            if (numEl) { numEl.focus(); numEl.classList.add('wm-field-error'); }
+            return;
+        }
+        if (numEl) numEl.classList.remove('wm-field-error');
+
+        sessionStorage.setItem('mesa_id',        numVal);
+        sessionStorage.setItem('mesa_modalidad', 'mesa');
+        if (nombre) sessionStorage.setItem('mesa_nombre', nombre);
+
+        this.ocultar();
+        cargarMenu();
+    },
+
+    // Confirmar selección de para llevar / domicilio
+    confirmarLlevar() {
+        const nombreEl   = document.getElementById('wm-nombre-llevar');
+        const tipoEl     = document.getElementById('wm-tipo-llevar'); // 'retiro' | 'domicilio'
+        const direccEl   = document.getElementById('wm-direccion');
+        const nombre     = nombreEl   ? nombreEl.value.trim()   : '';
+        const tipoVal    = tipoEl     ? tipoEl.value            : 'retiro';
+        const direccion  = direccEl   ? direccEl.value.trim()   : '';
+
+        if (!nombre) {
+            if (nombreEl) { nombreEl.focus(); nombreEl.classList.add('wm-field-error'); }
+            return;
+        }
+        if (nombreEl) nombreEl.classList.remove('wm-field-error');
+
+        if (tipoVal === 'domicilio' && !direccion) {
+            if (direccEl) { direccEl.focus(); direccEl.classList.add('wm-field-error'); }
+            return;
+        }
+        if (direccEl) direccEl.classList.remove('wm-field-error');
+
+        // Persistir contexto de para llevar
+        sessionStorage.setItem('mesa_id',        tipoVal === 'domicilio' ? 'domicilio' : 'para_llevar');
+        sessionStorage.setItem('mesa_modalidad', tipoVal === 'domicilio' ? 'domicilio' : 'para_llevar');
+        sessionStorage.setItem('mesa_nombre',    nombre);
+        if (tipoVal === 'domicilio' && direccion) {
+            sessionStorage.setItem('mesa_direccion', direccion);
+        }
+
+        this.ocultar();
+        cargarMenu();
+    },
+
+    // Muestra/oculta el campo de dirección según el tipo elegido
+    toggleDireccion() {
+        const tipoEl   = document.getElementById('wm-tipo-llevar');
+        const wrapEl   = document.getElementById('wm-direccion-wrap');
+        if (!tipoEl || !wrapEl) return;
+        wrapEl.style.display = tipoEl.value === 'domicilio' ? 'block' : 'none';
+    },
+};
+
+// ============================================================
+// CONTROL DE INTERFAZ
+// ============================================================
+function mostrarLoader() {
+    elLoader.style.display = 'flex';
+    elError.style.display  = 'none';
+    elMenu.style.display   = 'none';
+    setConexion('cargando');
+}
+
+function mostrarError(msg) {
+    elLoader.style.display = 'none';
+    elError.style.display  = 'flex';
+    elMenu.style.display   = 'none';
+    elErrorMsg.textContent = msg;
+    setConexion('error');
+}
+
+function mostrarMenu() {
+    elLoader.style.display = 'none';
+    elError.style.display  = 'none';
+    elMenu.style.display   = 'block';
+    setConexion('ok');
+}
+
+function setConexion(estado) {
+    const colores = {
+        ok:       '#4a5a28',
+        error:    '#b83232',
+        cargando: '#d4a853',
+    };
+    elConnDot.style.background = colores[estado] || colores.cargando;
+    if (estado === 'ok') {
+        elConnDot.style.animation = 'none';
+    } else {
+        elConnDot.style.animation = 'pulse 2s ease-in-out infinite';
+    }
+}
+
+// ── Muestra el badge de mesa y el banner de bienvenida ──────
+function mostrarInfoMesa(numero, nombre) {
+    // Badge compacto en el header
+    if (elBadgeMesa) {
+        elBadgeMesa.textContent   = numero;
+        elBadgeMesa.style.display = 'inline-flex';
+    }
+
+    // Banner de bienvenida elegante
+    if (elWelcomeBanner && elWelcomeText) {
+        const textoNombre = nombre ? ` · Bienvenido, ${nombre}` : '';
+        elWelcomeText.textContent = `${numero}${textoNombre}`;
+        elWelcomeBanner.classList.add('visible');
+    }
+
+    // Si viene el nombre via QR/sessionStorage, pre-llenar el campo del modal
+    if (nombre && elCustomerName) {
+        elCustomerName.value = nombre;
+        // Solo ocultamos el campo de nombre si no es para llevar/domicilio
+        // (en esos casos, queremos que el cliente confirme su nombre)
+        if (modalidad === 'mesa' && elNombreWrapper) {
+            elNombreWrapper.style.display = 'none';
+        }
+    }
+
+    // ── Configurar campos de Para Llevar / Domicilio ──────────
+    configurarCamposModalidad();
+}
+
+// ── Muestra u oculta el bloque de campos de entrega según modalidad ──
+function configurarCamposModalidad() {
+    if (!elDeliveryWrapper) return;
+
+    const esPararLlevar = (modalidad === 'para_llevar' || modalidad === 'domicilio');
+
+    if (esPararLlevar) {
+        // Mostrar campos de entrega
+        elDeliveryWrapper.classList.remove('hidden-field');
+        elDeliveryWrapper.style.display = 'flex';
+
+        // Si la modalidad ya viene como "domicilio", pre-seleccionar ese botón
+        if (modalidad === 'domicilio') {
+            Order.seleccionarEntrega('domicilio');
+        } else {
+            Order.seleccionarEntrega('retiro');
+        }
+
+        // Aseguramos que el campo de nombre siempre sea visible para para llevar
+        if (elNombreWrapper) {
+            elNombreWrapper.style.display = 'block';
+        }
+    } else {
+        // Mesa normal → ocultar campos de entrega
+        elDeliveryWrapper.classList.add('hidden-field');
+        elDeliveryWrapper.style.display = 'none';
+    }
+}
+
+function actualizarCarritoBar() {
+    const cantidad = calcularCantidadTotal();
+    const total    = calcularTotal();
+
+    elCartCount.textContent = cantidad;
+    elCartTotal.textContent = formatCOP(total);
+
+    if (cantidad > 0) {
+        elCartBar.style.transform     = 'translateY(0)';
+        elCartBar.style.opacity       = '1';
+        elCartBar.style.pointerEvents = 'auto';
+    } else {
+        elCartBar.style.transform     = 'translateY(115%)';
+        elCartBar.style.opacity       = '0';
+        elCartBar.style.pointerEvents = 'none';
+    }
+}
+
+// ============================================================
+// BARRA DE CATEGORÍAS
+// Solo muestra las categorías con al menos un plato disponible.
+// Nunca genera botón para 'sauce'.
+// ============================================================
+function renderizarCatsBar() {
+    if (!elCatsBar) return;
+    elCatsBar.innerHTML = '';
+
+    // Botón "Todos"
+    const btnTodos       = document.createElement('button');
+    btnTodos.className   = `cat-btn${filtroActual === 'todos' ? ' active' : ''}`;
+    btnTodos.textContent = 'Todos';
+    btnTodos.onclick     = () => cambiarFiltro('todos');
+    elCatsBar.appendChild(btnTodos);
+
+    // Un botón por cada categoría presente (excluye 'sauce' al filtrar con CATEGORIAS)
+    const tiposPresentes = [...new Set(slots.map(s => s.itemType))].filter(t => CATEGORIAS[t]);
+    tiposPresentes
+        .sort((a, b) => (CATEGORIAS[a]?.orden || 99) - (CATEGORIAS[b]?.orden || 99))
+        .forEach(tipo => {
+            const cfg = CATEGORIAS[tipo];
+            const btn = document.createElement('button');
+            btn.className   = `cat-btn${filtroActual === tipo ? ' active' : ''}`;
+            btn.textContent = `${cfg.icono} ${cfg.label}`;
+            btn.onclick     = () => cambiarFiltro(tipo);
+            elCatsBar.appendChild(btn);
+        });
+}
+
+function cambiarFiltro(tipo) {
+    filtroActual = tipo;
+    renderizarCatsBar();
+    renderizarMenu();
+}
+
+// ============================================================
+// RENDERIZADO DEL MENÚ
+// Agrupa los slots por CATEGORIAS (protein/side/drink/a_la_carte).
+// Nunca muestra sección para el tipo 'sauce'.
+// ============================================================
+function renderizarMenu() {
+    elMenuSections.innerHTML = '';
+
+    const lista = slotsFiltrados();
+
+    if (!lista || lista.length === 0) {
+        elMenuSections.innerHTML = `
+            <div class="empty-state">
+                <div class="icon">🍽️</div>
+                <p>No hay platos disponibles<br>en esta categoría por el momento.</p>
+            </div>`;
+        return;
+    }
+
+    // Agrupar por itemType
+    const grupos = {};
+    lista.forEach(slot => {
+        const tipo = CATEGORIAS[slot.itemType] ? slot.itemType : 'a_la_carte';
+        if (!grupos[tipo]) grupos[tipo] = [];
+        grupos[tipo].push(slot);
+    });
+
+    // Renderizar en el orden definido en CATEGORIAS
+    const tiposOrdenados = Object.keys(grupos).sort(
+        (a, b) => (CATEGORIAS[a]?.orden || 99) - (CATEGORIAS[b]?.orden || 99)
+    );
+
+    tiposOrdenados.forEach((tipo, secIdx) => {
+        const cfg    = CATEGORIAS[tipo];
+        const platos = grupos[tipo];
+        if (!platos || platos.length === 0) return;
+
+        const seccion = document.createElement('div');
+
+        // Encabezado de sección
+        const header = document.createElement('div');
+        header.className = 'section-label';
+        header.innerHTML = `<h2>${cfg.icono} ${cfg.label}</h2>`;
+        seccion.appendChild(header);
+
+        // Tarjetas con delay de animación escalonado
+        platos.forEach((slot, i) => {
+            const tarjeta = crearTarjeta(slot);
+            tarjeta.style.animationDelay = `${secIdx * 0.06 + i * 0.05}s`;
+            seccion.appendChild(tarjeta);
+        });
+
+        elMenuSections.appendChild(seccion);
+    });
+}
+
+// ============================================================
+// CREAR TARJETA DE PLATO
+// ============================================================
+function crearTarjeta(slot) {
+    const disponible        = slot.disponible && slot.porciones > 0;
+    const pocasLeft         = disponible && slot.porciones > 0 && slot.porciones <= 5;
+    const enCarrito         = cart.find(c => c.slotId === slot.id);
+    const cantidadEnCarrito = enCarrito ? enCarrito.cantidad : 0;
+
+    // Badge de disponibilidad
+    let badgeHTML = '';
+    if (!disponible) {
+        badgeHTML = `<span class="badge-agotado">Agotado</span>`;
+    } else if (pocasLeft) {
+        badgeHTML = `<span class="badge-pocas">¡Solo quedan ${slot.porciones}!</span>`;
+    }
+
+    // Precio o "Incluido"
+    const precioHTML = slot.precio > 0
+        ? `<span class="plate-price">${formatCOP(slot.precio)}</span>`
+        : `<span class="plate-price incluido">Incluido</span>`;
+
+    // Control de cantidad
+    let controlHTML = '';
+    if (disponible) {
+        if (cantidadEnCarrito === 0) {
+            controlHTML = `
+                <button
+                    class="btn-add"
+                    onclick="Cart.agregar('${slot.id}')"
+                    aria-label="Agregar ${slot.nombre}">+</button>`;
+        } else {
+            controlHTML = `
+                <div class="qty-chip">
+                    <button onclick="Cart.cambiarCantidad('${slot.id}', -1)" aria-label="Quitar uno">−</button>
+                    <span>${cantidadEnCarrito}</span>
+                    <button onclick="Cart.cambiarCantidad('${slot.id}', +1)" aria-label="Agregar uno">+</button>
+                </div>`;
+        }
+    }
+
+    const tarjeta     = document.createElement('div');
+    tarjeta.id        = `tarjeta-${slot.id}`;
+    tarjeta.className = `plate-card${!disponible ? ' agotado' : ''}`;
+    tarjeta.innerHTML = `
+        <div class="plate-info">
+            <p class="plate-name">${slot.nombre}</p>
+            ${slot.descripcion ? `<p class="plate-desc">${slot.descripcion}</p>` : ''}
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px;">
+                ${precioHTML}
+                ${badgeHTML}
+            </div>
+        </div>
+        <div style="flex-shrink:0;">${controlHTML}</div>`;
+
+    return tarjeta;
+}
+
+function refrescarTarjeta(slotId) {
+    const slot = slots.find(s => s.id === slotId);
+    if (!slot) return;
+    const vieja = document.getElementById(`tarjeta-${slotId}`);
+    if (vieja) vieja.replaceWith(crearTarjeta(slot));
+}
+
+// ============================================================
+// CARRITO
+// ============================================================
+const Cart = {
+
+    agregar(slotId) {
+        const slot = slots.find(s => s.id === slotId);
+        if (!slot || !slot.disponible) return;
+
+        const existente = cart.find(c => c.slotId === slotId);
+        if (existente) {
+            if (slot.porciones > 0 && existente.cantidad >= slot.porciones) {
+                alert(`Solo quedan ${slot.porciones} porciones de "${slot.nombre}".`);
+                return;
+            }
+            existente.cantidad++;
+        } else {
+            cart.push({ slotId, cantidad: 1 });
+        }
+
+        refrescarTarjeta(slotId);
+        actualizarCarritoBar();
+    },
+
+    cambiarCantidad(slotId, delta) {
+        const slot = slots.find(s => s.id === slotId);
+        if (!slot) return;
+
+        const idx = cart.findIndex(c => c.slotId === slotId);
+        if (idx === -1) return;
+
+        const nueva = cart[idx].cantidad + delta;
+
+        if (delta > 0 && slot.porciones > 0 && nueva > slot.porciones) {
+            alert(`Solo quedan ${slot.porciones} porciones de "${slot.nombre}".`);
+            return;
+        }
+
+        if (nueva <= 0) {
+            cart.splice(idx, 1);
+        } else {
+            cart[idx].cantidad = nueva;
+        }
+
+        refrescarTarjeta(slotId);
+        actualizarCarritoBar();
+
+        // Si el modal está abierto, actualizarlo en tiempo real
+        if (elOrderModal.style.display !== 'none') {
+            this.renderSummary();
+        }
+    },
+
+    openSummary() {
+        this.renderSummary();
+        elOrderModal.style.display = 'block';
+        document.body.style.overflow = 'hidden';
+    },
+
+    closeSummary() {
+        elOrderModal.style.display   = 'none';
+        document.body.style.overflow = '';
+    },
+
+    renderSummary() {
+        elSummaryItems.innerHTML = '';
+
+        if (cart.length === 0) {
+            elSummaryItems.innerHTML = `
+                <div style="text-align:center;padding:36px 0;">
+                    <p style="font-size:13px;color:var(--ink-ghost);">Tu pedido está vacío.</p>
+                </div>`;
+            elSummaryTotal.textContent = '$0';
+            return;
+        }
+
+        cart.forEach(item => {
+            const slot = slots.find(s => s.id === item.slotId);
+            if (!slot) return;
+
+            const subtotal = slot.precio * item.cantidad;
+            const fila     = document.createElement('div');
+            fila.className = 'summary-row';
+            fila.innerHTML = `
+                <div style="flex:1;min-width:0;">
+                    <p class="summary-name">${slot.nombre}</p>
+                    <p class="summary-qty">${item.cantidad} × ${slot.precio > 0 ? formatCOP(slot.precio) : 'Incluido'}</p>
+                </div>
+                <span class="summary-price">
+                    ${slot.precio > 0 ? formatCOP(subtotal) : '—'}
+                </span>`;
+            elSummaryItems.appendChild(fila);
+        });
+
+        elSummaryTotal.textContent = formatCOP(calcularTotal());
+    },
+};
+
+// ============================================================
+// RESOLVER MENU_ITEM_IDs
+// Resuelve el problema cuando los slots tienen menuItemId: null.
+// 1. Trae todos los menu_items activos del restaurante.
+// 2. Para cada ítem del carrito busca el ID real por nombre.
+// 3. Excluye explícitamente cualquier item_type 'sauce'.
+// ============================================================
+async function resolverMenuItemIds() {
+    const { data: itemsReales, error } = await supabaseClient
+        .from('menu_items')
+        .select('id, name, price, item_type')
+        .eq('is_active', true)
+        .eq('restaurant_id', restaurantId)
+        .neq('item_type', 'sauce')
+        .in('item_type', ['protein', 'side', 'drink', 'a_la_carte']);
+
+    if (error) {
+        console.warn('[La 26] No se pudieron cargar menu_items:', error);
+    }
+
+    const lista      = itemsReales || [];
+    const fallbackId = lista[0]?.id || null;
+    const resultado  = [];
+
+    for (const item of cart) {
+        const slot = slots.find(s => s.id === item.slotId);
+        if (!slot) continue;
+
+        let menuItemId = slot.menuItemId;
+
+        if (!menuItemId && lista.length > 0) {
+            const nombreBuscar = (slot.nombre || '').toLowerCase().trim();
+
+            // 1. Coincidencia exacta por nombre
+            const exacto = lista.find(m =>
+                m.name.toLowerCase().trim() === nombreBuscar
+            );
+            // 2. Coincidencia parcial (primera palabra)
+            const parcial = !exacto && lista.find(m =>
+                m.name.toLowerCase().includes(nombreBuscar.split(' ')[0]) ||
+                nombreBuscar.includes(m.name.toLowerCase().split(' ')[0])
+            );
+            // 3. Mismo item_type como último criterio antes del fallback
+            const mismoCat = !exacto && !parcial && lista.find(m =>
+                m.item_type === slot.itemType
+            );
+
+            menuItemId = exacto?.id || parcial?.id || mismoCat?.id || fallbackId;
+
+            if (exacto)       console.log(`[La 26] ✅ Match exacto para "${slot.nombre}"`);
+            else if (parcial)  console.log(`[La 26] ⚡ Match parcial para "${slot.nombre}"`);
+            else if (mismoCat) console.log(`[La 26] 🔁 Match por categoría para "${slot.nombre}"`);
+            else if (fallbackId) console.log(`[La 26] ⚠️ Fallback para "${slot.nombre}"`);
+        }
+
+        if (!menuItemId) {
+            console.warn(`[La 26] ⛔ Sin menu_item_id para "${slot.nombre}". Ítem omitido.`);
+            continue;
+        }
+
+        resultado.push({
+            menuItemId,
+            slotId:   (item.slotId && item.slotId.startsWith('mock-')) ? null : item.slotId,
+            cantidad: item.cantidad,
+            precio:   slot.precio,
+            nombre:   slot.nombre,
+        });
+    }
+
+    return resultado;
+}
+
+// ============================================================
+// PEDIDOS — LÓGICA DE TIPO DE ENTREGA
+// ============================================================
+const Order = {
+
+    // Cambia visualmente el selector de entrega (retiro vs domicilio)
+    seleccionarEntrega(tipo) {
+        tipoEntrega = tipo;
+
+        if (elBtnRetiro) {
+            elBtnRetiro.classList.toggle('selected', tipo === 'retiro');
+        }
+        if (elBtnDomicilio) {
+            elBtnDomicilio.classList.toggle('selected', tipo === 'domicilio');
+        }
+
+        // Mostrar u ocultar campo de dirección
+        if (elDireccionWrapper) {
+            if (tipo === 'domicilio') {
+                elDireccionWrapper.classList.remove('hidden-field');
+                elDireccionWrapper.style.display = 'block';
+                if (elDeliveryAddress) elDeliveryAddress.required = true;
+            } else {
+                elDireccionWrapper.classList.add('hidden-field');
+                elDireccionWrapper.style.display = 'none';
+                if (elDeliveryAddress) {
+                    elDeliveryAddress.required = false;
+                    elDeliveryAddress.value    = '';
+                }
+            }
+        }
+    },
+
+    // ── Submit del pedido ─────────────────────────────────────
+    async submit(event) {
+        event.preventDefault();
+        if (isSubmitting) return;
+
+        // Nombre del cliente: viene del campo visible O del capturado via QR/sessionStorage
+        const nombreCampo = elCustomerName ? elCustomerName.value.trim() : '';
+        const nombreFinal = nombreCampo || tableNombre || '';
+
+        if (!nombreFinal) {
+            if (elCustomerName) elCustomerName.focus();
+            alert('Por favor ingresa tu nombre para que podamos avisarte cuando tu pedido esté listo.');
+            return;
+        }
+
+        if (cart.length === 0) return;
+
+        // Validar dirección si eligió domicilio
+        const esPararLlevar = (modalidad === 'para_llevar' || modalidad === 'domicilio');
+        let direccionEntrega = '';
+        let tipoDespacho    = 'mesa'; // 'mesa' | 'retiro' | 'domicilio'
+
+        if (esPararLlevar) {
+            tipoDespacho = tipoEntrega; // 'retiro' | 'domicilio'
+            if (tipoEntrega === 'domicilio') {
+                direccionEntrega = elDeliveryAddress ? elDeliveryAddress.value.trim() : '';
+                if (!direccionEntrega) {
+                    if (elDeliveryAddress) elDeliveryAddress.focus();
+                    alert('Por favor ingresa la dirección de entrega para el domicilio.');
+                    return;
+                }
+            }
+        }
+
+        isSubmitting = true;
+        const btnSubmit = elOrderForm.querySelector('button[type="submit"]');
+        if (btnSubmit) {
+            btnSubmit.disabled    = true;
+            btnSubmit.textContent = 'Enviando a cocina…';
+        }
+
+        const numeroOrden = generarNumeroOrden();
+        const totalMonto  = calcularTotal();
+
+        // Construir notas de despacho para la cocina
+        let notasCocina = '';
+        if (tipoDespacho === 'retiro') {
+            notasCocina = `[PARA LLEVAR] Cliente: ${nombreFinal} — Retira en el restaurante`;
+        } else if (tipoDespacho === 'domicilio') {
+            notasCocina = `[DOMICILIO] Cliente: ${nombreFinal} — Dirección: ${direccionEntrega}`;
+        } else {
+            notasCocina = tableNumber ? `[MESA] ${tableNumber}` : '';
+        }
+
+        try {
+            // ── Paso 1: resolver IDs reales ──────────────────────
+            const itemsResueltos = await resolverMenuItemIds();
+
+            // ── Paso 2: insertar la orden maestra en 'orders' ────
+            const ordenPayload = {
+                restaurant_id:    restaurantId,
+                table_id:         tableId,
+                order_number:     numeroOrden,
+                status:           'pending',
+                customer_name:    nombreFinal,
+                total_amount:     totalMonto,
+                daily_menu_id:    dailyMenuId || null,
+                // Campos de modalidad/despacho
+                delivery_type:    tipoDespacho,       // 'mesa' | 'retiro' | 'domicilio'
+                delivery_address: direccionEntrega || null,
+                notes:            notasCocina || null,
+            };
+
+            const { data: orden, error: errorOrden } = await supabaseClient
+                .from('orders')
+                .insert([ordenPayload])
+                .select('id')
+                .single();
+
+            if (errorOrden) throw errorOrden;
+
+            // ── Paso 3: insertar order_items ─────────────────────
+            if (itemsResueltos.length > 0) {
+                const { error: errorItems } = await supabaseClient
+                    .from('order_items')
+                    .insert(itemsResueltos.map(item => ({
+                        order_id:           orden.id,
+                        menu_item_id:       item.menuItemId,
+                        daily_menu_slot_id: item.slotId,
+                        quantity:           item.cantidad,
+                        unit_price:         item.precio,
+                        item_status:        'pending',
+                        // El nombre real del plato se guarda en notes con prefijo [nombre]
+                        // para que la pantalla de cocina lo muestre aunque el join falle
+                        notes:              `[nombre]${item.nombre}`,
+                    })));
+
+                if (errorItems) {
+                    console.error('[La 26] ❌ Error en order_items:', errorItems);
+                    // La orden maestra ya existe — no bloqueamos al cliente
+                }
+            }
+
+            this.mostrarExito(numeroOrden);
+
+        } catch (err) {
+            console.error('[La 26] Error al insertar pedido:', err);
+            alert('No se pudo enviar el pedido. Por favor llama a un mesero o intenta de nuevo.');
+        } finally {
+            isSubmitting = false;
+            if (btnSubmit) {
+                btnSubmit.disabled    = false;
+                btnSubmit.textContent = 'Enviar pedido a cocina';
+            }
+        }
+    },
+
+    mostrarExito(numeroOrden) {
+        Cart.closeSummary();
+        elSuccessOrder.textContent       = numeroOrden;
+        elSuccessModal.style.display     = 'flex';
+        // Limpiar carrito local tras envío exitoso
+        cart = [];
+        actualizarCarritoBar();
+    },
+
+    newOrder() {
+        // Si el nombre vino via QR y es pedido en mesa, no limpiamos el campo
+        const limpiarNombre = !(tableNombre && modalidad === 'mesa');
+        if (limpiarNombre && elCustomerName) {
+            elCustomerName.value = '';
+        }
+        // Limpiar dirección de domicilio
+        if (elDeliveryAddress) {
+            elDeliveryAddress.value = '';
+        }
+        elSuccessModal.style.display = 'none';
+        renderizarMenu();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+};
+
+// ============================================================
+// RESOLVER RESTAURANT_ID
+// ============================================================
+async function resolverRestaurantId() {
+    try {
+        // Buscar por slug canónico
+        const { data: porSlug } = await supabaseClient
+            .from('restaurants')
+            .select('id')
+            .eq('slug', RESTAURANT_SLUG)
+            .maybeSingle();
+
+        if (porSlug?.id) return porSlug.id;
+
+        // Fallback: cualquier restaurante en la tabla
+        const { data: cualquiera } = await supabaseClient
+            .from('restaurants')
+            .select('id')
+            .limit(1)
+            .maybeSingle();
+
+        if (cualquiera?.id) {
+            console.warn('[La 26] Restaurante encontrado sin slug. Actualiza el slug a "restaurante-la-26".');
+            return cualquiera.id;
+        }
+
+        // Tabla vacía → insertar automáticamente
+        const { data: nuevo, error } = await supabaseClient
+            .from('restaurants')
+            .insert([{ name: 'Restaurante la 26', slug: RESTAURANT_SLUG }])
+            .select('id')
+            .single();
+
+        if (error) throw error;
+        console.log('[La 26] ✅ Restaurante creado automáticamente.');
+        return nuevo.id;
+
+    } catch (err) {
+        console.error('[La 26] Error resolviendo restaurant_id:', err);
+        return null;
+    }
+}
+
+// ============================================================
+// CARGAR SLOTS DESDE VISTA daily_menu_slots_availability
+// ============================================================
+async function cargarSlotsDesdeMenuDia() {
+    const { data: rawSlots, error } = await supabaseClient
+        .from('daily_menu_slots_availability')
+        .select(`
+            id,
+            menu_item_id,
+            item_name,
+            price,
+            category_name,
+            category_order,
+            display_order,
+            portions_available,
+            portions_sold,
+            is_truly_available,
+            item_type
+        `)
+        .eq('daily_menu_id', dailyMenuId)
+        .neq('item_type', 'sauce')
+        .in('item_type', ['protein', 'side', 'drink', 'a_la_carte'])
+        .order('category_order', { ascending: true })
+        .order('display_order',  { ascending: true });
+
+    if (error || !rawSlots || rawSlots.length === 0) {
+        console.log('[La 26] Sin slots en daily_menu → cargando catálogo directo. Error:', error);
+        await cargarSlotsDesdeCatalogo();
+        return;
+    }
+
+    slots = rawSlots.map(s => ({
+        id:          s.id,
+        menuItemId:  s.menu_item_id,
+        nombre:      s.item_name,
+        precio:      Number(s.price) || 0,
+        descripcion: '',
+        itemType:    CATEGORIAS[s.item_type] ? s.item_type : 'a_la_carte',
+        porciones:   s.is_truly_available
+                        ? Math.max(0, (s.portions_available || 0) - (s.portions_sold || 0))
+                        : 0,
+        disponible:  Boolean(s.is_truly_available),
+    }));
+
+    renderizarCatsBar();
+    renderizarMenu();
+    mostrarMenu();
+    suscribirTiempoReal();
+}
+
+// ============================================================
+// CARGAR SLOTS DIRECTAMENTE DEL CATÁLOGO menu_items
+// Excluye por completo el item_type 'sauce'.
+// ============================================================
+async function cargarSlotsDesdeCatalogo() {
+    const { data: items, error } = await supabaseClient
+        .from('menu_items')
+        .select('id, name, price, item_type, is_active, description')
+        .eq('restaurant_id', restaurantId)
+        .eq('is_active', true)
+        .neq('item_type', 'sauce')
+        .in('item_type', ['protein', 'side', 'drink', 'a_la_carte'])
+        .order('item_type', { ascending: true })
+        .order('name',      { ascending: true });
+
+    if (error) {
+        console.error('[La 26] Error cargando catálogo:', error);
+        activarModoDemo();
+        return;
+    }
+
+    if (!items || items.length === 0) {
+        console.log('[La 26] Catálogo vacío → modo Demo');
+        activarModoDemo();
+        return;
+    }
+
+    slots = items.map(item => ({
+        id:          item.id,
+        menuItemId:  item.id,
+        nombre:      item.name,
+        precio:      Number(item.price) || 0,
+        descripcion: item.description || '',
+        itemType:    CATEGORIAS[item.item_type] ? item.item_type : 'a_la_carte',
+        porciones:   999,
+        disponible:  true,
+    }));
+
+    renderizarCatsBar();
+    renderizarMenu();
+    mostrarMenu();
+}
+
+// ============================================================
+// MODO DEMO — datos de ejemplo cuando Supabase no tiene nada.
+// Refleja los tipos reales de la cocina de La 26.
+// No contiene ningún ítem de tipo 'sauce'.
+// ============================================================
+function activarModoDemo() {
+    console.log('[La 26] 🎭 Modo Demo activo');
+    slots = [
+        { id:'mock-p1', menuItemId:null, nombre:'Pechuga a la Plancha con Salsa Criolla',    precio:16000, descripcion:'Pechuga jugosa a la plancha bañada en salsa criolla de tomate y cebolla caramelizada.',         itemType:'protein',    porciones:12, disponible:true  },
+        { id:'mock-p2', menuItemId:null, nombre:'Tilapia Frita con Salsa de Ajo',             precio:18000, descripcion:'Tilapia del día frita en aceite de maíz con salsa de ajo y limón.',                            itemType:'protein',    porciones:8,  disponible:true  },
+        { id:'mock-p3', menuItemId:null, nombre:'Cerdo al Horno con Salsa BBQ',               precio:17000, descripcion:'Lomo de cerdo jugoso horneado lentamente, servido con salsa BBQ artesanal.',                   itemType:'protein',    porciones:0,  disponible:false },
+        { id:'mock-p4', menuItemId:null, nombre:'Camarones al Ajillo',                        precio:22000, descripcion:'Camarones frescos salteados en mantequilla de ajo y limón, servidos sobre arroz.',              itemType:'a_la_carte', porciones:4,  disponible:true  },
+        { id:'mock-s1', menuItemId:null, nombre:'Arroz Blanco con Coco',                      precio:0,     descripcion:'Arroz cocinado con leche de coco, acompañamiento clásico de la cocina colombiana.',             itemType:'side',       porciones:30, disponible:true  },
+        { id:'mock-s2', menuItemId:null, nombre:'Fríjoles Rojos con Hogao',                   precio:0,     descripcion:'Fríjoles rojos cocinados a fuego lento con hogao de tomate y cebolla.',                         itemType:'side',       porciones:25, disponible:true  },
+        { id:'mock-s3', menuItemId:null, nombre:'Patacón Tostado con Guacamole',              precio:0,     descripcion:'Plátano verde aplastado y frito dos veces, servido con guacamole fresco.',                       itemType:'side',       porciones:20, disponible:true  },
+        { id:'mock-d1', menuItemId:null, nombre:'Jugo Natural del Día',                       precio:3000,  descripcion:'Fruta fresca de temporada preparada al momento — pregunta al mesero qué hay hoy.',              itemType:'drink',      porciones:30, disponible:true  },
+        { id:'mock-d2', menuItemId:null, nombre:'Limonada de Panela',                         precio:3500,  descripcion:'Limón recién exprimido endulzado con panela orgánica y una pizca de sal.',                      itemType:'drink',      porciones:25, disponible:true  },
+        { id:'mock-d3', menuItemId:null, nombre:'Agua Aromática de Hierbas',                  precio:2000,  descripcion:'Infusión de menta, hierba buena y canela servida fría o caliente.',                             itemType:'drink',      porciones:20, disponible:true  },
+    ];
+
+    renderizarCatsBar();
+    renderizarMenu();
+    mostrarMenu();
+}
+
+// ============================================================
+// TIEMPO REAL — suscripción a cambios en el menú del día
+// ============================================================
+function suscribirTiempoReal() {
+    if (!dailyMenuId) return;
+
+    supabaseClient
+        .channel('la26-menu-cliente-rt')
+        .on('postgres_changes', {
+            event:  '*',
+            schema: 'public',
+            table:  'daily_menu_slots',
+            filter: `daily_menu_id=eq.${dailyMenuId}`,
+        }, () => {
+            console.log('[La 26] 🔄 Cambio en daily_menu_slots — recargando');
+            cargarSlotsDesdeMenuDia();
+        })
+        .on('postgres_changes', {
+            event:  'UPDATE',
+            schema: 'public',
+            table:  'menu_items',
+            filter: `restaurant_id=eq.${restaurantId}`,
+        }, () => {
+            console.log('[La 26] 🔄 Cambio en menu_items — recargando');
+            if (dailyMenuId) cargarSlotsDesdeMenuDia();
+            else             cargarSlotsDesdeCatalogo();
+        })
+        .subscribe(status => console.log('[La 26] Canal RT:', status));
+}
+
+// ============================================================
+// EVENT LISTENERS
+// ============================================================
+elOrderForm.addEventListener('submit', Order.submit.bind(Order));
+
+// ============================================================
+// CARGA DE DATOS — FLUJO PRINCIPAL
+// ============================================================
+async function cargarMenu() {
+    mostrarLoader();
+
+    // ── 1. Capturar contexto de mesa/modalidad (sessionStorage > URL params) ──
+    //    ACCESO PÚBLICO: nunca pide contraseña, solo valida ubicación del cliente.
+    const sesion = capturarContexto();
+    if (!sesion) return; // modal de bienvenida visible — esperando elección del cliente
+
+    const mesaParam   = sesion.mesa;
+    const nombreParam = sesion.nombre;
+    modalidad         = sesion.modalidad || 'mesa'; // 'mesa' | 'para_llevar' | 'domicilio'
+    tableNombre       = nombreParam || '';
+
+    // Pre-cargar dirección de domicilio si la capturó el MesaModal
+    const direccPreCargada = sessionStorage.getItem('mesa_direccion') || '';
+    if (direccPreCargada && elDeliveryAddress) {
+        elDeliveryAddress.value = direccPreCargada;
+    }
+
+    // ── 2. Resolver restaurant_id por slug ──────────────────────
+    restaurantId = await resolverRestaurantId();
+    if (!restaurantId) {
+        mostrarError('No se pudo identificar el restaurante. Contacta al administrador.');
+        return;
+    }
+
+    // ── 3. Resolver table_id ─────────────────────────────────────
+    const esUUID = /^[0-9a-f-]{36}$/i.test(mesaParam);
+    let mesa     = null;
+
+    if (esUUID) {
+        const { data } = await supabaseClient
+            .from('tables')
+            .select('id, number, label, restaurant_id')
+            .eq('id', mesaParam)
+            .eq('restaurant_id', restaurantId)
+            .maybeSingle();
+        mesa = data;
+    } else {
+        const { data } = await supabaseClient
+            .from('tables')
+            .select('id, number, label, restaurant_id')
+            .eq('restaurant_id', restaurantId)
+            .or(`number.eq.${isNaN(mesaParam) ? 0 : mesaParam},label.ilike.${mesaParam}`)
+            .maybeSingle();
+        mesa = data;
+    }
+
+    if (!mesa) {
+        console.warn('[La 26] Mesa no encontrada en BD — operando sin table_id');
+        tableId     = null;
+
+        // Etiqueta amigable según modalidad
+        if (modalidad === 'para_llevar' || modalidad === 'domicilio') {
+            tableNumber = 'Para Llevar / Domicilio';
+        } else if (mesaParam === 'domicilio') {
+            tableNumber = 'Domicilio';
+        } else if (mesaParam === 'barra') {
+            tableNumber = 'Barra';
+        } else if (mesaParam === 'terraza') {
+            tableNumber = 'Terraza';
+        } else {
+            tableNumber = `Mesa ${mesaParam}`;
+        }
+    } else {
+        tableId     = mesa.id;
+        tableNumber = mesa.label || `Mesa ${mesa.number}`;
+    }
+
+    // ── 4. Mostrar badge de mesa y banner de bienvenida ──────────
+    mostrarInfoMesa(tableNumber, tableNombre);
+
+    // ── 5. Cargar menú del día o catálogo directo ─────────────────
+    const hoy = todayISO();
+    const { data: menuDia, error: errorMenuDia } = await supabaseClient
+        .from('daily_menus')
+        .select('id, day_type')
+        .eq('restaurant_id', restaurantId)
+        .eq('menu_date', hoy)
+        .eq('is_published', true)
+        .maybeSingle();
+
+    if (errorMenuDia) {
+        console.warn('[La 26] Error consultando daily_menus:', errorMenuDia);
+    }
+
+    if (menuDia && menuDia.id) {
+        dailyMenuId = menuDia.id;
+        await cargarSlotsDesdeMenuDia();
+    } else {
+        console.log('[La 26] Sin menú del día publicado → cargando catálogo directo');
+        await cargarSlotsDesdeCatalogo();
+    }
+}
+
+// ============================================================
+// INICIO
+// ============================================================
+cargarMenu();

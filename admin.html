@@ -1,0 +1,1372 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Restaurante la 26 — Panel Administrativo</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        :root {
+            --olive:       #4a6741;
+            --olive-h:     #3a5233;
+            --olive-lt:    rgba(74,103,65,0.09);
+            --olive-bd:    rgba(74,103,65,0.28);
+            --olive-soft:  #e8ede7;
+            --surface:     #ffffff;
+            --surface-2:   #f7f8f6;
+            --surface-3:   #f0f2ef;
+            --border:      #e4e7e2;
+            --border-2:    #d4d9d2;
+            --text-1:      #1a1f18;
+            --text-2:      #4a5248;
+            --text-3:      #8a9388;
+            --red:         #c0392b;
+            --red-lt:      rgba(192,57,43,0.08);
+            --red-bd:      rgba(192,57,43,0.25);
+            --amber:       #9a6c1a;
+            --amber-lt:    rgba(154,108,26,0.09);
+            --blue:        #2563a8;
+            --blue-lt:     rgba(37,99,168,0.08);
+            --purple:      #6644c0;
+            --purple-lt:   rgba(102,68,192,0.08);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--surface-2);
+            color: var(--text-1);
+            min-height: 100vh;
+        }
+
+        /* ── Scrollbar discreta ── */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 99px; }
+
+        /* ── Inputs y selects globales ── */
+        input, select, textarea {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--surface);
+            color: var(--text-1);
+            border: 1.5px solid var(--border);
+            border-radius: 999px;
+            padding: 9px 16px;
+            font-size: 13px;
+            width: 100%;
+            transition: border-color .2s, box-shadow .2s;
+            outline: none;
+        }
+        select { border-radius: 999px; }
+        textarea { border-radius: 14px; }
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--olive);
+            box-shadow: 0 0 0 3px var(--olive-lt);
+        }
+        input::placeholder { color: var(--text-3); }
+        label {
+            font-size: 11.5px;
+            font-weight: 600;
+            color: var(--text-2);
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        /* ── Botón acento oliva ── */
+        .btn-olive {
+            background: var(--olive);
+            color: #fff;
+            border: none;
+            border-radius: 999px;
+            padding: 9px 22px;
+            font-size: 12.5px;
+            font-weight: 600;
+            letter-spacing: .3px;
+            cursor: pointer;
+            transition: background .2s, transform .15s, box-shadow .2s;
+            font-family: 'DM Sans', sans-serif;
+            white-space: nowrap;
+        }
+        .btn-olive:hover { background: var(--olive-h); box-shadow: 0 4px 14px rgba(74,103,65,.25); transform: translateY(-1px); }
+        .btn-olive:active { transform: translateY(0); }
+
+        /* ── Botón secundario ── */
+        .btn-ghost {
+            background: var(--surface);
+            color: var(--text-2);
+            border: 1.5px solid var(--border);
+            border-radius: 999px;
+            padding: 9px 20px;
+            font-size: 12.5px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: border-color .2s, background .2s;
+            font-family: 'DM Sans', sans-serif;
+            white-space: nowrap;
+        }
+        .btn-ghost:hover { border-color: var(--olive); background: var(--olive-lt); color: var(--olive); }
+
+        /* ── Botón danger ── */
+        .btn-danger {
+            background: var(--red-lt);
+            color: var(--red);
+            border: 1.5px solid var(--red-bd);
+            border-radius: 999px;
+            padding: 5px 13px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background .2s;
+            font-family: 'DM Sans', sans-serif;
+            white-space: nowrap;
+        }
+        .btn-danger:hover { background: rgba(192,57,43,.15); }
+
+        /* ── Botón amber (nómina) ── */
+        .btn-amber {
+            background: var(--amber-lt);
+            color: var(--amber);
+            border: 1.5px solid rgba(154,108,26,.3);
+            border-radius: 999px;
+            padding: 6px 14px;
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background .2s;
+            font-family: 'DM Sans', sans-serif;
+            white-space: nowrap;
+        }
+        .btn-amber:hover { background: rgba(154,108,26,.16); }
+
+        /* ── Tarjeta base ── */
+        .card {
+            background: var(--surface);
+            border: 1.5px solid var(--border);
+            border-radius: 18px;
+            padding: 20px;
+            transition: border-color .2s, box-shadow .2s;
+        }
+        .card:hover { border-color: var(--border-2); box-shadow: 0 4px 20px rgba(0,0,0,.05); }
+
+        /* ── Nav tab activo (sidebar interno) ── */
+        .tab-active {
+            background: var(--olive-lt) !important;
+            color: var(--olive) !important;
+            border: 1.5px solid var(--olive-bd) !important;
+            font-weight: 600 !important;
+        }
+        .tab-inactive {
+            background: transparent;
+            color: var(--text-2);
+            border: 1.5px solid transparent;
+        }
+        .tab-inactive:hover { background: var(--surface-3); color: var(--text-1); }
+
+        /* ── Filtro de menú ── */
+        .filter-active {
+            background: var(--olive) !important;
+            color: #fff !important;
+            border-color: var(--olive) !important;
+        }
+        .filter-btn {
+            background: var(--surface);
+            color: var(--text-2);
+            border: 1.5px solid var(--border);
+            border-radius: 999px;
+            padding: 6px 16px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all .2s;
+            font-family: 'DM Sans', sans-serif;
+        }
+        .filter-btn:hover { border-color: var(--olive); color: var(--olive); }
+
+        /* ── KPI card ── */
+        .kpi-card {
+            background: var(--surface);
+            border: 1.5px solid var(--border);
+            border-radius: 18px;
+            padding: 18px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            transition: box-shadow .2s;
+        }
+        .kpi-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.06); }
+        .kpi-icon {
+            width: 40px; height: 40px;
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        /* ── Switch disponibilidad ── */
+        .sw-on {
+            background: rgba(74,103,65,.1);
+            color: var(--olive);
+            border: 1.5px solid var(--olive-bd);
+            border-radius: 999px;
+            padding: 5px 14px;
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all .2s;
+            font-family: 'DM Sans', sans-serif;
+        }
+        .sw-on:hover { background: rgba(74,103,65,.18); }
+        .sw-off {
+            background: var(--red-lt);
+            color: var(--red);
+            border: 1.5px solid var(--red-bd);
+            border-radius: 999px;
+            padding: 5px 14px;
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all .2s;
+            font-family: 'DM Sans', sans-serif;
+        }
+        .sw-off:hover { background: rgba(192,57,43,.15); }
+
+        /* ── Table styles ── */
+        .thead-row th {
+            padding: 10px 14px;
+            font-size: 10.5px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .8px;
+            color: var(--text-3);
+            border-bottom: 1.5px solid var(--border);
+            background: var(--surface-2);
+            white-space: nowrap;
+        }
+        .tbody-row td { padding: 11px 14px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        .tbody-row:hover td { background: var(--surface-2); }
+        .tbody-row:last-child td { border-bottom: none; }
+
+        /* ── Badges de tipo ── */
+        .badge { display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:999px; font-size:10px; font-weight:600; letter-spacing:.3px; border: 1.5px solid; text-transform:uppercase; white-space:nowrap; }
+        .badge-protein  { background:rgba(180,60,60,.08);  color:#b43c3c; border-color:rgba(180,60,60,.25); }
+        .badge-side     { background:rgba(154,108,26,.09); color:#9a6c1a; border-color:rgba(154,108,26,.28); }
+        .badge-drink    { background:rgba(37,99,168,.08);  color:#2563a8; border-color:rgba(37,99,168,.25); }
+        .badge-carte    { background:rgba(100,60,160,.08); color:#6644c0; border-color:rgba(100,60,160,.25); }
+        .badge-dessert  { background:rgba(180,80,120,.08); color:#b45080; border-color:rgba(180,80,120,.25); }
+
+        /* ── Badge código de rango ── */
+        .range-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 12px 4px 8px;
+            border-radius: 999px;
+            font-size: 10.5px;
+            font-weight: 600;
+            border: 1.5px solid;
+            cursor: default;
+        }
+        .range-01  { background: rgba(74,103,65,.07);   color: var(--olive);  border-color: var(--olive-bd); }
+        .range-11  { background: rgba(180,60,60,.07);   color: #b43c3c;       border-color: rgba(180,60,60,.25); }
+        .range-31  { background: rgba(154,108,26,.08);  color: var(--amber);  border-color: rgba(154,108,26,.28); }
+        .range-51  { background: rgba(37,99,168,.07);   color: var(--blue);   border-color: rgba(37,99,168,.25); }
+        .range-71  { background: rgba(102,68,192,.07);  color: var(--purple); border-color: rgba(102,68,192,.25); }
+
+        /* ── Sección DIAN ── */
+        .dian-panel {
+            background: var(--surface);
+            border: 1.5px solid var(--border);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        .dian-header {
+            padding: 20px 24px;
+            border-bottom: 1.5px solid var(--border);
+            background: var(--surface-2);
+        }
+
+        /* ── Input card (precio / porciones en tarjeta menú) ── */
+        .card-input {
+            background: var(--surface-2);
+            border: 1.5px solid var(--border);
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 12.5px;
+            font-weight: 600;
+            text-align: center;
+            width: 100%;
+            color: var(--text-1);
+            font-family: 'DM Mono', monospace;
+            transition: border-color .2s;
+        }
+        .card-input:focus { outline: none; border-color: var(--olive); box-shadow: 0 0 0 3px var(--olive-lt); }
+
+        /* ── Animación tarjetas menú ── */
+        @keyframes fadeUp {
+            from { opacity:0; transform:translateY(10px); }
+            to   { opacity:1; transform:translateY(0); }
+        }
+        .menu-card { animation: fadeUp .25s ease both; }
+
+        /* ── Monospace ── */
+        .mono { font-family: 'DM Mono', monospace; }
+
+        /* ── Barra navegación global (top) ── */
+        #global-nav {
+            background: var(--surface);
+            border-bottom: 1.5px solid var(--border);
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            height: 44px;
+        }
+        .gnav-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 16px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-2);
+            background: transparent;
+            border: 1.5px solid transparent;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all .2s;
+            font-family: 'DM Sans', sans-serif;
+        }
+        .gnav-btn:hover { background: var(--surface-3); color: var(--text-1); border-color: var(--border); }
+        .gnav-btn.gnav-active {
+            background: var(--olive-lt);
+            color: var(--olive);
+            border-color: var(--olive-bd);
+            font-weight: 600;
+        }
+        .gnav-sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
+
+        /* ── Modal nómina ── */
+        .modal-overlay {
+            position: fixed; inset: 0;
+            background: rgba(26,31,24,.45);
+            backdrop-filter: blur(4px);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .modal-box {
+            background: var(--surface);
+            border: 1.5px solid var(--border);
+            border-radius: 22px;
+            padding: 28px;
+            max-width: 680px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,.12);
+        }
+
+        /* ── Chip cargo ── */
+        .chip-cargo {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 999px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .4px;
+        }
+        .chip-mesero  { background: var(--blue-lt);   color: var(--blue);   border: 1px solid rgba(37,99,168,.22); }
+        .chip-cocinero{ background: rgba(180,60,60,.08);  color: #b43c3c;   border: 1px solid rgba(180,60,60,.22); }
+        .chip-cajero  { background: var(--amber-lt);  color: var(--amber);  border: 1px solid rgba(154,108,26,.22); }
+        .chip-admin   { background: var(--olive-lt);  color: var(--olive);  border: 1px solid var(--olive-bd); }
+
+        /* ── Desglose nómina ── */
+        .nomina-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 9px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 12.5px;
+        }
+        .nomina-row:last-child { border-bottom: none; }
+        .nomina-label { color: var(--text-2); }
+        .nomina-value { font-family: 'DM Mono', monospace; font-weight: 600; color: var(--text-1); }
+        .nomina-value.deduccion { color: var(--red); }
+        .nomina-value.provision { color: var(--amber); }
+        .nomina-value.neto { color: var(--olive); font-size: 14px; }
+
+        /* ── Separador de sección ── */
+        .section-sep {
+            font-size: 9.5px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: var(--text-3);
+            padding: 10px 0 4px;
+        }
+    </style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════
+     BARRA DE NAVEGACIÓN GLOBAL (Solo Admin)
+════════════════════════════════════════════════════════ -->
+<nav id="global-nav" style="display:none;">
+    <div style="display:flex;align-items:center;gap:10px;margin-right:12px;">
+        <div style="width:30px;height:30px;border-radius:8px;overflow:hidden;flex-shrink:0;border:1.5px solid var(--olive-bd);box-shadow:0 1px 4px rgba(74,103,65,0.15);background:var(--olive-soft);display:flex;align-items:center;justify-content:center;">
+            <img src="logo.png" alt="Restaurante la 26" style="width:100%;height:100%;object-fit:cover;">
+        </div>
+        <span style="font-size:12px;color:var(--text-2);font-weight:500;white-space:nowrap;">Restaurante la 26 — Panel Administrativo</span>
+    </div>
+    <div class="gnav-sep"></div>
+    <a href="admin.html" class="gnav-btn gnav-active">📊 Panel Admin</a>
+    <a href="index.html" class="gnav-btn">🍳 Pantalla Cocina</a>
+    <a href="menu.html"  class="gnav-btn">📱 Vista Cliente</a>
+    <div style="flex:1;"></div>
+    <span id="gnav-rol-badge"
+        style="font-size:10.5px;font-weight:700;color:var(--olive);background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;">
+        👤 Administrador
+    </span>
+</nav>
+
+<!-- ════════════════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════════════ -->
+<header style="background:var(--surface);border-bottom:1.5px solid var(--border);padding:0 24px;height:58px;display:flex;justify-content:space-between;align-items:center;">
+    <div style="display:flex;align-items:center;gap:12px;">
+        <div style="background:var(--olive-soft);border-radius:11px;width:40px;height:40px;overflow:hidden;flex-shrink:0;border:1.5px solid var(--olive-bd);box-shadow:0 2px 8px rgba(74,103,65,0.14);display:flex;align-items:center;justify-content:center;">
+            <img src="logo.png" alt="Restaurante la 26" style="width:100%;height:100%;object-fit:cover;">
+        </div>
+        <div>
+            <h1 style="font-size:15px;font-weight:700;letter-spacing:-.2px;color:var(--text-1);line-height:1.2;">Restaurante la 26</h1>
+            <p style="font-size:10.5px;color:var(--text-3);">Panel Administrativo · Bucaramanga, Santander</p>
+        </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;">
+        <span id="fecha-actual" class="mono" style="font-size:12px;color:var(--text-3);">—</span>
+        <button onclick="ejecutarCierreCaja()"
+            style="background:var(--red-lt);color:var(--red);border:1.5px solid var(--red-bd);border-radius:999px;padding:7px 18px;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .2s;"
+            onmouseover="this.style.background='rgba(192,57,43,.16)'"
+            onmouseout="this.style.background='var(--red-lt)'">
+            🔒 Cierre de Caja (Z)
+        </button>
+    </div>
+</header>
+
+<div style="display:flex;">
+
+<!-- ════════════════════════════════════════════════════════
+     SIDEBAR
+════════════════════════════════════════════════════════ -->
+<aside style="width:236px;min-height:calc(100vh - 102px);background:var(--surface);border-right:1.5px solid var(--border);padding:20px 12px;display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+    <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:1.2px;padding:0 8px 10px;">Control del Negocio</p>
+
+    <button onclick="cambiarTab('dashboard')" id="btn-tab-dashboard"
+        class="tab-active w-full text-left"
+        style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;border:1.5px solid transparent;">
+        📊 Dashboard Contable
+    </button>
+    <button onclick="cambiarTab('menu')" id="btn-tab-menu"
+        class="tab-inactive w-full text-left"
+        style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
+        🍳 Control de Menú
+    </button>
+    <button onclick="cambiarTab('personal')" id="btn-tab-personal"
+        class="tab-inactive w-full text-left"
+        style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
+        👥 Control de Personal
+    </button>
+    <button onclick="cambiarTab('nomina')" id="btn-tab-nomina"
+        class="tab-inactive w-full text-left"
+        style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
+        💵 Gastos Operativos
+    </button>
+    <button onclick="cambiarTab('inventario')" id="btn-tab-inventario"
+        class="tab-inactive w-full text-left"
+        style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
+        📦 Inventario General
+    </button>
+
+    <div style="height:1.5px;background:var(--border);margin:6px 8px;"></div>
+
+    <button onclick="cambiarTab('dian')" id="btn-tab-dian"
+        class="tab-inactive w-full text-left"
+        style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
+        🧾 Facturación DIAN
+    </button>
+</aside>
+
+<!-- ════════════════════════════════════════════════════════
+     MAIN CONTENT
+════════════════════════════════════════════════════════ -->
+<main style="flex:1;padding:28px;overflow-y:auto;min-width:0;">
+
+<!-- ══════════════════════════════
+     TAB: DASHBOARD CONTABLE
+══════════════════════════════ -->
+<section id="tab-dashboard" style="display:flex;flex-direction:column;gap:24px;">
+
+    <!-- KPIs -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;">
+        <div class="kpi-card">
+            <div>
+                <p style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;">Ventas Brutas</p>
+                <h3 id="gros-ventas" class="mono" style="font-size:22px;font-weight:700;color:var(--olive);margin-top:4px;">$0</h3>
+            </div>
+            <div class="kpi-icon" style="background:var(--olive-lt);">💰</div>
+        </div>
+        <div class="kpi-card">
+            <div>
+                <p style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;">Órdenes Hoy</p>
+                <h3 id="total-pedidos" class="mono" style="font-size:22px;font-weight:700;color:var(--blue);margin-top:4px;">0</h3>
+            </div>
+            <div class="kpi-icon" style="background:var(--blue-lt);">📋</div>
+        </div>
+        <div class="kpi-card">
+            <div>
+                <p style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;">Gastos del Día</p>
+                <h3 id="total-gastos" class="mono" style="font-size:22px;font-weight:700;color:var(--red);margin-top:4px;">$0</h3>
+            </div>
+            <div class="kpi-icon" style="background:var(--red-lt);">📉</div>
+        </div>
+        <div class="kpi-card">
+            <div>
+                <p style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;">Provisión Rete-ICA</p>
+                <h3 id="val-reteica" class="mono" style="font-size:22px;font-weight:700;color:var(--amber);margin-top:4px;">$0</h3>
+                <p style="font-size:9.5px;color:var(--text-3);margin-top:2px;">Tarifa 6.9‰ — BGA</p>
+            </div>
+            <div class="kpi-icon" style="background:var(--amber-lt);">🏛️</div>
+        </div>
+    </div>
+
+    <!-- Tablas -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+        <div class="card" style="padding:0;overflow:hidden;">
+            <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
+                <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">🧾 Historial de Facturación</h3>
+            </div>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead><tr class="thead-row">
+                        <th>Código</th><th>Cliente</th><th>Total</th><th style="text-align:center;">Acciones</th>
+                    </tr></thead>
+                    <tbody id="tabla-facturas">
+                        <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Cargando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card" style="padding:0;overflow:hidden;">
+            <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
+                <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">🔥 Platos Más Solicitados</h3>
+            </div>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead><tr class="thead-row">
+                        <th>Plato</th><th style="text-align:center;">Cantidad</th>
+                    </tr></thead>
+                    <tbody id="tabla-top-platos">
+                        <tr><td colspan="2" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Cargando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ══════════════════════════════
+     TAB: CONTROL DE MENÚ
+══════════════════════════════ -->
+<section id="tab-menu" style="display:none;flex-direction:column;gap:20px;">
+
+    <!-- Guía de rangos de código -->
+    <div class="card" style="background:var(--surface-2);border-style:dashed;">
+        <p style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.9px;margin-bottom:12px;">📐 Estructura de Códigos del Catálogo</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+            <span class="range-badge range-01">🌿 01–10 · Vegetales, Salsas e Ingredientes Base</span>
+            <span class="range-badge range-11">🥩 11–30 · Carnes, Proteínas y Cortes</span>
+            <span class="range-badge range-31">🍲 31–50 · Acompañamientos y Principios</span>
+            <span class="range-badge range-51">🍹 51–70 · Bebidas y Jugos</span>
+            <span class="range-badge range-71">✨ 71+ · Platos a la Carta y Especiales</span>
+        </div>
+    </div>
+
+    <!-- Formulario nuevo plato -->
+    <div class="card">
+        <div style="margin-bottom:18px;">
+            <h3 style="font-size:15px;font-weight:700;color:var(--text-1);">🍳 Editor Modular del Catálogo</h3>
+            <p style="font-size:12px;color:var(--text-3);margin-top:3px;">
+                Asigna un código único según la estructura de rangos. Las proteínas ya incluyen su salsa. Porciones en 0 → se bloquea automáticamente.
+            </p>
+        </div>
+        <form id="form-nuevo-plato" style="display:grid;grid-template-columns:80px 1fr 130px 140px 160px auto;gap:12px;align-items:end;">
+            <div>
+                <label>Código *</label>
+                <input type="number" id="menu-codigo" placeholder="Ej: 12" min="1" max="999" required>
+            </div>
+            <div>
+                <label>Nombre del Plato o Componente</label>
+                <input type="text" id="menu-nombre" placeholder="Ej: Bagre en Salsa Criolla · Fríjoles · Limonada" required>
+            </div>
+            <div>
+                <label>Precio / Valor ($)</label>
+                <input type="number" id="menu-precio" placeholder="Ej: 16000" required>
+            </div>
+            <div>
+                <label>Tipo de Componente</label>
+                <select id="menu-tipo">
+                    <option value="executive_lunch">🥩 Proteína con Salsa</option>
+                    <option value="side">🍲 Principio / Acompañamiento</option>
+                    <option value="drink">🍹 Bebida / Refresco</option>
+                    <option value="a_la_carte">✨ Plato a la Carta</option>
+                    <option value="dessert">🍮 Postre</option>
+                </select>
+            </div>
+            <div>
+                <label>Porciones del Día</label>
+                <input type="number" id="menu-porciones" placeholder="Ej: 30" min="0">
+            </div>
+            <div>
+                <label>&nbsp;</label>
+                <button type="submit" class="btn-olive" style="height:40px;width:100%;">💾 Registrar</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Filtros -->
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+        <button type="button" onclick="filtrarMenuComponente('todos')"
+            id="btn-comp-todos" class="filter-btn filter-active btn-comp">Todo el Catálogo</button>
+        <button type="button" onclick="filtrarMenuComponente('executive_lunch')"
+            id="btn-comp-executive_lunch" class="filter-btn btn-comp">🥩 Proteínas</button>
+        <button type="button" onclick="filtrarMenuComponente('side')"
+            id="btn-comp-side" class="filter-btn btn-comp">🍲 Principios</button>
+        <button type="button" onclick="filtrarMenuComponente('a_la_carte')"
+            id="btn-comp-a_la_carte" class="filter-btn btn-comp">✨ A la Carta</button>
+        <button type="button" onclick="filtrarMenuComponente('drink')"
+            id="btn-comp-drink" class="filter-btn btn-comp">🍹 Bebidas</button>
+        <button type="button" onclick="filtrarMenuComponente('dessert')"
+            id="btn-comp-dessert" class="filter-btn btn-comp">🍮 Postres</button>
+    </div>
+
+    <!-- Grid tarjetas -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;" id="contenedor-slots-menu">
+        <p style="color:var(--text-3);font-size:12.5px;padding:16px 0;grid-column:span 3;">Cargando catálogo...</p>
+    </div>
+</section>
+
+<!-- ══════════════════════════════
+     TAB: CONTROL DE PERSONAL
+══════════════════════════════ -->
+<section id="tab-personal" style="display:none;flex-direction:column;gap:24px;">
+
+    <!-- Header info -->
+    <div class="card" style="background:var(--olive-lt);border-color:var(--olive-bd);">
+        <div style="display:flex;gap:12px;align-items:flex-start;">
+            <span style="font-size:24px;margin-top:2px;">👥</span>
+            <div>
+                <h3 style="font-size:15px;font-weight:700;color:var(--olive);margin-bottom:4px;">Control de Personal y Nómina — Ley Laboral Colombiana 2026</h3>
+                <p style="font-size:12px;color:var(--text-2);line-height:1.6;">
+                    SMMLV 2026: <strong>$1.423.500 COP</strong> · Auxilio de Transporte: <strong>$200.000 COP</strong> (aplica para salarios ≤ 2 SMMLV = $2.847.000).
+                    Salud empleado: 4% · Pensión empleado: 4% · Prestaciones empleador incluidas en costo total.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:320px 1fr;gap:20px;align-items:start;">
+
+        <!-- Formulario agregar empleado -->
+        <div class="card" style="flex-shrink:0;">
+            <h3 style="font-size:14px;font-weight:700;color:var(--text-1);margin-bottom:18px;">➕ Registrar Empleado</h3>
+            <form id="form-empleado" style="display:flex;flex-direction:column;gap:14px;">
+                <div>
+                    <label>Nombre Completo</label>
+                    <input type="text" id="emp-nombre" placeholder="Ej: Carlos Torres Ruiz" required>
+                </div>
+                <div>
+                    <label>Cargo</label>
+                    <select id="emp-cargo">
+                        <option value="Mesero">Mesero</option>
+                        <option value="Cocinero">Cocinero</option>
+                        <option value="Cajero">Cajero</option>
+                        <option value="Administrador">Administrador</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Salario Base Mensual ($ COP)</label>
+                    <input type="number" id="emp-salario" placeholder="Ej: 1423500" required>
+                </div>
+                <div>
+                    <label>Días Trabajados (este mes)</label>
+                    <input type="number" id="emp-dias" placeholder="Ej: 26" min="1" max="30" value="30" required>
+                </div>
+                <button type="submit" class="btn-olive">💾 Añadir al Personal</button>
+            </form>
+        </div>
+
+        <!-- Tabla de empleados -->
+        <div class="card" style="padding:0;overflow:hidden;">
+            <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+                <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📋 Nómina del Personal</h3>
+                <span id="emp-count-badge"
+                    style="background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;">
+                    0 empleados
+                </span>
+            </div>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead><tr class="thead-row">
+                        <th>Empleado</th>
+                        <th style="text-align:center;">Cargo</th>
+                        <th style="text-align:right;">Salario Base</th>
+                        <th style="text-align:center;">Días</th>
+                        <th style="text-align:right;">Neto a Pagar</th>
+                        <th style="text-align:center;">Acciones</th>
+                    </tr></thead>
+                    <tbody id="tabla-empleados">
+                        <tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-3);font-size:12.5px;">
+                            No hay empleados registrados. Añade el primero usando el formulario.
+                        </td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <!-- Resumen costo total -->
+            <div id="emp-costo-total" style="display:none;padding:16px 20px;border-top:1.5px solid var(--border);background:var(--surface-2);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                <span style="font-size:12px;font-weight:600;color:var(--text-2);">💼 Costo total del restaurante (empleador)</span>
+                <span id="emp-costo-total-valor" class="mono" style="font-size:16px;font-weight:700;color:var(--amber);">$0</span>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ══════════════════════════════
+     TAB: GASTOS OPERATIVOS
+══════════════════════════════ -->
+<section id="tab-nomina" style="display:none;display:grid;grid-template-columns:1fr 2fr;gap:20px;align-items:start;">
+
+    <div class="card">
+        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);margin-bottom:18px;">📝 Registrar Salida de Caja</h3>
+        <form id="form-gasto" style="display:flex;flex-direction:column;gap:14px;">
+            <div>
+                <label>Categoría Contable</label>
+                <select id="gasto-tipo">
+                    <option value="Nomina Mesero">Nómina — Pago Diario Mesero</option>
+                    <option value="Nomina Cocina">Nómina — Operación Cocina</option>
+                    <option value="Insumos Plaza">Insumos — Compras en Plaza</option>
+                    <option value="Otros">Gastos Varios Operativos</option>
+                </select>
+            </div>
+            <div>
+                <label>Descripción</label>
+                <input type="text" id="gasto-descripcion" placeholder="Ej: Pago diario Carlos Torres" required>
+            </div>
+            <div>
+                <label>Valor ($ COP)</label>
+                <input type="number" id="gasto-monto" placeholder="Ej: 60000" required>
+            </div>
+            <button type="submit" class="btn-olive">💾 Registrar Movimiento</button>
+        </form>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden;">
+        <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
+            <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📉 Historial de Salidas de Caja</h3>
+        </div>
+        <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;">
+                <thead><tr class="thead-row">
+                    <th>Categoría</th><th>Descripción</th><th>Monto</th><th style="text-align:right;">Hora</th>
+                </tr></thead>
+                <tbody id="tabla-gastos">
+                    <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Sin movimientos.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<!-- ══════════════════════════════
+     TAB: INVENTARIO
+══════════════════════════════ -->
+<section id="tab-inventario" style="display:none;flex-direction:column;gap:20px;">
+
+    <div class="card">
+        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);margin-bottom:18px;">➕ Registrar Nuevo Insumo</h3>
+        <form id="form-nuevo-insumo" style="display:grid;grid-template-columns:1fr 1fr 120px 140px auto;gap:12px;align-items:end;">
+            <div>
+                <label>Nombre del Insumo</label>
+                <input type="text" id="inv-nombre" placeholder="Ej: Pechuga de Pollo" required>
+            </div>
+            <div>
+                <label>Categoría</label>
+                <select id="inv-categoria">
+                    <option value="Materia Prima / Alimento">Materia Prima / Alimento</option>
+                    <option value="Perecederos / Plaza">Perecederos / Plaza</option>
+                    <option value="Productos de Aseo">Productos de Aseo</option>
+                    <option value="Empaques y Desechables">Empaques y Desechables</option>
+                    <option value="Insumos Operativos">Insumos Operativos</option>
+                </select>
+            </div>
+            <div>
+                <label>Stock Inicial</label>
+                <input type="number" step="0.01" id="inv-stock" placeholder="Ej: 10" required>
+            </div>
+            <div>
+                <label>Unidad</label>
+                <select id="inv-unidad">
+                    <option value="Kg">Kilogramos (Kg)</option>
+                    <option value="Libras">Libras</option>
+                    <option value="Unidades">Unidades</option>
+                    <option value="Litros">Litros</option>
+                    <option value="Galón">Galón</option>
+                    <option value="Paquete">Paquete</option>
+                </select>
+            </div>
+            <div>
+                <label>&nbsp;</label>
+                <button type="submit" class="btn-olive" style="height:40px;width:100%;">💾 Añadir</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden;">
+        <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
+            <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📦 Kárdex de Suministros</h3>
+        </div>
+        <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;">
+                <thead><tr class="thead-row">
+                    <th>Insumo</th><th>Categoría</th><th style="text-align:center;">Stock</th>
+                    <th style="text-align:center;">Unidad</th><th style="text-align:center;">Ajuste</th>
+                    <th style="text-align:right;">Baja</th>
+                </tr></thead>
+                <tbody id="tabla-inventario">
+                    <tr><td colspan="6" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Cargando inventario...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<!-- ══════════════════════════════
+     TAB: FACTURACIÓN DIAN
+══════════════════════════════ -->
+<section id="tab-dian" style="display:none;flex-direction:column;gap:20px;">
+    <div style="display:grid;grid-template-columns:2fr 3fr;gap:20px;">
+
+        <div class="dian-panel">
+            <div class="dian-header">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                    <div style="width:8px;height:8px;border-radius:50%;background:var(--olive);flex-shrink:0;"></div>
+                    <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">Factura Electrónica DIAN</h3>
+                </div>
+                <p style="font-size:11.5px;color:var(--text-3);">Emitir cuando el cliente solicite documento equivalente</p>
+            </div>
+            <div style="padding:20px;display:flex;flex-direction:column;gap:16px;">
+                <div>
+                    <label>Tipo de Documento *</label>
+                    <select id="dian-tipo-doc">
+                        <option value="CC">Cédula de Ciudadanía (CC)</option>
+                        <option value="NIT">NIT — Persona Jurídica</option>
+                        <option value="CE">Cédula de Extranjería (CE)</option>
+                        <option value="PAS">Pasaporte</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Número de Identificación *</label>
+                    <input type="text" id="dian-num-doc" placeholder="Ej: 13 457 890  /  900.123.456-1">
+                </div>
+                <div>
+                    <label>Nombre o Razón Social *</label>
+                    <input type="text" id="dian-nombre" placeholder="Ej: Juan Pérez  /  Empresa S.A.S.">
+                </div>
+                <div>
+                    <label>Correo Electrónico *</label>
+                    <input type="email" id="dian-email" placeholder="cliente@correo.com">
+                </div>
+                <div>
+                    <label>Valor Total Recaudado ($ COP) *</label>
+                    <input type="number" id="dian-valor" placeholder="Ej: 28000">
+                </div>
+
+                <div id="dian-resumen" style="display:none;background:var(--surface-2);border:1.5px solid var(--border);border-radius:14px;padding:14px;">
+                    <p style="font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px;">Liquidación IVA Consumo</p>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <span style="font-size:12.5px;color:var(--text-2);">Base gravable (sin IVA 8%)</span>
+                        <span class="mono" style="font-size:12.5px;font-weight:600;color:var(--text-1);" id="dian-base">—</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <span style="font-size:12.5px;color:var(--text-2);">IVA al consumo (8%)</span>
+                        <span class="mono" style="font-size:12.5px;font-weight:600;color:var(--olive);" id="dian-iva">—</span>
+                    </div>
+                    <div style="border-top:1.5px solid var(--border);padding-top:8px;display:flex;justify-content:space-between;align-items:center;">
+                        <span style="font-size:13px;font-weight:700;color:var(--text-1);">Total con IVA</span>
+                        <span class="mono" style="font-size:13px;font-weight:700;color:var(--text-1);" id="dian-total">—</span>
+                    </div>
+                </div>
+
+                <div style="display:flex;gap:10px;">
+                    <button type="button" onclick="calcularIVADian()" class="btn-ghost" style="flex:1;">🧮 Calcular IVA</button>
+                    <button type="button" onclick="emitirFacturaDian()" class="btn-olive" style="flex:1;">📤 Emitir Factura</button>
+                </div>
+
+                <div id="dian-resultado" style="display:none;background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px;"></div>
+            </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:16px;">
+            <div class="card" style="background:var(--olive-lt);border-color:var(--olive-bd);">
+                <div style="display:flex;gap:12px;align-items:flex-start;">
+                    <span style="font-size:20px;margin-top:2px;">🏛️</span>
+                    <div>
+                        <h4 style="font-size:13px;font-weight:700;color:var(--olive);margin-bottom:4px;">Marco Legal — Facturación Electrónica</h4>
+                        <p style="font-size:12px;color:var(--text-2);line-height:1.6;">
+                            Según la <strong>Resolución DIAN 000042 de 2020</strong>, los restaurantes deben emitir
+                            factura electrónica cuando el cliente la solicite. El IVA al consumo aplicable
+                            es del <strong>8%</strong> (Art. 512-1 E.T.). La tarifa de Rete-ICA para
+                            Bucaramanga en expendio de comidas es <strong>6.9 × 1000</strong>.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" style="padding:0;overflow:hidden;">
+                <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+                    <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📋 Facturas Emitidas Hoy</h3>
+                    <span id="dian-contador-badge"
+                        style="background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;">
+                        0 facturas
+                    </span>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead><tr class="thead-row">
+                            <th>Cliente / Razón Social</th>
+                            <th>Doc.</th>
+                            <th style="text-align:right;">Total c/IVA</th>
+                            <th style="text-align:center;">Hora</th>
+                        </tr></thead>
+                        <tbody id="tabla-dian-historial">
+                            <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Aún no se han emitido facturas hoy.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <h4 style="font-size:13px;font-weight:700;color:var(--text-1);margin-bottom:12px;">📌 Cómo usar este panel</h4>
+                <ol style="list-style:none;display:flex;flex-direction:column;gap:10px;">
+                    <li style="display:flex;gap:10px;align-items:flex-start;">
+                        <span style="background:var(--olive);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px;">1</span>
+                        <p style="font-size:12.5px;color:var(--text-2);line-height:1.5;">El cliente solicita la factura electrónica al pagar su almuerzo.</p>
+                    </li>
+                    <li style="display:flex;gap:10px;align-items:flex-start;">
+                        <span style="background:var(--olive);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px;">2</span>
+                        <p style="font-size:12.5px;color:var(--text-2);line-height:1.5;">Diligencia el tipo de documento, identificación, nombre y correo.</p>
+                    </li>
+                    <li style="display:flex;gap:10px;align-items:flex-start;">
+                        <span style="background:var(--olive);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px;">3</span>
+                        <p style="font-size:12.5px;color:var(--text-2);line-height:1.5;">Ingresa el valor total cobrado al cliente y presiona <strong>Calcular IVA</strong>.</p>
+                    </li>
+                    <li style="display:flex;gap:10px;align-items:flex-start;">
+                        <span style="background:var(--olive);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px;">4</span>
+                        <p style="font-size:12.5px;color:var(--text-2);line-height:1.5;">Presiona <strong>Emitir Factura</strong> para registrar y enviar por correo.</p>
+                    </li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</section>
+
+</main>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     MODAL: DESGLOSE NÓMINA EMPLEADO
+════════════════════════════════════════════════════════ -->
+<div id="modal-nomina" style="display:none;" class="modal-overlay" onclick="if(event.target===this)cerrarModalNomina()">
+    <div class="modal-box">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px;">
+            <div>
+                <h2 style="font-size:17px;font-weight:700;color:var(--text-1);" id="modal-emp-nombre">Empleado</h2>
+                <p style="font-size:12px;color:var(--text-3);margin-top:2px;" id="modal-emp-cargo">Cargo</p>
+            </div>
+            <button onclick="cerrarModalNomina()"
+                style="background:var(--surface-3);border:none;border-radius:999px;width:32px;height:32px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text-2);">×</button>
+        </div>
+
+        <!-- Devengados -->
+        <p class="section-sep">📥 Devengados</p>
+        <div id="modal-devengados"></div>
+
+        <!-- Deducciones -->
+        <p class="section-sep" style="margin-top:14px;">📤 Deducciones (cargo empleado)</p>
+        <div id="modal-deducciones"></div>
+
+        <!-- Neto -->
+        <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:16px 18px;margin-top:16px;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:14px;font-weight:700;color:var(--olive);">💵 Neto a Pagar al Empleado</span>
+            <span class="mono" id="modal-neto" style="font-size:20px;font-weight:700;color:var(--olive);">$0</span>
+        </div>
+
+        <!-- Costo empleador -->
+        <p class="section-sep" style="margin-top:16px;">🏢 Provisiones a cargo del Restaurante (Empleador)</p>
+        <div id="modal-provisiones"></div>
+
+        <div style="background:var(--amber-lt);border:1.5px solid rgba(154,108,26,.3);border-radius:14px;padding:16px 18px;margin-top:14px;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:13px;font-weight:700;color:var(--amber);">💼 Costo Real para el Restaurante</span>
+            <span class="mono" id="modal-costo-total" style="font-size:18px;font-weight:700;color:var(--amber);">$0</span>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;margin-top:20px;">
+            <button onclick="cerrarModalNomina()" class="btn-ghost">Cerrar</button>
+        </div>
+    </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     SCRIPTS
+════════════════════════════════════════════════════════ -->
+<script src="admin.js"></script>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// GUARD: Verificar rol admin al cargar la página
+// ═══════════════════════════════════════════════════════
+(function verificarRolAdmin() {
+    const rol = sessionStorage.getItem('user_role');
+    if (rol !== 'admin') {
+        // En desarrollo, permitir acceso pero sin barra global
+        // En producción, descomentar la línea de redireccion:
+        // window.location.href = 'index.html';
+        return;
+    }
+    const nav = document.getElementById('global-nav');
+    if (nav) nav.style.display = 'flex';
+})();
+
+// ═══════════════════════════════════════════════════════
+// GESTIÓN DE TABS (incluye pestaña 'personal' y 'dian')
+// Sobrescribe la función de admin.js
+// ═══════════════════════════════════════════════════════
+const TABS = ['dashboard', 'menu', 'personal', 'nomina', 'inventario', 'dian'];
+
+function cambiarTab(dest) {
+    TABS.forEach(t => {
+        const el  = document.getElementById(`tab-${t}`);
+        const btn = document.getElementById(`btn-tab-${t}`);
+        if (el)  { el.style.display = 'none'; el.style.flexDirection = ''; }
+        if (btn) { btn.className = btn.className.replace('tab-active','').replace('tab-inactive','').trim() + ' tab-inactive'; }
+    });
+
+    const target    = document.getElementById(`tab-${dest}`);
+    const btnTarget = document.getElementById(`btn-tab-${dest}`);
+
+    if (target) {
+        const flexTabs = ['dashboard','menu','personal','inventario','dian'];
+        target.style.display = flexTabs.includes(dest) ? 'flex' : 'grid';
+        if (flexTabs.includes(dest)) target.style.flexDirection = 'column';
+        if (dest === 'nomina') { target.style.display = 'grid'; }
+    }
+    if (btnTarget) {
+        btnTarget.className = btnTarget.className.replace('tab-inactive','').trim() + ' tab-active';
+    }
+
+    if (dest === 'dashboard')  cargarDashboardReal();
+    if (dest === 'menu')       cargarSlotsMenuReal();
+    if (dest === 'personal')   renderTablaEmpleados();
+    if (dest === 'nomina')     cargarGastosReal();
+    if (dest === 'inventario') cargarInventarioReal();
+}
+
+// Inicializar: mostrar dashboard al cargar
+document.addEventListener('DOMContentLoaded', () => {
+    const elFecha = document.getElementById('fecha-actual');
+    if (elFecha) {
+        elFecha.textContent = new Date().toLocaleDateString('es-CO',{weekday:'short',year:'numeric',month:'short',day:'numeric'});
+    }
+    // Mostrar dashboard por defecto
+    TABS.forEach(t => {
+        const el = document.getElementById(`tab-${t}`);
+        if (el && t !== 'dashboard') el.style.display = 'none';
+    });
+    const btnDash = document.getElementById('btn-tab-dashboard');
+    if (btnDash) { btnDash.className = btnDash.className.replace('tab-inactive','').trim() + ' tab-active'; }
+    cargarDashboardReal();
+});
+
+// ═══════════════════════════════════════════════════════
+// MÓDULO DIAN (historial local del día)
+// ═══════════════════════════════════════════════════════
+const FORMATO_COP = v => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(v);
+let facturasDian = [];
+
+function calcularIVADian() {
+    const valor = parseFloat(document.getElementById('dian-valor').value) || 0;
+    if (valor <= 0) { alert('Ingresa un valor total válido.'); return; }
+    const base = valor / 1.08;
+    const iva  = valor - base;
+    document.getElementById('dian-base').textContent  = FORMATO_COP(base);
+    document.getElementById('dian-iva').textContent   = FORMATO_COP(iva);
+    document.getElementById('dian-total').textContent = FORMATO_COP(valor);
+    document.getElementById('dian-resumen').style.display = 'block';
+}
+
+function emitirFacturaDian() {
+    const tipoDoc = document.getElementById('dian-tipo-doc').value;
+    const numDoc  = document.getElementById('dian-num-doc').value.trim();
+    const nombre  = document.getElementById('dian-nombre').value.trim();
+    const email   = document.getElementById('dian-email').value.trim();
+    const valor   = parseFloat(document.getElementById('dian-valor').value) || 0;
+    if (!numDoc || !nombre || !email || valor <= 0) {
+        alert('Por favor completa todos los campos obligatorios (*).');
+        return;
+    }
+    const base  = valor / 1.08;
+    const iva   = valor - base;
+    const ahora = new Date();
+    const hora  = ahora.toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+    const folio = `FE-${ahora.getFullYear()}${String(ahora.getMonth()+1).padStart(2,'0')}${String(ahora.getDate()).padStart(2,'0')}-${String(facturasDian.length+1).padStart(4,'0')}`;
+    facturasDian.push({ folio, nombre, tipoDoc, numDoc, email, base, iva, valor, hora });
+    _renderTablaHistorialDian();
+    const res = document.getElementById('dian-resultado');
+    res.style.display = 'block';
+    res.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <span style="font-size:18px;">✅</span>
+            <span style="font-size:13px;font-weight:700;color:var(--olive);">Factura registrada</span>
+        </div>
+        <p style="font-size:12px;color:var(--text-2);line-height:1.7;">
+            <strong>Folio:</strong> <span class="mono">${folio}</span><br>
+            <strong>Receptor:</strong> ${nombre} · ${tipoDoc} ${numDoc}<br>
+            <strong>Correo:</strong> ${email}<br>
+            <strong>Total:</strong> ${FORMATO_COP(valor)} (IVA incluido: ${FORMATO_COP(iva)})
+        </p>`;
+    ['dian-num-doc','dian-nombre','dian-email','dian-valor'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('dian-resumen').style.display = 'none';
+}
+
+function _renderTablaHistorialDian() {
+    const tbody = document.getElementById('tabla-dian-historial');
+    const badge = document.getElementById('dian-contador-badge');
+    badge.textContent = `${facturasDian.length} factura${facturasDian.length !== 1 ? 's' : ''}`;
+    if (facturasDian.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Aún no se han emitido facturas hoy.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = facturasDian.slice().reverse().map(f => `
+        <tr class="tbody-row">
+            <td>
+                <p style="font-size:13px;font-weight:600;color:var(--text-1);">${f.nombre}</p>
+                <p style="font-size:11px;color:var(--text-3);" class="mono">${f.tipoDoc} ${f.numDoc}</p>
+            </td>
+            <td><span class="mono" style="font-size:11.5px;color:var(--text-2);">${f.folio}</span></td>
+            <td style="text-align:right;font-weight:700;color:var(--text-1);" class="mono">${FORMATO_COP(f.valor)}</td>
+            <td style="text-align:center;color:var(--text-3);font-size:12px;">${f.hora}</td>
+        </tr>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════
+// MÓDULO PERSONAL Y NÓMINA COLOMBIANA 2026
+// ═══════════════════════════════════════════════════════
+const SMMLV_2026           = 1423500;   // Salario Mínimo Mensual Legal Vigente 2026
+const AUX_TRANSPORTE_2026  = 200000;    // Auxilio de transporte 2026
+const TOPE_AUX_TRANSP      = SMMLV_2026 * 2; // Aplica si salario ≤ 2 SMMLV
+
+// Porcentajes ley laboral colombiana
+const PCT_SALUD_EMP      = 0.04;   // 4% salud a cargo del empleado
+const PCT_PENSION_EMP    = 0.04;   // 4% pensión a cargo del empleado
+const PCT_PRIMA          = 0.0833; // 8.33% prima de servicios (empleador provisión)
+const PCT_CESANTIAS      = 0.0833; // 8.33% cesantías (empleador provisión)
+const PCT_INT_CESANTIAS  = 0.01;   // 1% intereses sobre cesantías mensual
+const PCT_VACACIONES     = 0.0417; // 4.17% vacaciones (empleador provisión)
+const PCT_SALUD_EMPL     = 0.085;  // 8.5% salud a cargo del empleador
+const PCT_PENSION_EMPL   = 0.12;   // 12% pensión a cargo del empleador
+const PCT_ARL            = 0.00522;// 0.522% ARL clase I (bajo riesgo)
+const PCT_SENA           = 0.02;   // 2% SENA (parafiscal)
+const PCT_ICBF           = 0.03;   // 3% ICBF (parafiscal)
+const PCT_CCF            = 0.04;   // 4% Caja de Compensación Familiar
+
+// Arreglo local de empleados (puede conectarse a Supabase)
+let listaEmpleados = [];
+let empleadoEditandoId = null;
+
+function calcularNomina(salarioBase, diasTrabajados) {
+    const diasMes = 30;
+    const salarioProporcional = (salarioBase / diasMes) * diasTrabajados;
+
+    // Auxilio de transporte proporcional (solo si salario ≤ 2 SMMLV)
+    const auxTransporte = salarioBase <= TOPE_AUX_TRANSP
+        ? (AUX_TRANSPORTE_2026 / diasMes) * diasTrabajados
+        : 0;
+
+    // Total devengado
+    const totalDevengado = salarioProporcional + auxTransporte;
+
+    // Deducciones empleado
+    const deducSalud   = salarioProporcional * PCT_SALUD_EMP;
+    const deducPension = salarioProporcional * PCT_PENSION_EMP;
+    const totalDeducciones = deducSalud + deducPension;
+
+    // Neto a pagar al empleado
+    const netoPagar = totalDevengado - totalDeducciones;
+
+    // Provisiones empleador (calculadas sobre salario base proporcional)
+    const provPrima         = salarioProporcional * PCT_PRIMA;
+    const provCesantias     = salarioProporcional * PCT_CESANTIAS;
+    const provIntCesantias  = salarioProporcional * PCT_INT_CESANTIAS;
+    const provVacaciones    = salarioProporcional * PCT_VACACIONES;
+    const provSaludEmpl     = salarioProporcional * PCT_SALUD_EMPL;
+    const provPensionEmpl   = salarioProporcional * PCT_PENSION_EMPL;
+    const provARL           = salarioProporcional * PCT_ARL;
+    const provSENA          = salarioProporcional * PCT_SENA;
+    const provICBF          = salarioProporcional * PCT_ICBF;
+    const provCCF           = salarioProporcional * PCT_CCF;
+
+    const totalProvisiones = provPrima + provCesantias + provIntCesantias + provVacaciones
+        + provSaludEmpl + provPensionEmpl + provARL + provSENA + provICBF + provCCF;
+
+    // Costo real del empleado para el restaurante
+    const costoReal = salarioProporcional + auxTransporte + totalProvisiones;
+
+    return {
+        salarioProporcional, auxTransporte, totalDevengado,
+        deducSalud, deducPension, totalDeducciones,
+        netoPagar,
+        provPrima, provCesantias, provIntCesantias, provVacaciones,
+        provSaludEmpl, provPensionEmpl, provARL, provSENA, provICBF, provCCF,
+        totalProvisiones, costoReal
+    };
+}
+
+function renderTablaEmpleados() {
+    const tbody = document.getElementById('tabla-empleados');
+    const badge = document.getElementById('emp-count-badge');
+    const costoBlock  = document.getElementById('emp-costo-total');
+    const costoValor  = document.getElementById('emp-costo-total-valor');
+
+    badge.textContent = `${listaEmpleados.length} empleado${listaEmpleados.length !== 1 ? 's' : ''}`;
+
+    if (listaEmpleados.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-3);font-size:12.5px;">No hay empleados registrados. Añade el primero usando el formulario.</td></tr>';
+        costoBlock.style.display = 'none';
+        return;
+    }
+
+    let costoTotalRestaurante = 0;
+    tbody.innerHTML = listaEmpleados.map((emp, idx) => {
+        const n = calcularNomina(emp.salario, emp.dias);
+        costoTotalRestaurante += n.costoReal;
+        const chipClass = { Mesero:'chip-mesero', Cocinero:'chip-cocinero', Cajero:'chip-cajero', Administrador:'chip-admin' }[emp.cargo] || 'chip-mesero';
+        return `
+        <tr class="tbody-row">
+            <td>
+                <p style="font-size:13px;font-weight:600;color:var(--text-1);">${emp.nombre}</p>
+            </td>
+            <td style="text-align:center;">
+                <span class="chip-cargo ${chipClass}">${emp.cargo}</span>
+            </td>
+            <td style="text-align:right;" class="mono" style="font-size:13px;">${FORMATO_COP(emp.salario)}</td>
+            <td style="text-align:center;font-size:13px;">${emp.dias}/30</td>
+            <td style="text-align:right;font-weight:700;color:var(--olive);" class="mono">${FORMATO_COP(n.netoPagar)}</td>
+            <td style="text-align:center;">
+                <div style="display:flex;justify-content:center;gap:6px;">
+                    <button onclick="abrirModalNomina(${idx})" class="btn-amber" style="padding:5px 12px;font-size:11px;">
+                        🧮 Ver Desglose
+                    </button>
+                    <button onclick="eliminarEmpleado(${idx})" class="btn-danger">✕</button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+
+    costoBlock.style.display = 'flex';
+    costoValor.textContent = FORMATO_COP(costoTotalRestaurante);
+}
+
+function abrirModalNomina(idx) {
+    const emp = listaEmpleados[idx];
+    if (!emp) return;
+    const n = calcularNomina(emp.salario, emp.dias);
+
+    document.getElementById('modal-emp-nombre').textContent = emp.nombre;
+    document.getElementById('modal-emp-cargo').textContent  = `${emp.cargo} · ${emp.dias} días trabajados de 30`;
+
+    // Devengados
+    document.getElementById('modal-devengados').innerHTML = `
+        <div class="nomina-row"><span class="nomina-label">Salario proporcional (${emp.dias}/30 días)</span><span class="nomina-value">${FORMATO_COP(n.salarioProporcional)}</span></div>
+        ${n.auxTransporte > 0 ? `<div class="nomina-row"><span class="nomina-label">Auxilio de Transporte 2026 (proporcional)</span><span class="nomina-value">${FORMATO_COP(n.auxTransporte)}</span></div>` : `<div class="nomina-row"><span class="nomina-label" style="color:var(--text-3);">Auxilio de Transporte</span><span style="font-size:11px;color:var(--text-3);">No aplica (salario > 2 SMMLV)</span></div>`}
+        <div class="nomina-row" style="border-top:1.5px solid var(--border);margin-top:4px;padding-top:10px;"><span style="font-weight:700;color:var(--text-1);">Total Devengado</span><span class="nomina-value" style="font-size:14px;">${FORMATO_COP(n.totalDevengado)}</span></div>`;
+
+    // Deducciones
+    document.getElementById('modal-deducciones').innerHTML = `
+        <div class="nomina-row"><span class="nomina-label">Salud (4% cargo empleado)</span><span class="nomina-value deduccion">- ${FORMATO_COP(n.deducSalud)}</span></div>
+        <div class="nomina-row"><span class="nomina-label">Pensión (4% cargo empleado)</span><span class="nomina-value deduccion">- ${FORMATO_COP(n.deducPension)}</span></div>
+        <div class="nomina-row" style="border-top:1.5px solid var(--border);margin-top:4px;padding-top:10px;"><span style="font-weight:700;color:var(--text-1);">Total Deducciones</span><span class="nomina-value deduccion" style="font-size:14px;">- ${FORMATO_COP(n.totalDeducciones)}</span></div>`;
+
+    // Neto
+    document.getElementById('modal-neto').textContent = FORMATO_COP(n.netoPagar);
+
+    // Provisiones empleador
+    document.getElementById('modal-provisiones').innerHTML = `
+        <div class="nomina-row"><span class="nomina-label">Prima de Servicios (8.33%)</span><span class="nomina-value provision">${FORMATO_COP(n.provPrima)}</span></div>
+        <div class="nomina-row"><span class="nomina-label">Cesantías (8.33%)</span><span class="nomina-value provision">${FORMATO_COP(n.provCesantias)}</span></div>
+        <div class="nomina-row"><span class="nomina-label">Intereses sobre Cesantías (1%)</span><span class="nomina-value provision">${FORMATO_COP(n.provIntCesantias)}</span></div>
+        <div class="nomina-row"><span class="nomina-label">Vacaciones (4.17%)</span><span class="nomina-value provision">${FORMATO_COP(n.provVacaciones)}</span></div>
+        <div class="nomina-row"><span class="nomina-label">Salud empleador (8.5%)</span><span class="nomina-value provision">${FORMATO_COP(n.provSaludEmpl)}</span></div>
+        <div class="nomina-row"><span class="nomina-label">Pensión empleador (12%)</span><span class="nomina-value provision">${FORMATO_COP(n.provPensionEmpl)}</span></div>
+        <div class="nomina-row"><span class="nomina-label">ARL Clase I (0.522%)</span><span class="nomina-value provision">${FORMATO_COP(n.provARL)}</span></div>
+        <div class="nomina-row"><span class="nomina-label">SENA (2%)</span><span class="nomina-value provision">${FORMATO_COP(n.provSENA)}</span></div>
+        <div class="nomina-row"><span class="nomina-label">ICBF (3%)</span><span class="nomina-value provision">${FORMATO_COP(n.provICBF)}</span></div>
+        <div class="nomina-row"><span class="nomina-label">Caja de Compensación Familiar (4%)</span><span class="nomina-value provision">${FORMATO_COP(n.provCCF)}</span></div>
+        <div class="nomina-row" style="border-top:1.5px solid var(--border);margin-top:4px;padding-top:10px;"><span style="font-weight:700;color:var(--text-1);">Total Provisiones Empleador</span><span class="nomina-value provision" style="font-size:14px;">${FORMATO_COP(n.totalProvisiones)}</span></div>`;
+
+    document.getElementById('modal-costo-total').textContent = FORMATO_COP(n.costoReal);
+    document.getElementById('modal-nomina').style.display = 'flex';
+}
+
+function cerrarModalNomina() {
+    document.getElementById('modal-nomina').style.display = 'none';
+}
+
+function eliminarEmpleado(idx) {
+    if (!confirm(`¿Eliminar a "${listaEmpleados[idx].nombre}" del registro?`)) return;
+    listaEmpleados.splice(idx, 1);
+    renderTablaEmpleados();
+}
+
+// Formulario registro empleado
+document.addEventListener('DOMContentLoaded', () => {
+    const formEmp = document.getElementById('form-empleado');
+    if (formEmp) {
+        formEmp.addEventListener('submit', e => {
+            e.preventDefault();
+            const nombre  = document.getElementById('emp-nombre').value.trim();
+            const cargo   = document.getElementById('emp-cargo').value;
+            const salario = parseFloat(document.getElementById('emp-salario').value) || 0;
+            const dias    = parseInt(document.getElementById('emp-dias').value) || 30;
+            if (!nombre || salario <= 0) { alert('Completa nombre y salario.'); return; }
+            listaEmpleados.push({ nombre, cargo, salario, dias });
+            formEmp.reset();
+            document.getElementById('emp-dias').value = '30';
+            renderTablaEmpleados();
+            // Si no estamos en la pestaña personal, cambiar a ella
+            cambiarTab('personal');
+        });
+    }
+});
+</script>
+</body>
+</html>
