@@ -300,26 +300,26 @@
 
         /* ── Tarjeta de comanda (estilo oscuro heredado de app.js) ── */
         .order-card {
-            background: #1f2937;
-            border: 1px solid #374151;
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
             border-radius: 20px; overflow:hidden;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
             display: flex; flex-direction: column;
             transition: all 0.3s;
             animation: cardEntry 0.4s cubic-bezier(.22,.68,0,1.2) both;
             position: relative;
         }
-        .order-card:hover { border-color:#4b5563; transform:translateY(-2px); box-shadow:0 8px 30px rgba(0,0,0,0.2); }
+        .order-card:hover { border-color:#c2d09c; transform:translateY(-2px); box-shadow:0 6px 24px rgba(74,90,40,0.10); }
         .order-card.is-new { animation: cardEntry 0.4s cubic-bezier(.22,.68,0,1.2) both, newOrderPulse 1.2s ease 0.4s 2; }
         .order-card.despachando { opacity:0.4; pointer-events:none; transform:scale(0.97); }
 
         .card-header {
             padding:16px 18px 14px;
-            border-bottom:1px solid #374151;
+            border-bottom:1px solid #f0f0ea;
             display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
         }
-        .order-number { font-family:monospace; font-size:11px; font-weight:700; color:#f97316; letter-spacing:0.08em; }
-        .customer-name { font-size:15px; font-weight:700; color:#f9fafb; margin-top:2px; }
+        .order-number { font-family:monospace; font-size:11px; font-weight:700; color:#4a5a28; letter-spacing:0.08em; }
+        .customer-name { font-size:15px; font-weight:700; color:#111827; margin-top:2px; }
 
         .status-badge {
             display:inline-flex; align-items:center;
@@ -327,43 +327,43 @@
             font-size:10px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
             border:1px solid; white-space:nowrap;
         }
-        .status-badge.pending    { background:rgba(217,119,6,0.15);  border-color:rgba(217,119,6,0.3);  color:#fbbf24; }
-        .status-badge.confirmed  { background:rgba(37,99,235,0.15);  border-color:rgba(37,99,235,0.3);  color:#60a5fa; }
-        .status-badge.in_kitchen { background:rgba(249,115,22,0.15); border-color:rgba(249,115,22,0.3); color:#fb923c; }
+        .status-badge.pending    { background:rgba(217,119,6,0.09);  border-color:rgba(217,119,6,0.28);  color:#b45309; }
+        .status-badge.confirmed  { background:rgba(37,99,235,0.08);  border-color:rgba(37,99,235,0.25);  color:#1d4ed8; }
+        .status-badge.in_kitchen { background:rgba(74,90,40,0.09);   border-color:rgba(74,90,40,0.28);   color:#4a5a28; }
 
         .mesa-tag {
-            font-size:12px; font-weight:700; color:#d1d5db;
-            background:#111827; border:1px solid #374151;
+            font-size:12px; font-weight:700; color:#4a5a28;
+            background:#f0f3e8; border:1px solid #c2d09c;
             padding:5px 12px; border-radius:10px; white-space:nowrap;
         }
 
         .card-body { padding:16px 18px; flex:1; overflow-y:auto; max-height:260px; }
         .items-label {
             font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase;
-            color:#6b7280; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid #374151;
+            color:#9ca3af; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid #f0f0ea;
         }
 
         .order-item {
-            background:#111827; border:1px solid #374151;
+            background:#fafaf8; border:1px solid #e8e8e2;
             border-radius:12px; padding:10px 12px; margin-bottom:8px;
         }
         .order-item:last-child { margin-bottom:0; }
         .item-top { display:flex; align-items:flex-start; gap:10px; }
         .item-qty {
             flex-shrink:0; min-width:32px; height:28px; padding:0 4px;
-            background:rgba(249,115,22,0.2); border:1px solid rgba(249,115,22,0.4);
-            color:#fb923c; font-size:12px; font-weight:800;
+            background:rgba(74,90,40,0.10); border:1px solid rgba(74,90,40,0.28);
+            color:#4a5a28; font-size:12px; font-weight:800;
             border-radius:8px; display:flex; align-items:center; justify-content:center;
         }
-        .item-name { font-size:14px; font-weight:600; color:#e5e7eb; line-height:1.35; }
+        .item-name { font-size:14px; font-weight:600; color:#1f2937; line-height:1.35; }
         .item-nota {
             margin-top:6px; font-size:12px; font-weight:500;
-            background:rgba(217,119,6,0.1); border:1px solid rgba(217,119,6,0.2);
-            color:#fbbf24; padding:5px 10px; border-radius:8px;
+            background:rgba(217,119,6,0.07); border:1px solid rgba(217,119,6,0.20);
+            color:#b45309; padding:5px 10px; border-radius:8px;
         }
 
         .card-footer {
-            padding:14px 18px; border-top:1px solid #374151; display:flex; gap:10px;
+            padding:14px 18px; border-top:1px solid #f0f0ea; display:flex; gap:10px;
         }
         .btn-kitchen {
             flex:1; padding:10px; border-radius:12px; font-size:13px; font-weight:700;
