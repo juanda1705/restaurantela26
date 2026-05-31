@@ -575,10 +575,16 @@
                 box-shadow: 0 -4px 20px rgba(26,31,24,0.08);
                 height: 66px;
                 align-items: stretch;
+                overflow-x: auto;
+                overflow-y: hidden;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
             }
+            #bottom-nav::-webkit-scrollbar { display: none; }
 
             .bnav-item {
-                flex: 1;
+                flex: 0 0 72px;
+                min-width: 72px;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
@@ -1295,12 +1301,20 @@
         <span class="bnav-label">Dashboard</span>
     </button>
     <button class="bnav-item" id="bnav-menu" onclick="cambiarTab('menu')" aria-label="Productos">
-        <span class="bnav-icon">🍳</span>
+        <span class="bnav-icon">🔍</span>
         <span class="bnav-label">Productos</span>
     </button>
     <button class="bnav-item" id="bnav-personal" onclick="cambiarTab('personal')" aria-label="Nómina">
         <span class="bnav-icon">👥</span>
         <span class="bnav-label">Nómina</span>
+    </button>
+    <button class="bnav-item" id="bnav-nomina" onclick="cambiarTab('nomina')" aria-label="Gastos">
+        <span class="bnav-icon">💵</span>
+        <span class="bnav-label">Gastos</span>
+    </button>
+    <button class="bnav-item" id="bnav-inventario" onclick="cambiarTab('inventario')" aria-label="Inventario">
+        <span class="bnav-icon">📦</span>
+        <span class="bnav-label">Inventario</span>
     </button>
     <a class="bnav-item" href="index.html" aria-label="Cocina">
         <span class="bnav-icon">🔥</span>
@@ -1397,7 +1411,7 @@ function cambiarTab(dest) {
     }
 
     // Sincronizar Bottom Navigation Bar (móvil)
-    const bnavMap = { dashboard: 'bnav-dashboard', menu: 'bnav-menu', personal: 'bnav-personal', nomina: 'bnav-personal' };
+    const bnavMap = { dashboard: 'bnav-dashboard', menu: 'bnav-menu', personal: 'bnav-personal', nomina: 'bnav-nomina', inventario: 'bnav-inventario' };
     document.querySelectorAll('.bnav-item').forEach(b => b.classList.remove('bnav-active'));
     const bnavId = bnavMap[dest];
     if (bnavId) {
