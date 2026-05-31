@@ -39,6 +39,12 @@
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
+        html, body {
+            width: 100%;
+            max-width: 100%;
+            overflow-x: hidden;
+        }
+
         body {
             font-family: 'DM Sans', sans-serif;
             background: var(--surface-2);
@@ -438,6 +444,7 @@
             header {
                 padding: 0 14px !important;
                 height: 52px !important;
+                width: 100% !important;
             }
             header h1 {
                 font-size: 13px !important;
@@ -445,44 +452,73 @@
             header p {
                 display: none !important;
             }
-            header .logo-img {
-                width: 34px !important;
-                height: 34px !important;
-            }
 
             /* El botón de cierre de caja: más compacto */
             #btn-cierre-caja {
                 padding: 6px 12px !important;
                 font-size: 11px !important;
+                white-space: nowrap;
             }
 
-            /* El div flex que envuelve aside+main */
+            /* Layout wrapper: columna única, ancho total */
             .layout-wrapper {
                 flex-direction: column;
+                width: 100% !important;
             }
 
-            /* Main ocupa todo el ancho */
+            /* Main ocupa TODO el ancho de la pantalla */
             main {
-                padding: 16px 14px !important;
-                padding-bottom: 90px !important; /* espacio para la bottom nav */
+                flex: 1 1 auto !important;
+                width: 100% !important;
+                min-width: 0 !important;
+                max-width: 100% !important;
+                padding: 14px !important;
+                padding-bottom: 90px !important;
+                overflow-x: hidden !important;
+                box-sizing: border-box !important;
             }
 
-            /* KPI grid: 2 columnas en móvil */
+            /* Todas las secciones usan ancho completo */
+            main section {
+                width: 100% !important;
+                max-width: 100% !important;
+                box-sizing: border-box !important;
+            }
+
+            /* KPI grid: 2 columnas simétricas */
             .kpi-grid {
                 grid-template-columns: 1fr 1fr !important;
                 gap: 10px !important;
+                width: 100% !important;
             }
 
-            /* Tablas en dos columnas: stack en móvil */
+            /* Tablas del dashboard: columna única apilada */
             .tables-grid {
                 grid-template-columns: 1fr !important;
                 gap: 14px !important;
+                width: 100% !important;
             }
 
-            /* Formulario menú: columna única en móvil */
+            /* CRÍTICO: overflow-x en TODOS los contenedores de tabla */
+            .card [style*="overflow-x"],
+            [style*="overflow-x:auto"],
+            div[style*="overflow-x"] {
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch !important;
+            }
+
+            /* Forzar overflow-x en tablas dentro de cards */
+            .card > div,
+            .dian-panel > div {
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch !important;
+            }
+
+            /* Formulario menú: 2 columnas con spans */
             #form-nuevo-plato {
                 grid-template-columns: 1fr 1fr !important;
                 gap: 10px !important;
+                width: 100% !important;
             }
             #form-nuevo-plato > div:nth-child(2) {
                 grid-column: span 2;
@@ -500,16 +536,19 @@
             /* Layout personal: columna única */
             .personal-grid {
                 grid-template-columns: 1fr !important;
+                width: 100% !important;
             }
 
             /* Layout gastos operativos: columna única */
             .gastos-grid {
                 grid-template-columns: 1fr !important;
+                width: 100% !important;
             }
 
             /* Layout DIAN: columna única */
             .dian-grid {
                 grid-template-columns: 1fr !important;
+                width: 100% !important;
             }
 
             /* Layout inventario form: 2 columnas */
@@ -646,7 +685,7 @@
 <!-- ════════════════════════════════════════════════════════
      HEADER
 ════════════════════════════════════════════════════════ -->
-<header style="background:var(--surface);border-bottom:1.5px solid var(--border);padding:0 24px;height:58px;display:flex;justify-content:space-between;align-items:center;">
+<header style="background:var(--surface);border-bottom:1.5px solid var(--border);padding:0 24px;height:58px;display:flex;justify-content:space-between;align-items:center;width:100%;box-sizing:border-box;">
     <div style="display:flex;align-items:center;gap:12px;">
         <div style="background:var(--olive-soft);border-radius:11px;width:40px;height:40px;overflow:hidden;flex-shrink:0;border:1.5px solid var(--olive-bd);box-shadow:0 2px 8px rgba(74,103,65,0.14);display:flex;align-items:center;justify-content:center;">
             <img src="logo.png" alt="Restaurante la 26" style="width:100%;height:100%;object-fit:cover;">
@@ -667,7 +706,7 @@
     </div>
 </header>
 
-<div style="display:flex;" class="layout-wrapper">
+<div style="display:flex;width:100%;overflow-x:hidden;" class="layout-wrapper">
 
 <!-- ════════════════════════════════════════════════════════
      SIDEBAR
@@ -713,7 +752,7 @@
 <!-- ════════════════════════════════════════════════════════
      MAIN CONTENT
 ════════════════════════════════════════════════════════ -->
-<main style="flex:1;padding:28px;overflow-y:auto;min-width:0;">
+<main style="flex:1;padding:28px;overflow-y:auto;min-width:0;box-sizing:border-box;">
 
 <!-- ══════════════════════════════
      TAB: DASHBOARD CONTABLE
