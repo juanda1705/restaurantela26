@@ -664,7 +664,7 @@
 <!-- ════════════════════════════════════════════════════════
      BARRA DE NAVEGACIÓN GLOBAL (Solo Admin)
 ════════════════════════════════════════════════════════ -->
-<nav id="global-nav" style="display:none;">
+<nav id="global-nav" style="display:none;" class="hidden md:flex">
     <div style="display:flex;align-items:center;gap:10px;margin-right:12px;">
         <div style="width:30px;height:30px;border-radius:8px;overflow:hidden;flex-shrink:0;border:1.5px solid var(--olive-bd);box-shadow:0 1px 4px rgba(74,103,65,0.15);background:var(--olive-soft);display:flex;align-items:center;justify-content:center;">
             <img src="logo.png" alt="Restaurante la 26" style="width:100%;height:100%;object-fit:cover;">
@@ -759,7 +759,24 @@
 ══════════════════════════════ -->
 <section id="tab-dashboard" style="display:flex;flex-direction:column;gap:24px;">
 
-    <!-- KPIs -->
+    <!-- Apertura de Caja (se oculta tras registrar) -->
+    <div id="panel-apertura-caja" class="card" style="background:var(--olive-soft);border-color:var(--olive-bd);">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+            <div>
+                <p style="font-size:11px;font-weight:700;color:var(--olive);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">🏦 Apertura de Caja</p>
+                <p style="font-size:12px;color:var(--text-2);">Registra el efectivo base con el que arranca la jornada.</p>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <input id="input-base-caja" type="number" placeholder="Ej: 50000" min="0"
+                    style="width:160px;border-radius:999px;background:#fff;">
+                <button onclick="registrarAperturaCaja()" class="btn-olive" style="white-space:nowrap;">
+                    ✅ Registrar Base
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- KPIs fila 1: ventas, órdenes, gastos, rete-ica -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;" class="kpi-grid">
         <div class="kpi-card">
             <div>
@@ -792,6 +809,39 @@
         </div>
     </div>
 
+    <!-- KPIs fila 2: métodos de pago -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;" class="kpi-grid">
+        <div class="kpi-card" style="border-color:var(--olive-bd);">
+            <div>
+                <p style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;">💵 Efectivo</p>
+                <h3 id="kpi-efectivo" class="mono" style="font-size:20px;font-weight:700;color:var(--olive);margin-top:4px;">$0</h3>
+            </div>
+            <div class="kpi-icon" style="background:var(--olive-lt);">🏦</div>
+        </div>
+        <div class="kpi-card" style="border-color:rgba(37,99,168,.22);">
+            <div>
+                <p style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;">📲 Transferencia</p>
+                <h3 id="kpi-transferencia" class="mono" style="font-size:20px;font-weight:700;color:var(--blue);margin-top:4px;">$0</h3>
+            </div>
+            <div class="kpi-icon" style="background:var(--blue-lt);">📱</div>
+        </div>
+        <div class="kpi-card" style="border-color:rgba(154,108,26,.22);">
+            <div>
+                <p style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;">🤝 Fiado (Pendiente)</p>
+                <h3 id="kpi-fiado" class="mono" style="font-size:20px;font-weight:700;color:var(--amber);margin-top:4px;">$0</h3>
+            </div>
+            <div class="kpi-icon" style="background:var(--amber-lt);">⏳</div>
+        </div>
+        <div class="kpi-card" style="border-color:var(--olive-bd);">
+            <div>
+                <p style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;">Saldo en Caja</p>
+                <h3 id="kpi-saldo-caja" class="mono" style="font-size:20px;font-weight:700;color:var(--olive);margin-top:4px;">$0</h3>
+                <p style="font-size:9.5px;color:var(--text-3);margin-top:2px;">Base + Efectivo + Transf.</p>
+            </div>
+            <div class="kpi-icon" style="background:var(--olive-lt);">💼</div>
+        </div>
+    </div>
+
     <!-- Tablas -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;" class="tables-grid">
         <div class="card" style="padding:0;overflow:hidden;">
@@ -801,7 +851,7 @@
             <div style="overflow-x:auto;">
                 <table style="width:100%;border-collapse:collapse;">
                     <thead><tr class="thead-row">
-                        <th>Código</th><th>Cliente</th><th>Total</th><th style="text-align:center;">Acciones</th>
+                        <th>Código</th><th>Cliente</th><th>Total</th><th style="text-align:center;">Método</th><th style="text-align:center;">Acciones</th>
                     </tr></thead>
                     <tbody id="tabla-facturas">
                         <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Cargando...</td></tr>
