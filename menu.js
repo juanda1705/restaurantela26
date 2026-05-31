@@ -1,18 +1,30 @@
 // ============================================================
 // RESTAURANTE LA 26 — LÓGICA DE CARTA DIGITAL
-// menu.js · Versión 4.0
+// menu.js · Versión 4.1
 // Bucaramanga, Santander — Colombia
 //
-// CAMBIOS v4.0:
-//  - Acceso público: solo valida mesa/modalidad en sessionStorage o URL.
-//    NUNCA pide contraseña ni credenciales al cliente.
-//  - Soporte de modalidad "Para Llevar / Domicilio" con campos dinámicos:
-//    nombre del cliente, "Retiro en Restaurante" vs "Envío a Domicilio"
-//    y dirección de entrega obligatoria si es domicilio.
-//  - Elimina completamente el tipo 'sauce' como producto independiente.
-//  - INSERT en 'orders' incluye: table_id, customer_name, delivery_type,
-//    delivery_address y notes de despacho para la cocina.
+// ACCESO PÚBLICO — SIN LOGIN, SIN CONTRASEÑA
+// ─────────────────────────────────────────────────────────
+//  menu.html + menu.js son 100% públicos para el cliente.
+//  index.html es EXCLUSIVAMENTE la pantalla interna de cocina.
+//  admin.html es EXCLUSIVAMENTE el panel del administrador.
+//
+//  Si no hay mesa_id en URL ni sessionStorage, se muestra
+//  el modal de bienvenida (MesaModal) dentro de menu.html.
+//  NUNCA se redirige a index.html ni se pide contraseña.
 // ============================================================
+
+// ── GUARD DE ACCESO PÚBLICO ──────────────────────────────
+// Elimina cualquier dato de sesión de cocina/admin que pudiera
+// haber quedado de una visita anterior, evitando colisiones.
+// El cliente del menú NUNCA necesita user_role ni auth_token.
+(function limpiarSesionInterna() {
+    // Solo limpiamos las claves de autenticación interna.
+    // Las claves de mesa (mesa_id, mesa_nombre, etc.) se conservan.
+    const clavesInternas = ['user_role', 'auth_token', 'admin_session', 'cocina_session', 'staff_token'];
+    clavesInternas.forEach(function(k) { sessionStorage.removeItem(k); });
+})();
+
 
 // ============================================================
 // CREDENCIALES SUPABASE
@@ -178,12 +190,17 @@ function capturarContexto() {
 const MesaModal = {
 
     mostrar() {
-        // Ocultar loader mientras el cliente elige
-        if (elLoader) elLoader.style.display = 'none';
+        // Ocultar loader y error mientras el cliente elige su mesa
+        if (elLoader) { elLoader.style.display = 'none'; }
+        if (elError)  { elError.style.display  = 'none'; }
+        if (elMenu)   { elMenu.style.display   = 'none'; }
+
         const modal = document.getElementById('mesa-welcome-modal');
         if (modal) {
-            modal.style.display = 'flex';
-            // Focus en el primer campo
+            modal.style.display     = 'flex';
+            modal.style.alignItems  = 'flex-end';
+            modal.style.justifyContent = 'center';
+            // Focus en el primer campo tras la animación de entrada
             setTimeout(() => {
                 const inp = document.getElementById('wm-mesa-numero');
                 if (inp) inp.focus();
