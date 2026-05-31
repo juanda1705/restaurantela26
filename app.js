@@ -1,41 +1,25 @@
 // ============================================================
-// RESTAURANTE LA 26 — app.js · Versión 3.0
+// RESTAURANTE LA 26 — app.js · Versión 3.1
 // Módulo principal: login, cocina, Supabase Realtime
 // Namespace global: window.La26
 // Bucaramanga, Santander — Colombia
 // ============================================================
 
-// ============================================================
-// CREDENCIALES SUPABASE
-// ============================================================
 const SUPABASE_URL      = "https://hxmodeduckuhvvspnkxd.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_ESxhljLgqWkGvrnKhvbeEg_iBqaGciv";
 
-// Crear cliente Supabase una sola vez (evita doble inicialización)
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-// Alias heredado por si menu.js u otros archivos lo usan
 const _supabase = supabaseClient;
 
-// ============================================================
-// SLUG DEL RESTAURANTE
-// ============================================================
 const RESTAURANT_SLUG = "restaurante-la-26";
 let _restaurantId = null;
 
-// ============================================================
-// CREDENCIALES LOCALES DE ACCESO (desarrollo)
-// En producción: reemplazar por Supabase Auth
-// ============================================================
 const LA26_USERS = {
     'admin':   { password: 'admin26',   role: 'admin',   label: 'Administrador', emoji: '👑' },
     'cocina':  { password: 'cocina26',  role: 'cocina',  label: 'Cocina',        emoji: '🍳' },
     'cliente': { password: 'cliente26', role: 'cliente', label: 'Cliente',       emoji: '👤' },
 };
 
-// ============================================================
-// ESTADO GLOBAL DEL MÓDULO
-// ============================================================
 let _currentRole     = null;
 let _currentUser     = null;
 let _allOrders       = [];
@@ -45,14 +29,10 @@ let _timerInterval   = null;
 let _audioCtx        = null;
 
 // ============================================================
-// NAMESPACE PÚBLICO — todo lo que index.html puede llamar
+// NAMESPACE PÚBLICO
 // ============================================================
 window.La26 = {
 
-    // ----------------------------------------------------------
-    // EJECUTAR LOGIN
-    // Llamado desde el submit del form en index.html
-    // ----------------------------------------------------------
     ejecutarLogin() {
         const userInput = (document.getElementById('login-user')?.value || '').trim().toLowerCase();
         const passInput =  document.getElementById('login-pass')?.value || '';
@@ -60,12 +40,10 @@ window.La26 = {
         const btnText   =  document.getElementById('btn-login-text');
         const btnEl     =  document.getElementById('btn-login');
 
-        // Limpiar estado anterior
         _ocultarMsgLogin();
         document.getElementById('login-user')?.classList.remove('field-error');
         document.getElementById('login-pass')?.classList.remove('field-error');
 
-        // Validar campos vacíos
         if (!userInput || !passInput) {
             _mostrarMsgLogin('Completa el usuario y la contraseña.', 'error');
             if (!userInput) document.getElementById('login-user')?.classList.add('field-error');
@@ -74,7 +52,6 @@ window.La26 = {
             return;
         }
 
-        // Validar credenciales
         const userData = LA26_USERS[userInput];
         if (!userData || userData.password !== passInput) {
             _mostrarMsgLogin('Usuario o contraseña incorrectos.', 'error');
@@ -86,71 +63,52 @@ window.La26 = {
             return;
         }
 
-        // Credenciales válidas → bloquear botón y proceder
         if (btnEl) btnEl.disabled = true;
         if (btnText) btnText.textContent = 'Verificando…';
 
         setTimeout(() => {
             _currentRole = userData.role;
             _currentUser = userInput;
-
-            // Persistir sesión
             sessionStorage.setItem('user_role', _currentRole);
             sessionStorage.setItem('user_name', _currentUser);
-
             _iniciarApp();
         }, 600);
     },
 
-    // ----------------------------------------------------------
-    // CERRAR SESIÓN
-    // ----------------------------------------------------------
     cerrarSesion() {
-        // Desconectar canal Realtime
-        if (_realtimeChannel) {
-            supabaseClient.removeChannel(_realtimeChannel);
-            _realtimeChannel = null;
-        }
-        // Detener timers
-        if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+        if (_realtimeChannel) { supabaseClient.removeChannel(_realtimeChannel); _realtimeChannel = null; }
+        if (_timerInterval)   { clearInterval(_timerInterval); _timerInterval = null; }
 
-        // Limpiar sesión
         sessionStorage.removeItem('user_role');
         sessionStorage.removeItem('user_name');
         sessionStorage.removeItem('mesa_id');
         sessionStorage.removeItem('mesa_nombre');
-        _currentRole = null;
-        _currentUser = null;
-        _allOrders   = [];
+        _currentRole = null; _currentUser = null; _allOrders = [];
 
-        // Resetear formulario
         const userEl = document.getElementById('login-user');
         const passEl = document.getElementById('login-pass');
         const btnEl  = document.getElementById('btn-login');
         const btnTxt = document.getElementById('btn-login-text');
         if (userEl) { userEl.value = ''; userEl.classList.remove('field-error'); }
         if (passEl) { passEl.value = ''; passEl.classList.remove('field-error'); passEl.type = 'password'; }
-        if (btnEl) btnEl.disabled = false;
+        if (btnEl)  btnEl.disabled = false;
         if (btnTxt) btnTxt.textContent = 'Ingresar';
         _ocultarMsgLogin();
+
+        // Quitar bottom nav si existe
+        document.getElementById('bottom-nav-cocina')?.remove();
 
         _mostrarLogin();
     },
 
-    // ----------------------------------------------------------
-    // NAVEGACIÓN (solo admin)
-    // ----------------------------------------------------------
     navTo(destino, btn) {
         document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
         if (btn) btn.classList.add('active');
-        if (destino === 'admin')   window.location.href = 'admin.html';
+        if (destino === 'admin')        window.location.href = 'admin.html';
         else if (destino === 'cliente') window.location.href = 'index-cliente.html';
         else _mostrarToast('📍 Vista de Cocina', 'info');
     },
 
-    // ----------------------------------------------------------
-    // CARGAR PEDIDOS DESDE SUPABASE
-    // ----------------------------------------------------------
     async cargarPedidos() {
         const grid = document.getElementById('contenedor-pedidos');
         if (!grid) return;
@@ -190,8 +148,8 @@ window.La26 = {
             _actualizarContadores();
             _renderizarPedidos();
 
-            const ahora = new Date();
-            const timeStr = ahora.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+            const ahora   = new Date();
+            const timeStr = ahora.toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' });
             const el = document.getElementById('last-update-text');
             if (el) el.textContent = `Actualizado a las ${timeStr} · ${_allOrders.length} comanda(s) activa(s)`;
 
@@ -210,9 +168,6 @@ window.La26 = {
         }
     },
 
-    // ----------------------------------------------------------
-    // FILTRO DE COMANDAS
-    // ----------------------------------------------------------
     setFilter(filter, btn) {
         _activeFilter = filter;
         document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
@@ -220,9 +175,6 @@ window.La26 = {
         _renderizarPedidos();
     },
 
-    // ----------------------------------------------------------
-    // CAMBIAR ESTADO DE UN PEDIDO
-    // ----------------------------------------------------------
     async cambiarEstado(pedidoId, nuevoEstado) {
         const { error } = await supabaseClient
             .from('orders')
@@ -233,55 +185,56 @@ window.La26 = {
             console.error('[La 26] Error al cambiar estado:', error);
             _mostrarToast('Error al actualizar el pedido.', 'error');
         }
-        // El canal Realtime recargará automáticamente
     },
 
-    // ----------------------------------------------------------
-    // DESPACHAR (entregar) UN PEDIDO
-    // ----------------------------------------------------------
+    // ── FIX CRÍTICO: despacharPedido ──────────────────────────
+    // v3.0 enviaba delivered_at y delivered_by — columnas que
+    // probablemente no existen en el esquema → error 42703.
+    // Ahora solo actualiza 'status' (columna segura y confirmada).
+    // Si tu tabla SÍ tiene delivered_at, puedes descomentarlo abajo.
     async despacharPedido(pedidoId) {
         const tarjeta = document.getElementById(`pedido-${pedidoId}`);
         if (tarjeta) tarjeta.classList.add('despachando');
 
-        const updateData = {
-            status:       'delivered',
-            delivered_at: new Date().toISOString(),
-            delivered_by: _currentUser || 'cocina',
-        };
-
         const { error } = await supabaseClient
             .from('orders')
-            .update(updateData)
-            .eq('id', pedidoId);
+            .update({ status: 'delivered' })   // ← solo la columna que siempre existe
+            .eq('id', pedidoId);               // ← id es el PK correcto (no order_id)
+
+        // Si tu esquema tiene delivered_at y delivered_by, usa esto en cambio:
+        // .update({
+        //     status:       'delivered',
+        //     delivered_at: new Date().toISOString(),
+        //     delivered_by: _currentUser || 'cocina',
+        // })
 
         if (error) {
             console.error('[La 26] Error al despachar:', error);
-            _mostrarToast('Error al despachar la orden.', 'error');
+            _mostrarToast(`❌ Error al despachar: ${error.message}`, 'error');
             if (tarjeta) tarjeta.classList.remove('despachando');
             return;
         }
 
         _mostrarToast('✅ Pedido despachado correctamente', 'success');
+        // Realtime lo eliminará del grid automáticamente.
+        // Fallback manual si Realtime tarda:
+        setTimeout(() => La26.cargarPedidos(), 800);
     },
 };
 
-// ============================================================
-// FUNCIONES HEREDADAS GLOBALES
-// Mantienen compatibilidad con llamadas directas desde
-// el HTML antiguo (onclick="cambiarEstado(...)")
-// ============================================================
+// Aliases globales para compatibilidad con onclick en HTML
 function cambiarEstado(pedidoId, nuevoEstado) { return La26.cambiarEstado(pedidoId, nuevoEstado); }
 function despacharPedido(pedidoId)            { return La26.despacharPedido(pedidoId); }
 function cargarPedidos()                      { return La26.cargarPedidos(); }
 
 // ============================================================
-// FUNCIONES PRIVADAS (prefijo _)
+// FUNCIONES PRIVADAS
 // ============================================================
 
 function _mostrarLogin() {
-    const scLogin  = document.getElementById('screen-login');
-    const scCocina = document.getElementById('screen-cocina');
-    const navAdmin = document.getElementById('nav-admin');
+    const scLogin   = document.getElementById('screen-login');
+    const scCocina  = document.getElementById('screen-cocina');
+    const navAdmin  = document.getElementById('nav-admin');
     const barCocina = document.getElementById('bar-cocina');
 
     if (scLogin)   scLogin.style.display = 'flex';
@@ -299,8 +252,6 @@ function _iniciarApp() {
     document.body.className = `role-${_currentRole}`;
 
     const userData = LA26_USERS[_currentUser] || {};
-
-    // Actualizar chip de usuario en nav
     const navEmoji    = document.getElementById('nav-emoji');
     const navUsername = document.getElementById('nav-username');
     if (navEmoji)    navEmoji.textContent    = userData.emoji || '';
@@ -309,12 +260,9 @@ function _iniciarApp() {
     if (_currentRole === 'admin') {
         document.getElementById('nav-admin')?.classList.add('visible');
         _mostrarCocina();
-
     } else if (_currentRole === 'cocina') {
         _mostrarCocina();
-
     } else if (_currentRole === 'cliente') {
-        // Redirigir al flujo de cliente
         _mostrarMsgLogin('Bienvenido. Redirigiendo…', 'success');
         if (scLogin) scLogin.style.display = 'flex';
         setTimeout(() => {
@@ -324,26 +272,108 @@ function _iniciarApp() {
 }
 
 function _mostrarCocina() {
-    // Mostrar pantalla y barra
     document.getElementById('screen-cocina')?.classList.add('visible');
     document.getElementById('bar-cocina')?.classList.add('visible');
 
-    // Etiqueta de usuario en la barra
     const barLabel = document.getElementById('bar-user-label');
     const userData = LA26_USERS[_currentUser] || {};
     if (barLabel) barLabel.textContent = `${userData.emoji || ''} ${userData.label || ''}`;
 
-    // Cargar datos y activar Realtime
+    // ── FIX 3: Bottom Navigation para móvil ───────────────
+    _inyectarBottomNav();
+
     La26.cargarPedidos();
     _activarRealtime();
     _iniciarTimers();
 }
 
-// ── Realtime ──────────────────────────────────────
+// ── BOTTOM NAV MÓVIL — solo se inyecta una vez ────────────
+function _inyectarBottomNav() {
+    if (document.getElementById('bottom-nav-cocina')) return; // ya existe
+
+    const esAdmin = sessionStorage.getItem('user_role') === 'admin';
+
+    const nav = document.createElement('nav');
+    nav.id = 'bottom-nav-cocina';
+    Object.assign(nav.style, {
+        display:        'none',         // CSS lo muestra solo en móvil
+        position:       'fixed',
+        bottom:         '0',
+        left:           '0',
+        right:          '0',
+        zIndex:         '9000',
+        background:     '#ffffff',
+        borderTop:      '1.5px solid #e8e8e2',
+        boxShadow:      '0 -4px 20px rgba(26,31,24,0.08)',
+        height:         '66px',
+        alignItems:     'stretch',
+        paddingBottom:  'env(safe-area-inset-bottom, 0px)',
+    });
+
+    // Siempre se muestra en pantallas ≤768 px
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `
+        @media (max-width: 768px) {
+            #bottom-nav-cocina { display: flex !important; }
+            #screen-cocina .cocina-main { padding-bottom: 80px !important; }
+        }
+        .bnav-cocina-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            padding: 8px 4px;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            color: #78786e;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 10px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: color .18s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .bnav-cocina-item:active { opacity: .7; }
+        .bnav-cocina-icon { font-size: 20px; line-height: 1; }
+        .bnav-cocina-label { font-size: 9.5px; font-weight: 600; letter-spacing: .2px; white-space: nowrap; }
+    `;
+    document.head.appendChild(styleEl);
+
+    // Botón: Actualizar comandas
+    nav.innerHTML = `
+        <button class="bnav-cocina-item" onclick="La26.cargarPedidos()" aria-label="Actualizar">
+            <span class="bnav-cocina-icon">🔄</span>
+            <span class="bnav-cocina-label">Actualizar</span>
+        </button>
+        <button class="bnav-cocina-item" onclick="La26.setFilter('all', null)" aria-label="Todos">
+            <span class="bnav-cocina-icon">🍽️</span>
+            <span class="bnav-cocina-label">Todos</span>
+        </button>
+        <button class="bnav-cocina-item" onclick="La26.setFilter('pending', null)" aria-label="Pendientes">
+            <span class="bnav-cocina-icon">⏳</span>
+            <span class="bnav-cocina-label">Pendientes</span>
+        </button>
+        <button class="bnav-cocina-item" onclick="La26.cerrarSesion()" aria-label="Salir">
+            <span class="bnav-cocina-icon">🚪</span>
+            <span class="bnav-cocina-label">Salir</span>
+        </button>
+        ${esAdmin ? `
+        <a class="bnav-cocina-item" href="admin.html" aria-label="Panel Admin"
+           style="color:#4a6741;">
+            <span class="bnav-cocina-icon">📊</span>
+            <span class="bnav-cocina-label" style="color:#4a6741;font-weight:700;">Admin</span>
+        </a>` : ''}
+    `;
+
+    document.body.appendChild(nav);
+}
+
+// ── Realtime ──────────────────────────────────────────────
 function _activarRealtime() {
-    if (_realtimeChannel) {
-        supabaseClient.removeChannel(_realtimeChannel);
-    }
+    if (_realtimeChannel) supabaseClient.removeChannel(_realtimeChannel);
 
     let debounceTimer = null;
     const recargar = (ms = 400) => {
@@ -353,98 +383,69 @@ function _activarRealtime() {
 
     _realtimeChannel = supabaseClient
         .channel('la26-cocina-v3')
-        .on('postgres_changes',
-            { event: 'INSERT', schema: 'public', table: 'orders' },
+        .on('postgres_changes', { event:'INSERT', schema:'public', table:'orders' },
             (payload) => {
                 console.info('[La 26] 📦 Nuevo pedido:', payload.new?.order_number || payload.new?.id);
                 _dispararAlerta(payload.new);
                 recargar(300);
             })
-        .on('postgres_changes',
-            { event: 'UPDATE', schema: 'public', table: 'orders' },
-            () => {
-                console.info('[La 26] 🔄 Pedido actualizado');
-                recargar(300);
-            })
-        .on('postgres_changes',
-            { event: 'INSERT', schema: 'public', table: 'order_items' },
-            () => {
-                console.info('[La 26] 🍽️ Nuevo ítem registrado');
-                recargar(600);  // mayor delay por ser tabla hija
-            })
+        .on('postgres_changes', { event:'UPDATE', schema:'public', table:'orders' },
+            () => { console.info('[La 26] 🔄 Pedido actualizado'); recargar(300); })
+        .on('postgres_changes', { event:'INSERT', schema:'public', table:'order_items' },
+            () => { console.info('[La 26] 🍽️ Nuevo ítem'); recargar(600); })
         .subscribe((status) => {
-            console.info('[La 26] Estado canal Realtime:', status);
+            console.info('[La 26] Canal RT:', status);
             const dot = document.getElementById('dot-live');
             if (dot) dot.style.background = status === 'SUBSCRIBED' ? '#4ade80' : '#f87171';
         });
 }
 
-// ── Alertas visuales y sonoras ────────────────────
 function _dispararAlerta(pedido) {
     const mesa = pedido?.table_id || pedido?.tables?.label || 'nueva mesa';
-
-    // Toast
     _mostrarToast(`🛎️ Nuevo pedido — ${mesa}`, 'new');
 
-    // Banner flash
-    const banner = document.getElementById('new-order-banner');
+    const banner    = document.getElementById('new-order-banner');
     const bannerTxt = document.getElementById('banner-text');
     if (banner && bannerTxt) {
         bannerTxt.textContent = `¡Nuevo pedido recibido! — ${mesa}`;
         banner.classList.add('visible');
         setTimeout(() => banner.classList.remove('visible'), 3500);
     }
-
-    // Sonido (Web Audio API, sin archivos externos)
     _reproducirSonido();
 }
 
 function _reproducirSonido() {
     try {
         if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const ctx  = _audioCtx;
-        const now  = ctx.currentTime;
-        const notas = [523.25, 659.25, 783.99]; // Do-Mi-Sol
-
-        notas.forEach((freq, i) => {
-            const osc  = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain);
-            gain.connect(ctx.destination);
+        const ctx = _audioCtx, now = ctx.currentTime;
+        [523.25, 659.25, 783.99].forEach((freq, i) => {
+            const osc = ctx.createOscillator(), gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
             osc.type = 'sine';
             osc.frequency.setValueAtTime(freq, now + i * 0.13);
-            gain.gain.setValueAtTime(0,    now + i * 0.13);
+            gain.gain.setValueAtTime(0, now + i * 0.13);
             gain.gain.linearRampToValueAtTime(0.18, now + i * 0.13 + 0.03);
             gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.13 + 0.38);
             osc.start(now + i * 0.13);
             osc.stop(now  + i * 0.13 + 0.45);
         });
-    } catch (e) {
-        console.warn('[La 26] Audio no disponible:', e);
-    }
+    } catch(e) { console.warn('[La 26] Audio no disponible:', e); }
 }
 
 function _mostrarToast(mensaje, tipo = 'info') {
     const container = document.getElementById('toast-container');
     if (!container) return;
-
     const toast = document.createElement('div');
     toast.className = 'toast';
     if (tipo === 'new')     toast.style.borderLeftColor = '#4ade80';
     if (tipo === 'error')   toast.style.borderLeftColor = '#ef4444';
     if (tipo === 'success') toast.style.borderLeftColor = '#22c55e';
-
     const iconos = { new:'🛎️', info:'ℹ️', success:'✅', warning:'⚠️', error:'❌' };
     toast.innerHTML = `<span>${iconos[tipo]||'ℹ️'}</span><span>${_esc(mensaje)}</span>`;
     container.appendChild(toast);
-
-    setTimeout(() => {
-        toast.classList.add('out');
-        setTimeout(() => toast.remove(), 350);
-    }, 4000);
+    setTimeout(() => { toast.classList.add('out'); setTimeout(() => toast.remove(), 350); }, 4000);
 }
 
-// ── Renderizado de comandas ───────────────────────
 function _renderizarPedidos(nuevoId = null) {
     const grid = document.getElementById('contenedor-pedidos');
     if (!grid) return;
@@ -455,10 +456,10 @@ function _renderizarPedidos(nuevoId = null) {
 
     if (filtradas.length === 0) {
         const msgs = {
-            all:        { icon:'🍽️', title:'Cocina despejada',        sub:'No hay comandas activas en este momento.' },
-            pending:    { icon:'⏳', title:'Sin pendientes',           sub:'Todos los pedidos han sido tomados.' },
-            in_kitchen: { icon:'🔥', title:'Nada en preparación',     sub:'No hay órdenes siendo preparadas ahora.' },
-            confirmed:  { icon:'✅', title:'Sin confirmados',          sub:'Los pedidos confirmados aparecerán aquí.' },
+            all:        { icon:'🍽️', title:'Cocina despejada',     sub:'No hay comandas activas.' },
+            pending:    { icon:'⏳', title:'Sin pendientes',        sub:'Todos los pedidos han sido tomados.' },
+            in_kitchen: { icon:'🔥', title:'Nada en preparación',  sub:'No hay órdenes siendo preparadas.' },
+            confirmed:  { icon:'✅', title:'Sin confirmados',       sub:'Los pedidos confirmados aparecerán aquí.' },
         };
         const m = msgs[_activeFilter] || msgs.all;
         grid.innerHTML = `
@@ -470,11 +471,9 @@ function _renderizarPedidos(nuevoId = null) {
         return;
     }
 
-    // Ordenar: pending → in_kitchen → confirmed
     const ORDEN = { pending:0, in_kitchen:1, confirmed:2 };
     const ordenadas = [...filtradas].sort((a, b) => {
-        const oa = ORDEN[a.status] ?? 9;
-        const ob = ORDEN[b.status] ?? 9;
+        const oa = ORDEN[a.status] ?? 9, ob = ORDEN[b.status] ?? 9;
         return oa !== ob ? oa - ob : new Date(a.created_at) - new Date(b.created_at);
     });
 
@@ -483,19 +482,16 @@ function _renderizarPedidos(nuevoId = null) {
 }
 
 function _crearCardHTML(order, esNuevo = false) {
-    // Resolver identificador de mesa
     const identificadorMesa = order.tables?.label
         || (order.tables?.number ? `Mesa ${order.tables.number}` : 'Mesa Rápida');
 
-    // Config de estado
     const estadoMap = {
         pending:    { label:'Pendiente',      cls:'pending'    },
         confirmed:  { label:'Confirmado',     cls:'confirmed'  },
         in_kitchen: { label:'En preparación', cls:'in_kitchen' },
     };
-    const cfg = estadoMap[order.status] || { label: order.status, cls: 'pending' };
+    const cfg = estadoMap[order.status] || { label: order.status, cls:'pending' };
 
-    // Ítems
     const items = order.order_items || [];
     let itemsHTML = items.length === 0
         ? '<p style="font-size:13px;color:#6b7280;font-style:italic;padding:4px 0;">Sin detalle registrado.</p>'
@@ -505,7 +501,6 @@ function _crearCardHTML(order, esNuevo = false) {
             const notaCliente = item.menu_items?.name
                 ? (item.notes?.startsWith('[nombre]') ? _parsearNotes(item.notes).notaCliente : item.notes)
                 : parsed.notaCliente;
-
             return `
             <div class="order-item">
                 <div class="item-top">
@@ -516,7 +511,6 @@ function _crearCardHTML(order, esNuevo = false) {
             </div>`;
           }).join('');
 
-    // Botones según estado
     let botonesHTML = '';
     if (order.status === 'pending' || order.status === 'confirmed') {
         botonesHTML = `
@@ -543,7 +537,6 @@ function _crearCardHTML(order, esNuevo = false) {
          class="order-card${esNuevo ? ' is-new' : ''}"
          data-status="${order.status}"
          data-created="${order.created_at || ''}">
-
         <div class="card-header">
             <div>
                 <div class="order-number">${_esc(order.order_number || '—')}</div>
@@ -557,19 +550,16 @@ function _crearCardHTML(order, esNuevo = false) {
                       style="font-size:12px;font-weight:500;color:#9ca3af;">—</span>
             </div>
         </div>
-
         <div class="card-body">
             <div class="items-label">Comanda</div>
             ${itemsHTML}
         </div>
-
         <div class="card-footer">
             ${botonesHTML}
         </div>
     </div>`;
 }
 
-// ── Timers de tiempo transcurrido ─────────────────
 function _iniciarTimers() {
     if (_timerInterval) clearInterval(_timerInterval);
     _actualizarTimers();
@@ -582,14 +572,13 @@ function _actualizarTimers() {
         const raw = el.getAttribute('data-created');
         if (!raw) { el.textContent = '—'; return; }
         const mins = Math.floor((ahora - new Date(raw).getTime()) / 60000);
-        if (mins < 1)  { el.textContent = 'Ahora mismo';        el.style.color = '#4ade80'; }
-        else if (mins < 10) { el.textContent = `Hace ${mins} min`; el.style.color = '#9ca3af'; }
-        else if (mins < 20) { el.textContent = `⚠ ${mins} min`;   el.style.color = '#fbbf24'; }
-        else                { el.textContent = `🔴 ${mins} min`;   el.style.color = '#f87171'; }
+        if (mins < 1)       { el.textContent = 'Ahora mismo';         el.style.color = '#4ade80'; }
+        else if (mins < 10) { el.textContent = `Hace ${mins} min`;    el.style.color = '#9ca3af'; }
+        else if (mins < 20) { el.textContent = `⚠ ${mins} min`;      el.style.color = '#fbbf24'; }
+        else                { el.textContent = `🔴 ${mins} min`;      el.style.color = '#f87171'; }
     });
 }
 
-// ── Contadores en la barra ────────────────────────
 function _actualizarContadores() {
     const counts = _allOrders.reduce((acc, o) => {
         acc[o.status] = (acc[o.status] || 0) + 1;
@@ -601,7 +590,6 @@ function _actualizarContadores() {
     set('count-delivered', counts.delivered);
 }
 
-// ── UI helpers ────────────────────────────────────
 function _mostrarMsgLogin(texto, tipo) {
     const el = document.getElementById('login-msg');
     if (!el) return;
@@ -618,7 +606,6 @@ function _shake(el) {
     setTimeout(() => el.classList.remove('shake'), 450);
 }
 
-// ── Parseo de notas de ítems (herencia app.js v2) ─
 function _parsearNotes(notes) {
     if (!notes) return { nombrePlato: null, notaCliente: null };
     if (notes.startsWith('[nombre]')) {
@@ -627,10 +614,8 @@ function _parsearNotes(notes) {
     }
     return { nombrePlato: null, notaCliente: notes };
 }
-// Alias público heredado
 function parsearNotes(notes) { return _parsearNotes(notes); }
 
-// ── Escape HTML ───────────────────────────────────
 function _esc(str) {
     if (typeof str !== 'string') return String(str ?? '');
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
@@ -638,18 +623,13 @@ function _esc(str) {
 }
 
 // ============================================================
-// FUNCIONES HEREDADAS GLOBALES (compatibilidad con menu.js,
-// landing de bienvenida, etc.)
+// FUNCIONES HEREDADAS GLOBALES
 // ============================================================
-
 async function resolverRestaurantId() {
     if (_restaurantId) return _restaurantId;
     try {
         const { data: rest } = await supabaseClient
-            .from('restaurants')
-            .select('id')
-            .eq('slug', RESTAURANT_SLUG)
-            .maybeSingle();
+            .from('restaurants').select('id').eq('slug', RESTAURANT_SLUG).maybeSingle();
         if (rest?.id) { _restaurantId = rest.id; return _restaurantId; }
 
         const { data: any } = await supabaseClient
@@ -658,22 +638,21 @@ async function resolverRestaurantId() {
 
         const { data: nuevo } = await supabaseClient
             .from('restaurants')
-            .insert([{ name: 'Restaurante la 26', slug: RESTAURANT_SLUG }])
+            .insert([{ name:'Restaurante la 26', slug:RESTAURANT_SLUG }])
             .select('id').single();
         if (nuevo?.id) { _restaurantId = nuevo.id; return _restaurantId; }
-
-    } catch (err) { console.error('[La 26] resolverRestaurantId:', err); }
+    } catch(err) { console.error('[La 26] resolverRestaurantId:', err); }
     return null;
 }
 
-window.abrirMenu = function (mesa, nombre) {
+window.abrirMenu = function(mesa, nombre) {
     if (!mesa) return;
     sessionStorage.setItem('mesa_id',     mesa);
     sessionStorage.setItem('mesa_nombre', nombre || 'Comensal');
-    window.location.href = `menu.html?mesa=${encodeURIComponent(mesa)}&nombre=${encodeURIComponent(nombre || 'Comensal')}`;
+    window.location.href = `menu.html?mesa=${encodeURIComponent(mesa)}&nombre=${encodeURIComponent(nombre||'Comensal')}`;
 };
 
-window.simularPedido = async function () {
+window.simularPedido = async function() {
     sessionStorage.setItem('mesa_id',     'QR-Demo');
     sessionStorage.setItem('mesa_nombre', 'Demo');
     window.location.href = 'menu.html?mesa=QR-Demo&nombre=Demo&modo=simulacion';
@@ -688,17 +667,12 @@ function leerParamsURL() {
     };
 }
 
-// ── Simulador de pedido demo ──────────────────────
 const btnSimular = document.getElementById('btn-simular');
-if (btnSimular) {
-    btnSimular.addEventListener('click', ejecutarSimulador);
-}
+if (btnSimular) btnSimular.addEventListener('click', ejecutarSimulador);
 
 async function ejecutarSimulador() {
     if (!btnSimular) return;
-    btnSimular.disabled    = true;
-    btnSimular.textContent = '⏳ Generando comanda...';
-
+    btnSimular.disabled = true; btnSimular.textContent = '⏳ Generando comanda...';
     try {
         const restaurantId = await resolverRestaurantId();
         if (!restaurantId) { alert('No se pudo resolver el ID del restaurante.'); return; }
@@ -753,7 +727,7 @@ async function ejecutarSimulador() {
 
         setTimeout(() => La26.cargarPedidos(), 600);
 
-    } catch (err) {
+    } catch(err) {
         console.error('[La 26] Error en simulador:', err);
         alert('Error al simular: ' + err.message);
     } finally {
@@ -762,24 +736,18 @@ async function ejecutarSimulador() {
 }
 
 // ============================================================
-// INICIALIZACIÓN AL CARGAR EL DOM
+// INICIALIZACIÓN
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
-
-    // Verificar si hay sesión activa en sessionStorage
     const savedRole = sessionStorage.getItem('user_role');
     const savedUser = sessionStorage.getItem('user_name');
-
-    const sesionValida = savedRole && savedUser
-        && LA26_USERS[savedUser]?.role === savedRole;
+    const sesionValida = savedRole && savedUser && LA26_USERS[savedUser]?.role === savedRole;
 
     if (sesionValida) {
-        // Restaurar sesión sin pasar por login
         _currentRole = savedRole;
         _currentUser = savedUser;
         _iniciarApp();
     } else {
-        // Mostrar login
         _mostrarLogin();
     }
 });
