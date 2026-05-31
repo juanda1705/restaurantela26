@@ -905,6 +905,46 @@ const Order = {
             }
         }
 
+        // ── GUARD: orders.table_id es NOT NULL — nunca puede ser null ────────────
+        // Si el cliente llegó por Para Llevar / Domicilio y tableId no se resolvió
+        // durante la carga inicial (falla silenciosa del INSERT automático por
+        // qr_code faltante), lo buscamos aquí antes de continuar.
+        if (!tableId) {
+            const { data: mesaVirtual } = await supabaseClient
+                .from('tables')
+                .select('id')
+                .eq('restaurant_id', restaurantId)
+                .ilike('label', '%para llevar%')
+                .maybeSingle();
+
+            if (mesaVirtual?.id) {
+                tableId = mesaVirtual.id;
+                console.log('[La 26] ✅ tableId resuelto en submit desde mesa virtual existente');
+            } else {
+                // Crear la mesa virtual como último recurso con todos los campos requeridos
+                const { data: mesaNueva } = await supabaseClient
+                    .from('tables')
+                    .upsert([{
+                        restaurant_id: restaurantId,
+                        number:        0,
+                        label:         'Para Llevar / Domicilio',
+                        qr_code:       `VIRTUAL-TAKEAWAY-${restaurantId}`,
+                        capacity:      99,
+                        status:        'available',
+                    }], { onConflict: 'restaurant_id,number' })
+                    .select('id')
+                    .single();
+
+                tableId = mesaNueva?.id || null;
+
+                if (!tableId) {
+                    Toast.error('No se pudo identificar la mesa. Por favor recarga la página e intenta de nuevo.');
+                    return;
+                }
+                console.log('[La 26] ✅ Mesa virtual "Para Llevar" creada automáticamente en submit.');
+            }
+        }
+
         isSubmitting = true;
         const btnSubmit = elOrderForm.querySelector('button[type="submit"]');
         if (btnSubmit) {
@@ -930,10 +970,9 @@ const Order = {
             const itemsResueltos = await resolverMenuItemIds();
 
             // ── Paso 2: insertar la orden maestra en 'orders' ────
-            // Payload base — columnas que siempre existen en la tabla
             const ordenPayload = {
                 restaurant_id: restaurantId,
-                table_id:      tableId      || null,
+                table_id:      tableId,        // ← siempre tiene valor aquí gracias al guard
                 order_number:  numeroOrden,
                 status:        'pending',
                 customer_name: nombreFinal,
@@ -1292,12 +1331,14 @@ async function cargarMenu() {
                 // Crearla automáticamente la primera vez
                 const { data: mesaNueva } = await supabaseClient
                     .from('tables')
-                    .insert([{
+                    .upsert([{
                         restaurant_id: restaurantId,
                         number:        0,
                         label:         'Para Llevar / Domicilio',
-                        is_active:     true,
-                    }])
+                        qr_code:       `VIRTUAL-TAKEAWAY-${restaurantId}`,
+                        capacity:      99,
+                        status:        'available',
+                    }], { onConflict: 'restaurant_id,number' })
                     .select('id')
                     .single();
                 tableId = mesaNueva?.id || null;
