@@ -1162,131 +1162,137 @@
 <!-- ══════════════════════════════
      TAB: FACTURACIÓN DIAN
 ══════════════════════════════ -->
-<section id="tab-dian" style="display:none;flex-direction:column;gap:20px;">
-    <div style="display:grid;grid-template-columns:2fr 3fr;gap:20px;" class="dian-grid">
+<section id="tab-dian" style="display:none;flex-direction:column;gap:16px;">
 
-        <div class="dian-panel">
-            <div class="dian-header">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                    <div style="width:8px;height:8px;border-radius:50%;background:var(--olive);flex-shrink:0;"></div>
-                    <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">Factura Electrónica DIAN</h3>
-                </div>
-                <p style="font-size:11.5px;color:var(--text-3);">Emitir cuando el cliente solicite documento equivalente</p>
+    <!-- ── Formulario de emisión ── -->
+    <div class="dian-panel">
+        <div class="dian-header">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                <div style="width:8px;height:8px;border-radius:50%;background:var(--olive);flex-shrink:0;"></div>
+                <h3 style="font-size:15px;font-weight:700;color:var(--text-1);">Factura Electrónica DIAN</h3>
             </div>
-            <div style="padding:20px;display:flex;flex-direction:column;gap:16px;">
+            <p style="font-size:12px;color:var(--text-3);">Emitir cuando el cliente solicite documento equivalente</p>
+        </div>
+        <div style="padding:18px;display:flex;flex-direction:column;gap:14px;">
+
+            <!-- Fila 1: tipo doc + número (2 columnas en móvil) -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                 <div>
-                    <label>Tipo de Documento *</label>
+                    <label>Tipo de Doc. *</label>
                     <select id="dian-tipo-doc">
-                        <option value="CC">Cédula de Ciudadanía (CC)</option>
-                        <option value="NIT">NIT — Persona Jurídica</option>
-                        <option value="CE">Cédula de Extranjería (CE)</option>
+                        <option value="CC">CC — Cédula</option>
+                        <option value="NIT">NIT — Empresa</option>
+                        <option value="CE">CE — Extranjería</option>
                         <option value="PAS">Pasaporte</option>
                     </select>
                 </div>
                 <div>
-                    <label>Número de Identificación *</label>
-                    <input type="text" id="dian-num-doc" placeholder="Ej: 13 457 890  /  900.123.456-1">
+                    <label>Nro. Identificación *</label>
+                    <input type="text" id="dian-num-doc" placeholder="13 457 890">
                 </div>
+            </div>
+
+            <!-- Nombre -->
+            <div>
+                <label>Nombre o Razón Social *</label>
+                <input type="text" id="dian-nombre" placeholder="Juan Pérez  /  Empresa S.A.S.">
+            </div>
+
+            <!-- Fila 2: correo + valor (2 columnas en móvil) -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                 <div>
-                    <label>Nombre o Razón Social *</label>
-                    <input type="text" id="dian-nombre" placeholder="Ej: Juan Pérez  /  Empresa S.A.S.">
-                </div>
-                <div>
-                    <label>Correo Electrónico *</label>
+                    <label>Correo *</label>
                     <input type="email" id="dian-email" placeholder="cliente@correo.com">
                 </div>
                 <div>
-                    <label>Valor Total Recaudado ($ COP) *</label>
-                    <input type="number" id="dian-valor" placeholder="Ej: 28000">
-                </div>
-
-                <div id="dian-resumen" style="display:none;background:var(--surface-2);border:1.5px solid var(--border);border-radius:14px;padding:14px;">
-                    <p style="font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px;">Liquidación IVA Consumo</p>
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                        <span style="font-size:12.5px;color:var(--text-2);">Base gravable (sin IVA 8%)</span>
-                        <span class="mono" style="font-size:12.5px;font-weight:600;color:var(--text-1);" id="dian-base">—</span>
-                    </div>
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                        <span style="font-size:12.5px;color:var(--text-2);">IVA al consumo (8%)</span>
-                        <span class="mono" style="font-size:12.5px;font-weight:600;color:var(--olive);" id="dian-iva">—</span>
-                    </div>
-                    <div style="border-top:1.5px solid var(--border);padding-top:8px;display:flex;justify-content:space-between;align-items:center;">
-                        <span style="font-size:13px;font-weight:700;color:var(--text-1);">Total con IVA</span>
-                        <span class="mono" style="font-size:13px;font-weight:700;color:var(--text-1);" id="dian-total">—</span>
-                    </div>
-                </div>
-
-                <div style="display:flex;gap:10px;">
-                    <button type="button" onclick="calcularIVADian()" class="btn-ghost" style="flex:1;">🧮 Calcular IVA</button>
-                    <button type="button" onclick="emitirFacturaDian()" class="btn-olive" style="flex:1;">📤 Emitir Factura</button>
-                </div>
-
-                <div id="dian-resultado" style="display:none;background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px;"></div>
-            </div>
-        </div>
-
-        <div style="display:flex;flex-direction:column;gap:16px;">
-            <div class="card" style="background:var(--olive-lt);border-color:var(--olive-bd);">
-                <div style="display:flex;gap:12px;align-items:flex-start;">
-                    <span style="font-size:20px;margin-top:2px;">🏛️</span>
-                    <div>
-                        <h4 style="font-size:13px;font-weight:700;color:var(--olive);margin-bottom:4px;">Marco Legal — Facturación Electrónica</h4>
-                        <p style="font-size:12px;color:var(--text-2);line-height:1.6;">
-                            Según la <strong>Resolución DIAN 000042 de 2020</strong>, los restaurantes deben emitir
-                            factura electrónica cuando el cliente la solicite. El IVA al consumo aplicable
-                            es del <strong>8%</strong> (Art. 512-1 E.T.). La tarifa de Rete-ICA para
-                            Bucaramanga en expendio de comidas es <strong>6.9 × 1000</strong>.
-                        </p>
-                    </div>
+                    <label>Valor Total ($ COP) *</label>
+                    <input type="number" id="dian-valor" placeholder="28000"
+                           oninput="calcularIVADian()" style="font-weight:600;">
                 </div>
             </div>
 
-            <div class="card" style="padding:0;overflow:hidden;">
-                <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-                    <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📋 Facturas Emitidas Hoy</h3>
-                    <span id="dian-contador-badge"
-                        style="background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;">
-                        0 facturas
-                    </span>
+            <!-- Resumen IVA — se muestra al tipear el valor -->
+            <div id="dian-resumen" style="display:none;background:var(--surface-2);border:1.5px solid var(--border);border-radius:14px;padding:14px;">
+                <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px;">Liquidación IVA Consumo</p>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">
+                    <span style="font-size:12px;color:var(--text-2);">Base gravable (sin IVA 8%)</span>
+                    <span class="mono" style="font-size:12px;font-weight:600;color:var(--text-1);" id="dian-base">—</span>
                 </div>
-                <div style="overflow-x:auto;">
-                    <table style="width:100%;border-collapse:collapse;">
-                        <thead><tr class="thead-row">
-                            <th>Cliente / Razón Social</th>
-                            <th>Doc.</th>
-                            <th style="text-align:right;">Total c/IVA</th>
-                            <th style="text-align:center;">Hora</th>
-                        </tr></thead>
-                        <tbody id="tabla-dian-historial">
-                            <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Aún no se han emitido facturas hoy.</td></tr>
-                        </tbody>
-                    </table>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">
+                    <span style="font-size:12px;color:var(--text-2);">IVA al consumo (8%)</span>
+                    <span class="mono" style="font-size:12px;font-weight:600;color:var(--olive);" id="dian-iva">—</span>
+                </div>
+                <div style="border-top:1.5px solid var(--border);padding-top:8px;display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-size:13px;font-weight:700;color:var(--text-1);">Total con IVA</span>
+                    <span class="mono" style="font-size:14px;font-weight:700;color:var(--olive);" id="dian-total">—</span>
                 </div>
             </div>
 
-            <div class="card">
-                <h4 style="font-size:13px;font-weight:700;color:var(--text-1);margin-bottom:12px;">📌 Cómo usar este panel</h4>
-                <ol style="list-style:none;display:flex;flex-direction:column;gap:10px;">
-                    <li style="display:flex;gap:10px;align-items:flex-start;">
-                        <span style="background:var(--olive);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px;">1</span>
-                        <p style="font-size:12.5px;color:var(--text-2);line-height:1.5;">El cliente solicita la factura electrónica al pagar su almuerzo.</p>
-                    </li>
-                    <li style="display:flex;gap:10px;align-items:flex-start;">
-                        <span style="background:var(--olive);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px;">2</span>
-                        <p style="font-size:12.5px;color:var(--text-2);line-height:1.5;">Diligencia el tipo de documento, identificación, nombre y correo.</p>
-                    </li>
-                    <li style="display:flex;gap:10px;align-items:flex-start;">
-                        <span style="background:var(--olive);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px;">3</span>
-                        <p style="font-size:12.5px;color:var(--text-2);line-height:1.5;">Ingresa el valor total cobrado al cliente y presiona <strong>Calcular IVA</strong>.</p>
-                    </li>
-                    <li style="display:flex;gap:10px;align-items:flex-start;">
-                        <span style="background:var(--olive);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px;">4</span>
-                        <p style="font-size:12.5px;color:var(--text-2);line-height:1.5;">Presiona <strong>Emitir Factura</strong> para registrar y enviar por correo.</p>
-                    </li>
-                </ol>
-            </div>
+            <!-- Botón único: Emitir (el cálculo ocurre automático al tipear) -->
+            <button type="button" onclick="emitirFacturaDian()" class="btn-olive"
+                style="width:100%;height:46px;font-size:14px;letter-spacing:.3px;">
+                📤 Emitir Factura Electrónica
+            </button>
+
+            <div id="dian-resultado" style="display:none;background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px;"></div>
         </div>
     </div>
+
+    <!-- ── Historial del día ── -->
+    <div class="card" style="padding:0;overflow:hidden;">
+        <div style="padding:16px 18px 12px;border-bottom:1.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+            <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📋 Facturas Emitidas Hoy</h3>
+            <span id="dian-contador-badge"
+                style="background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;">
+                0 facturas
+            </span>
+        </div>
+        <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:340px;">
+                <thead><tr class="thead-row">
+                    <th>Cliente / Razón Social</th>
+                    <th>Doc.</th>
+                    <th style="text-align:right;">Total c/IVA</th>
+                    <th style="text-align:center;">Hora</th>
+                </tr></thead>
+                <tbody id="tabla-dian-historial">
+                    <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Aún no se han emitido facturas hoy.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ── Marco legal (colapsable en móvil) ── -->
+    <details class="card" style="padding:0;overflow:hidden;cursor:pointer;">
+        <summary style="padding:16px 18px;display:flex;align-items:center;gap:10px;list-style:none;-webkit-appearance:none;">
+            <span style="font-size:16px;">🏛️</span>
+            <span style="font-size:13px;font-weight:700;color:var(--olive);flex:1;">Marco Legal — Facturación Electrónica</span>
+            <span style="font-size:11px;color:var(--text-3);font-weight:500;">ver más ▾</span>
+        </summary>
+        <div style="padding:0 18px 16px;border-top:1.5px solid var(--border);">
+            <p style="font-size:12px;color:var(--text-2);line-height:1.7;margin-top:12px;">
+                Según la <strong>Resolución DIAN 000042 de 2020</strong>, los restaurantes deben emitir
+                factura electrónica cuando el cliente la solicite. El IVA al consumo aplicable
+                es del <strong>8%</strong> (Art. 512-1 E.T.). La tarifa de Rete-ICA para
+                Bucaramanga en expendio de comidas es <strong>6.9 × 1000</strong>.
+            </p>
+            <ol style="list-style:none;display:flex;flex-direction:column;gap:10px;margin-top:14px;">
+                <li style="display:flex;gap:10px;align-items:flex-start;">
+                    <span style="background:var(--olive);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px;">1</span>
+                    <p style="font-size:12px;color:var(--text-2);line-height:1.5;">El cliente solicita la factura al pagar.</p>
+                </li>
+                <li style="display:flex;gap:10px;align-items:flex-start;">
+                    <span style="background:var(--olive);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px;">2</span>
+                    <p style="font-size:12px;color:var(--text-2);line-height:1.5;">Diligencia tipo de doc., identificación, nombre, correo y valor.</p>
+                </li>
+                <li style="display:flex;gap:10px;align-items:flex-start;">
+                    <span style="background:var(--olive);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px;">3</span>
+                    <p style="font-size:12px;color:var(--text-2);line-height:1.5;">El IVA se calcula automáticamente. Presiona <strong>Emitir Factura</strong>.</p>
+                </li>
+            </ol>
+        </div>
+    </details>
+
 </section>
 
 </main>
@@ -1453,14 +1459,16 @@ const FORMATO_COP = v => new Intl.NumberFormat('es-CO',{style:'currency',currenc
 let facturasDian = [];
 
 function calcularIVADian() {
+    // Se llama en tiempo real al tipear el valor — no muestra alerta si está vacío
     const valor = parseFloat(document.getElementById('dian-valor').value) || 0;
-    if (valor <= 0) { alert('Ingresa un valor total válido.'); return; }
+    const resumen = document.getElementById('dian-resumen');
+    if (valor <= 0) { resumen.style.display = 'none'; return; }
     const base = valor / 1.08;
     const iva  = valor - base;
     document.getElementById('dian-base').textContent  = FORMATO_COP(base);
     document.getElementById('dian-iva').textContent   = FORMATO_COP(iva);
     document.getElementById('dian-total').textContent = FORMATO_COP(valor);
-    document.getElementById('dian-resumen').style.display = 'block';
+    resumen.style.display = 'block';
 }
 
 function emitirFacturaDian() {
