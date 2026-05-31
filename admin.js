@@ -27,6 +27,58 @@ const TASA_IMPOCONSUMO = 0.08;    // 8% impoconsumo restaurantes
 let globalIngresos = 0;
 let globalEgresos  = 0;
 
+// Totales por método de pago (calculados al cargar el dashboard)
+let totalEfectivo     = 0;
+let totalTransferencia = 0;
+let totalFiado        = 0;
+let baseInicial       = 0; // apertura de caja
+
+// ============================================================
+// TOAST NOTIFICATIONS — reemplaza alert() nativos
+// ============================================================
+const Toast = (function() {
+    let _c = null;
+    function _init() {
+        if (_c) return;
+        _c = document.createElement('div');
+        Object.assign(_c.style, {
+            position:'fixed', top:'20px', left:'50%', transform:'translateX(-50%)',
+            zIndex:'9999', display:'flex', flexDirection:'column', gap:'8px',
+            alignItems:'center', pointerEvents:'none',
+            width:'max-content', maxWidth:'calc(100vw - 32px)',
+        });
+        document.body.appendChild(_c);
+    }
+    function show(msg, tipo, ms = 3800) {
+        _init();
+        const pal = {
+            ok:    { bg:'#f5f7f0', bd:'rgba(74,103,65,.35)',  tx:'#2e4028', dot:'#4a6741' },
+            error: { bg:'#fdf5f3', bd:'rgba(192,80,60,.30)',  tx:'#6b2a1e', dot:'#c0503c' },
+            info:  { bg:'#f5f7f0', bd:'rgba(74,103,65,.25)',  tx:'#3a4a38', dot:'#4a6741' },
+        };
+        const c = pal[tipo] || pal.info;
+        const t = document.createElement('div');
+        Object.assign(t.style, {
+            display:'flex', alignItems:'center', gap:'9px',
+            background:c.bg, border:`1.5px solid ${c.bd}`, borderRadius:'999px',
+            padding:'10px 20px 10px 14px', boxShadow:'0 4px 20px rgba(0,0,0,.10)',
+            fontSize:'13.5px', fontFamily:"'DM Sans',sans-serif", fontWeight:'500',
+            color:c.tx, pointerEvents:'auto',
+            opacity:'0', transform:'translateY(-8px)',
+            transition:'opacity .28s ease, transform .28s ease',
+        });
+        const dot = document.createElement('span');
+        Object.assign(dot.style, { width:'7px', height:'7px', borderRadius:'50%', background:c.dot, flexShrink:'0', display:'block' });
+        const txt = document.createElement('span');
+        txt.textContent = msg;
+        t.appendChild(dot); t.appendChild(txt); _c.appendChild(t);
+        requestAnimationFrame(() => requestAnimationFrame(() => { t.style.opacity='1'; t.style.transform='translateY(0)'; }));
+        const timer = setTimeout(() => { t.style.opacity='0'; t.style.transform='translateY(-8px)'; setTimeout(() => t.remove(), 300); }, ms);
+        t.onclick = () => { clearTimeout(timer); t.remove(); };
+    }
+    return { ok:(m,ms)=>show(m,'ok',ms), error:(m,ms)=>show(m,'error',ms), info:(m,ms)=>show(m,'info',ms) };
+})();
+
 // ============================================================
 // FORMATO MONEDA COP
 // ============================================================
@@ -69,7 +121,7 @@ async function cargarDashboardReal() {
     try {
         const { data: orders, error } = await supabaseClient
             .from('orders')
-            .select(`id, order_number, customer_name, total_amount, status,
+            .select(`id, order_number, customer_name, total_amount, status, payment_method,
                      order_items ( quantity, notes, unit_price )`);
 
         if (error) throw error;
@@ -82,15 +134,33 @@ async function cargarDashboardReal() {
             (acc, o) => acc + (parseFloat(o.total_amount) || 0), 0
         );
 
+        // Totales por método de pago
+        totalEfectivo      = 0;
+        totalTransferencia = 0;
+        totalFiado         = 0;
+        ordenesValidas.forEach(o => {
+            const monto = parseFloat(o.total_amount) || 0;
+            if (o.payment_method === 'efectivo')      totalEfectivo      += monto;
+            else if (o.payment_method === 'transferencia') totalTransferencia += monto;
+            else if (o.payment_method === 'fiado')    totalFiado         += monto;
+        });
+
         const baseICA      = Math.max(0, globalIngresos - globalEgresos);
         const provisionICA = baseICA * TASA_RETE_ICA;
 
-        const elGrosVentas   = document.getElementById('gros-ventas');
-        const elTotalPedidos = document.getElementById('total-pedidos');
-        const elValReteICA   = document.getElementById('val-reteica');
-        if (elGrosVentas)   elGrosVentas.textContent   = formatCOP(globalIngresos);
-        if (elTotalPedidos) elTotalPedidos.textContent = `${ordenesValidas.length} pedidos`;
-        if (elValReteICA)   elValReteICA.textContent   = formatCOP(provisionICA);
+        document.getElementById('gros-ventas')   ?.textContent && (document.getElementById('gros-ventas').textContent   = formatCOP(globalIngresos));
+        document.getElementById('total-pedidos') ?.textContent && (document.getElementById('total-pedidos').textContent = `${ordenesValidas.length} pedidos`);
+        document.getElementById('val-reteica')   ?.textContent && (document.getElementById('val-reteica').textContent   = formatCOP(provisionICA));
+
+        // Actualizar panel de métodos de pago
+        const elEf = document.getElementById('kpi-efectivo');
+        const elTr = document.getElementById('kpi-transferencia');
+        const elFi = document.getElementById('kpi-fiado');
+        const elSaldo = document.getElementById('kpi-saldo-caja');
+        if (elEf)    elEf.textContent    = formatCOP(totalEfectivo);
+        if (elTr)    elTr.textContent    = formatCOP(totalTransferencia);
+        if (elFi)    elFi.textContent    = formatCOP(totalFiado);
+        if (elSaldo) elSaldo.textContent = formatCOP(baseInicial + totalEfectivo + totalTransferencia);
 
         // Historial de facturación
         const tbodyFacturas = document.getElementById('tabla-facturas');
@@ -99,12 +169,28 @@ async function cargarDashboardReal() {
             if (ordenesValidas.length === 0) {
                 tbodyFacturas.innerHTML = `
                     <tr>
-                        <td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                        <td colspan="5" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
                             Sin comandas registradas hoy.
                         </td>
                     </tr>`;
             } else {
                 ordenesValidas.forEach(ord => {
+                    const metodo = ord.payment_method || '';
+                    const badgeMetodo = metodo
+                        ? `<span style="font-size:10px;font-weight:600;padding:2px 9px;border-radius:999px;
+                            background:${metodo==='efectivo'?'var(--olive-lt)':metodo==='transferencia'?'var(--blue-lt)':'var(--amber-lt)'};
+                            color:${metodo==='efectivo'?'var(--olive)':metodo==='transferencia'?'var(--blue)':'var(--amber)'};
+                            border:1.5px solid ${metodo==='efectivo'?'var(--olive-bd)':metodo==='transferencia'?'rgba(37,99,168,.28)':'rgba(154,108,26,.28)'};">
+                            ${metodo==='efectivo'?'💵 Efectivo':metodo==='transferencia'?'📲 Transferencia':'🤝 Fiado'}
+                           </span>`
+                        : `<select onchange="registrarMetodoPago('${ord.id}', this.value)"
+                               style="font-size:10.5px;padding:3px 10px;border-radius:999px;height:28px;width:auto;cursor:pointer;background:var(--amber-lt);border-color:rgba(154,108,26,.28);color:var(--amber);">
+                               <option value="">💳 Registrar pago…</option>
+                               <option value="efectivo">💵 Efectivo</option>
+                               <option value="transferencia">📲 Transferencia</option>
+                               <option value="fiado">🤝 Fiado</option>
+                           </select>`;
+
                     tbodyFacturas.insertAdjacentHTML('beforeend', `
                         <tr class="tbody-row">
                             <td>
@@ -114,6 +200,7 @@ async function cargarDashboardReal() {
                             <td>
                                 <span class="mono" style="font-size:13px;font-weight:700;color:var(--olive);">${formatCOP(ord.total_amount)}</span>
                             </td>
+                            <td style="text-align:center;">${badgeMetodo}</td>
                             <td style="text-align:center;">
                                 <div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;">
                                     <button onclick="exportarReciboPDF('${ord.id}')"
@@ -201,17 +288,52 @@ async function eliminarComandaReal(idComanda, nroOrden) {
         await supabaseClient.from('order_items').delete().eq('order_id', idComanda);
         const { error } = await supabaseClient.from('orders').delete().eq('id', idComanda);
         if (error) throw error;
-        alert(`✅ Orden ${nroOrden} eliminada.`);
+        Toast.ok(`Orden ${nroOrden} eliminada correctamente.`);
         cargarDashboardReal();
     } catch (err) {
         console.error('Error eliminando comanda:', err);
-        alert('Error al eliminar el registro.');
+        Toast.error('Error al eliminar el registro.');
     }
 }
 
 // ============================================================
-// EXPORTAR TIRILLA PDF (jsPDF)
+// REGISTRAR MÉTODO DE PAGO EN UNA ORDEN
 // ============================================================
+async function registrarMetodoPago(orderId, metodo) {
+    if (!metodo) return;
+    try {
+        const { error } = await supabaseClient
+            .from('orders')
+            .update({ payment_method: metodo, status: 'completed' })
+            .eq('id', orderId);
+        if (error) throw error;
+        const label = { efectivo: 'Efectivo 💵', transferencia: 'Transferencia 📲', fiado: 'Fiado 🤝' };
+        Toast.ok(`Pago registrado: ${label[metodo] || metodo}`);
+        cargarDashboardReal();
+    } catch (err) {
+        console.error('Error registrando método de pago:', err);
+        Toast.error('No se pudo registrar el método de pago.');
+    }
+}
+
+// ============================================================
+// APERTURA DE CAJA — base inicial en efectivo
+// ============================================================
+function registrarAperturaCaja() {
+    const inp = document.getElementById('input-base-caja');
+    const val = parseFloat(inp?.value?.replace(/[^0-9.]/g,'')) || 0;
+    if (val <= 0) { Toast.error('Ingresa un monto válido para la base de caja.'); return; }
+    baseInicial = val;
+    sessionStorage.setItem('base_caja_hoy', String(val));
+    Toast.ok(`Base de caja registrada: ${formatCOP(val)}`);
+    document.getElementById('kpi-saldo-caja')?.textContent && (
+        document.getElementById('kpi-saldo-caja').textContent = formatCOP(baseInicial + totalEfectivo + totalTransferencia)
+    );
+    const panel = document.getElementById('panel-apertura-caja');
+    if (panel) panel.style.display = 'none';
+}
+
+
 async function exportarReciboPDF(orderId) {
     try {
         const { data: ord, error } = await supabaseClient
@@ -276,7 +398,7 @@ async function exportarReciboPDF(orderId) {
 
     } catch (err) {
         console.error('Error generando PDF:', err);
-        alert('Error al generar la tirilla PDF.');
+        Toast.error('Error al generar la tirilla PDF.');
     }
 }
 
@@ -337,7 +459,7 @@ async function generarFacturaElectronica() {
     const email  = document.getElementById('fe-email')?.value.trim()  || '';
 
     if (!nombre || !nit || !email) {
-        alert('Completa todos los campos del receptor antes de continuar.');
+        Toast.error('Completa todos los campos del receptor antes de continuar.');
         return;
     }
 
@@ -549,11 +671,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const portions_today = parseInt(document.getElementById('menu-porciones').value) || null;
 
             if (item_type === 'sauce') {
-                alert('⚠️ El tipo "sauce" no está disponible como tipo independiente.');
+                Toast.error('El tipo "sauce" no está disponible como tipo independiente.');
                 return;
             }
             if (!product_code) {
-                alert('⚠️ El código de producto es obligatorio.');
+                Toast.error('El código de producto es obligatorio.');
                 return;
             }
 
@@ -627,7 +749,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (errItem) {
                     if (errItem.code === '23505') {
-                        alert(`⚠️ Ya existe "${name}" en el catálogo o el código #${product_code} está duplicado.`);
+                        Toast.error(`Ya existe "${name}" en el catálogo o el código #${product_code} está duplicado.`);
                         return;
                     }
                     throw errItem;
@@ -637,12 +759,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('menu-nombre').value   = '';
                 document.getElementById('menu-precio').value   = '';
                 document.getElementById('menu-porciones').value = '';
-                alert(`✅ "${name}" (Código #${product_code}) registrado en el catálogo.`);
+                Toast.ok(`"${name}" (Código #${product_code}) registrado en el catálogo.`);
                 cargarSlotsMenuReal();
 
             } catch (err) {
                 console.error('Error al guardar plato:', err);
-                alert(`Error al guardar: ${err.message}`);
+                Toast.error(`Error al guardar: ${err.message}`);
             }
         });
     }
@@ -660,7 +782,7 @@ async function eliminarComponenteCatalogo(idItem, nombreItem) {
         cargarSlotsMenuReal();
     } catch (err) {
         console.error('Error eliminando plato:', err);
-        alert('No se pudo eliminar. Revisa la consola.');
+        Toast.error('No se pudo eliminar. Revisa la consola.');
     }
 }
 
@@ -719,7 +841,7 @@ async function actualizarPorcionesHoy(idPlato, valor) {
     } catch (err) {
         console.error('Error actualizando porciones:', err.message || err);
         if (porciones === 0) _actualizarSwitchDOM(idPlato, true);
-        alert(`Error al guardar porciones: ${err.message || 'revisa la consola'}`);
+        Toast.error(`Error al guardar porciones: ${err.message || 'revisa la consola'}`);
     }
 }
 
@@ -738,7 +860,7 @@ async function alternarVisibilidadPlatoReal(idPlato, estadoActual) {
     } catch (err) {
         console.error('Error cambiando disponibilidad:', err);
         _actualizarSwitchDOM(idPlato, estadoActual);
-        alert('No se pudo guardar el cambio de disponibilidad.');
+        Toast.error('No se pudo guardar el cambio de disponibilidad.');
     }
 }
 
@@ -818,7 +940,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 cargarGastosReal();
             } catch (err) {
                 console.error('Error insertando gasto:', err);
-                alert('Error al registrar el movimiento contable.');
+                Toast.error('Error al registrar el movimiento contable.');
             }
         });
     }
@@ -907,6 +1029,14 @@ async function ajustarExistenciasFisicas(idInsumo, stockActual, delta) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Restaurar base de caja persistida en la jornada
+    const basePersistida = parseFloat(sessionStorage.getItem('base_caja_hoy') || '0');
+    if (basePersistida > 0) {
+        baseInicial = basePersistida;
+        const panel = document.getElementById('panel-apertura-caja');
+        if (panel) panel.style.display = 'none';
+    }
+
     const formNuevoInsumo = document.getElementById('form-nuevo-insumo');
     if (formNuevoInsumo) {
         formNuevoInsumo.addEventListener('submit', async (e) => {
@@ -921,17 +1051,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     .insert([{ item_name, category, current_stock, unit_of_measure, updated_at: new Date().toISOString() }]);
                 if (error) {
                     if (error.code === '23505') {
-                        alert('⚠️ Ya existe un insumo con ese nombre.');
+                        Toast.error('Ya existe un insumo con ese nombre.');
                         return;
                     }
                     throw error;
                 }
                 formNuevoInsumo.reset();
-                alert(`✅ Insumo "${item_name}" registrado.`);
+                Toast.ok(`Insumo "${item_name}" registrado correctamente.`);
                 cargarInventarioReal();
             } catch (err) {
                 console.error('Error insertando insumo:', err);
-                alert('No se pudo agregar el insumo.');
+                Toast.error('No se pudo agregar el insumo.');
             }
         });
     }
@@ -945,11 +1075,11 @@ async function eliminarInsumoReal(idInsumo, nombreInsumo) {
             .delete()
             .eq('id', idInsumo);
         if (error) throw error;
-        alert(`✅ "${nombreInsumo}" eliminado del kárdex.`);
+        Toast.ok(`"${nombreInsumo}" eliminado del kárdex.`);
         cargarInventarioReal();
     } catch (err) {
         console.error('Error eliminando insumo:', err);
-        alert('Error al eliminar el insumo.');
+        Toast.error('Error al eliminar el insumo.');
     }
 }
 
@@ -978,7 +1108,7 @@ Restaurante la 26 · Bucaramanga, Santander
 ¿Cerrar y validar el flujo de caja de este ciclo?`;
 
     if (confirm(msg)) {
-        alert('🔒 Ciclo contable cerrado. Reporte archivado.');
+        Toast.ok('Ciclo contable cerrado. Reporte archivado.');
     }
 }
 
