@@ -19,10 +19,109 @@
 // haber quedado de una visita anterior, evitando colisiones.
 // El cliente del menú NUNCA necesita user_role ni auth_token.
 (function limpiarSesionInterna() {
-    // Solo limpiamos las claves de autenticación interna.
-    // Las claves de mesa (mesa_id, mesa_nombre, etc.) se conservan.
     const clavesInternas = ['user_role', 'auth_token', 'admin_session', 'cocina_session', 'staff_token'];
     clavesInternas.forEach(function(k) { sessionStorage.removeItem(k); });
+})();
+
+// ============================================================
+// TOAST NOTIFICATIONS — reemplaza todos los alert() nativos
+// Estética "La 26": crema, Verde Oliva para éxito, arcilla para error
+// ============================================================
+const Toast = (function() {
+    let container = null;
+
+    function _ensureContainer() {
+        if (container) return;
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        Object.assign(container.style, {
+            position:      'fixed',
+            top:           '20px',
+            left:          '50%',
+            transform:     'translateX(-50%)',
+            zIndex:        '9999',
+            display:       'flex',
+            flexDirection: 'column',
+            gap:           '8px',
+            alignItems:    'center',
+            pointerEvents: 'none',
+            width:         'max-content',
+            maxWidth:      'calc(100vw - 32px)',
+        });
+        document.body.appendChild(container);
+    }
+
+    function show(msg, tipo = 'info', duracion = 3800) {
+        _ensureContainer();
+
+        const colores = {
+            ok:    { bg: '#f5f7f0', border: 'rgba(74,103,65,0.35)', text: '#2e4028', dot: '#4a6741' },
+            error: { bg: '#fdf5f3', border: 'rgba(192,80,60,0.30)', text: '#6b2a1e', dot: '#c0503c' },
+            info:  { bg: '#f5f7f0', border: 'rgba(74,103,65,0.25)', text: '#3a4a38', dot: '#4a6741' },
+        };
+        const c = colores[tipo] || colores.info;
+
+        const toast = document.createElement('div');
+        Object.assign(toast.style, {
+            display:       'flex',
+            alignItems:    'center',
+            gap:           '9px',
+            background:    c.bg,
+            border:        `1.5px solid ${c.border}`,
+            borderRadius:  '999px',
+            padding:       '10px 20px 10px 14px',
+            boxShadow:     '0 4px 20px rgba(0,0,0,0.10)',
+            fontSize:      '13.5px',
+            fontFamily:    "'DM Sans', sans-serif",
+            fontWeight:    '500',
+            color:         c.text,
+            pointerEvents: 'auto',
+            opacity:       '0',
+            transform:     'translateY(-8px)',
+            transition:    'opacity .28s ease, transform .28s ease',
+            whiteSpace:    'pre-wrap',
+            maxWidth:      'calc(100vw - 32px)',
+        });
+
+        const dot = document.createElement('span');
+        Object.assign(dot.style, {
+            width: '7px', height: '7px',
+            borderRadius: '50%',
+            background: c.dot,
+            flexShrink: '0',
+            display: 'block',
+        });
+
+        const txt = document.createElement('span');
+        txt.textContent = msg;
+
+        toast.appendChild(dot);
+        toast.appendChild(txt);
+        container.appendChild(toast);
+
+        // Entrada
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                toast.style.opacity   = '1';
+                toast.style.transform = 'translateY(0)';
+            });
+        });
+
+        // Salida
+        const timer = setTimeout(() => {
+            toast.style.opacity   = '0';
+            toast.style.transform = 'translateY(-8px)';
+            setTimeout(() => toast.remove(), 300);
+        }, duracion);
+
+        toast.onclick = () => { clearTimeout(timer); toast.remove(); };
+    }
+
+    return {
+        ok:    (msg, ms) => show(msg, 'ok',    ms),
+        error: (msg, ms) => show(msg, 'error', ms),
+        info:  (msg, ms) => show(msg, 'info',  ms),
+    };
 })();
 
 
@@ -581,7 +680,7 @@ const Cart = {
         const existente = cart.find(c => c.slotId === slotId);
         if (existente) {
             if (slot.porciones > 0 && existente.cantidad >= slot.porciones) {
-                alert(`Solo quedan ${slot.porciones} porciones de "${slot.nombre}".`);
+                Toast.error(`Solo quedan ${slot.porciones} porciones de "${slot.nombre}".`);
                 return;
             }
             existente.cantidad++;
@@ -603,7 +702,7 @@ const Cart = {
         const nueva = cart[idx].cantidad + delta;
 
         if (delta > 0 && slot.porciones > 0 && nueva > slot.porciones) {
-            alert(`Solo quedan ${slot.porciones} porciones de "${slot.nombre}".`);
+            Toast.error(`Solo quedan ${slot.porciones} porciones de "${slot.nombre}".`);
             return;
         }
 
@@ -783,7 +882,7 @@ const Order = {
 
         if (!nombreFinal) {
             if (elCustomerName) elCustomerName.focus();
-            alert('Por favor ingresa tu nombre para que podamos avisarte cuando tu pedido esté listo.');
+            Toast.error('Por favor ingresa tu nombre para que podamos avisarte cuando tu pedido esté listo.');
             return;
         }
 
@@ -800,7 +899,7 @@ const Order = {
                 direccionEntrega = elDeliveryAddress ? elDeliveryAddress.value.trim() : '';
                 if (!direccionEntrega) {
                     if (elDeliveryAddress) elDeliveryAddress.focus();
-                    alert('Por favor ingresa la dirección de entrega para el domicilio.');
+                    Toast.error('Por favor ingresa la dirección de entrega para el domicilio.');
                     return;
                 }
             }
@@ -831,19 +930,24 @@ const Order = {
             const itemsResueltos = await resolverMenuItemIds();
 
             // ── Paso 2: insertar la orden maestra en 'orders' ────
+            // Payload base — columnas que siempre existen en la tabla
             const ordenPayload = {
-                restaurant_id:    restaurantId,
-                table_id:         tableId,
-                order_number:     numeroOrden,
-                status:           'pending',
-                customer_name:    nombreFinal,
-                total_amount:     totalMonto,
-                daily_menu_id:    dailyMenuId || null,
-                // Campos de modalidad/despacho
-                delivery_type:    tipoDespacho,       // 'mesa' | 'retiro' | 'domicilio'
-                delivery_address: direccionEntrega || null,
-                notes:            notasCocina || null,
+                restaurant_id: restaurantId,
+                table_id:      tableId      || null,
+                order_number:  numeroOrden,
+                status:        'pending',
+                customer_name: nombreFinal,
+                total_amount:  totalMonto,
+                daily_menu_id: dailyMenuId  || null,
+                notes:         notasCocina  || null,
             };
+
+            // Columnas de modalidad/despacho — añadir solo si existen en el esquema
+            // (evita error 42703 si la migración no se ejecutó aún)
+            if (tipoDespacho !== 'mesa') {
+                ordenPayload.delivery_type    = tipoDespacho;
+                ordenPayload.delivery_address = direccionEntrega || null;
+            }
 
             const { data: orden, error: errorOrden } = await supabaseClient
                 .from('orders')
@@ -879,7 +983,9 @@ const Order = {
 
         } catch (err) {
             console.error('[La 26] Error al insertar pedido:', err);
-            alert('No se pudo enviar el pedido. Por favor llama a un mesero o intenta de nuevo.');
+            // Mostrar detalle del error de Supabase si está disponible
+            const detalle = err?.message || err?.details || '';
+            Toast.error('No se pudo enviar el pedido. Por favor llama a un mesero o intenta de nuevo.' + (detalle ? `\n(${detalle})` : ''), 5000);
         } finally {
             isSubmitting = false;
             if (btnSubmit) {
