@@ -1268,20 +1268,50 @@ async function cargarMenu() {
     }
 
     if (!mesa) {
-        console.warn('[La 26] Mesa no encontrada en BD — operando sin table_id');
-        tableId     = null;
+        // ── Para Llevar / Domicilio: buscar o crear mesa genérica ──
+        // Supabase requiere table_id NOT NULL. Usamos una fila especial
+        // con label='Para Llevar' que representa todos los pedidos externos.
+        if (modalidad === 'para_llevar' || modalidad === 'domicilio' ||
+            mesaParam === 'domicilio' || mesaParam === 'para_llevar') {
 
-        // Etiqueta amigable según modalidad
-        if (modalidad === 'para_llevar' || modalidad === 'domicilio') {
-            tableNumber = 'Para Llevar / Domicilio';
-        } else if (mesaParam === 'domicilio') {
-            tableNumber = 'Domicilio';
-        } else if (mesaParam === 'barra') {
-            tableNumber = 'Barra';
-        } else if (mesaParam === 'terraza') {
-            tableNumber = 'Terraza';
+            tableNumber = modalidad === 'domicilio' || mesaParam === 'domicilio'
+                ? 'Domicilio'
+                : 'Para Llevar';
+
+            // Buscar la mesa genérica de para llevar
+            const { data: mesaGenerica } = await supabaseClient
+                .from('tables')
+                .select('id')
+                .eq('restaurant_id', restaurantId)
+                .ilike('label', '%para llevar%')
+                .maybeSingle();
+
+            if (mesaGenerica?.id) {
+                tableId = mesaGenerica.id;
+            } else {
+                // Crearla automáticamente la primera vez
+                const { data: mesaNueva } = await supabaseClient
+                    .from('tables')
+                    .insert([{
+                        restaurant_id: restaurantId,
+                        number:        0,
+                        label:         'Para Llevar / Domicilio',
+                        is_active:     true,
+                    }])
+                    .select('id')
+                    .single();
+                tableId = mesaNueva?.id || null;
+                if (tableId) console.log('[La 26] ✅ Mesa genérica "Para Llevar" creada automáticamente.');
+            }
+
         } else {
-            tableNumber = `Mesa ${mesaParam}`;
+            // Mesa física no encontrada — operar sin table_id si el esquema lo permite
+            console.warn('[La 26] Mesa no encontrada en BD — operando sin table_id');
+            tableId = null;
+
+            if (mesaParam === 'barra')   tableNumber = 'Barra';
+            else if (mesaParam === 'terraza') tableNumber = 'Terraza';
+            else                         tableNumber = `Mesa ${mesaParam}`;
         }
     } else {
         tableId     = mesa.id;
