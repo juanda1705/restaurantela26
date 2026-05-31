@@ -357,6 +357,61 @@
         }
         .gnav-sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
 
+        /* ── Modal de confirmación / alerta custom ── */
+        #confirm-overlay {
+            position: fixed; inset: 0;
+            background: rgba(26,31,24,.5);
+            backdrop-filter: blur(6px);
+            z-index: 99999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        #confirm-overlay.visible { display: flex; }
+        #confirm-box {
+            background: var(--surface);
+            border: 1.5px solid var(--border);
+            border-radius: 24px;
+            padding: 28px 26px 22px;
+            max-width: 360px;
+            width: 100%;
+            box-shadow: 0 24px 64px rgba(0,0,0,.18);
+            animation: confirmIn .22s cubic-bezier(.34,1.56,.64,1) both;
+        }
+        @keyframes confirmIn {
+            from { opacity:0; transform: scale(.88) translateY(12px); }
+            to   { opacity:1; transform: scale(1)  translateY(0); }
+        }
+        #confirm-icon  { font-size: 32px; margin-bottom: 14px; display: block; }
+        #confirm-title {
+            font-size: 15px; font-weight: 700; color: var(--text-1);
+            margin-bottom: 8px; line-height: 1.4;
+        }
+        #confirm-body  {
+            font-size: 13px; color: var(--text-2); line-height: 1.6;
+            margin-bottom: 22px; white-space: pre-line;
+        }
+        #confirm-actions {
+            display: flex; gap: 10px; justify-content: flex-end;
+        }
+        #confirm-cancel {
+            padding: 9px 20px; border-radius: 999px; border: 1.5px solid var(--border);
+            background: var(--surface-2); color: var(--text-2);
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            font-family: 'DM Sans', sans-serif; transition: all .18s;
+        }
+        #confirm-cancel:hover { background: var(--surface-3); }
+        #confirm-ok {
+            padding: 9px 22px; border-radius: 999px; border: none;
+            background: var(--olive); color: #fff;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            font-family: 'DM Sans', sans-serif; transition: background .18s;
+        }
+        #confirm-ok:hover { background: var(--olive-h); }
+        #confirm-ok.danger { background: var(--red); }
+        #confirm-ok.danger:hover { background: #a02d22; }
+
         /* ── Modal nómina ── */
         .modal-overlay {
             position: fixed; inset: 0;
@@ -1373,6 +1428,22 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════
+     MODAL DE CONFIRMACIÓN / ALERTA CUSTOM
+     Reemplaza alert() y confirm() nativos del navegador
+════════════════════════════════════════════════════════ -->
+<div id="confirm-overlay">
+    <div id="confirm-box">
+        <span id="confirm-icon">⚠️</span>
+        <p  id="confirm-title">¿Estás seguro?</p>
+        <p  id="confirm-body"></p>
+        <div id="confirm-actions">
+            <button id="confirm-cancel">Cancelar</button>
+            <button id="confirm-ok">Confirmar</button>
+        </div>
+    </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
      SCRIPTS
 ════════════════════════════════════════════════════════ -->
 <script src="admin.js"></script>
@@ -1478,8 +1549,7 @@ function emitirFacturaDian() {
     const email   = document.getElementById('dian-email').value.trim();
     const valor   = parseFloat(document.getElementById('dian-valor').value) || 0;
     if (!numDoc || !nombre || !email || valor <= 0) {
-        alert('Por favor completa todos los campos obligatorios (*).');
-        return;
+        Toast.error('Por favor completa todos los campos obligatorios (*).'); return;
     }
     const base  = valor / 1.08;
     const iva   = valor - base;
@@ -1704,7 +1774,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const cargo   = document.getElementById('emp-cargo').value;
             const salario = parseFloat(document.getElementById('emp-salario').value) || 0;
             const dias    = parseInt(document.getElementById('emp-dias').value) || 30;
-            if (!nombre || salario <= 0) { alert('Completa nombre y salario.'); return; }
+            if (!nombre || salario <= 0) { Toast.error('Por favor completa el nombre y el salario del empleado.'); return; }
             listaEmpleados.push({ nombre, cargo, salario, dias });
             formEmp.reset();
             document.getElementById('emp-dias').value = '30';
