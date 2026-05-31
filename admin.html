@@ -1316,6 +1316,10 @@
         <span class="bnav-icon">📦</span>
         <span class="bnav-label">Inventario</span>
     </button>
+    <button class="bnav-item" id="bnav-dian" onclick="cambiarTab('dian')" aria-label="Facturación">
+        <span class="bnav-icon">🧾</span>
+        <span class="bnav-label">Factura</span>
+    </button>
     <a class="bnav-item" href="index.html" aria-label="Cocina">
         <span class="bnav-icon">🔥</span>
         <span class="bnav-label">Cocina</span>
@@ -1411,7 +1415,7 @@ function cambiarTab(dest) {
     }
 
     // Sincronizar Bottom Navigation Bar (móvil)
-    const bnavMap = { dashboard: 'bnav-dashboard', menu: 'bnav-menu', personal: 'bnav-personal', nomina: 'bnav-nomina', inventario: 'bnav-inventario' };
+    const bnavMap = { dashboard: 'bnav-dashboard', menu: 'bnav-menu', personal: 'bnav-personal', nomina: 'bnav-nomina', inventario: 'bnav-inventario', dian: 'bnav-dian' };
     document.querySelectorAll('.bnav-item').forEach(b => b.classList.remove('bnav-active'));
     const bnavId = bnavMap[dest];
     if (bnavId) {
