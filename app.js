@@ -157,7 +157,7 @@ window.La26 = {
                 const ids = ordenesSinItems.map(o => o.id);
                 const { data: itemsDirectos } = await supabaseClient
                     .from('order_items')
-                    .select('id, order_id, quantity, unit_price, notes, item_status, menu_item_id, menu_items ( name )')
+                    .select('id, order_id, quantity, unit_price, notes, item_status, menu_item_id')
                     .in('order_id', ids);
 
                 if (itemsDirectos && itemsDirectos.length > 0) {
