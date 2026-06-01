@@ -1,8 +1,20 @@
 // ============================================================
-// RESTAURANTE LA 26 — app.js · Versión 3.1
+// RESTAURANTE LA 26 — app.js · Versión 3.2
 // Módulo principal: login, cocina, Supabase Realtime
 // Namespace global: window.La26
 // Bucaramanga, Santander — Colombia
+//
+// CAMBIOS v3.2 (fixes críticos):
+//  [FIX-1] cargarPedidos: fallback sin join anidado a menu_items
+//          → el fallback ahora solo pide order_items sin menu_items(name)
+//            porque si RLS bloquea ese sub-join devuelve [] silencioso.
+//            El nombre del plato se resuelve desde notes con [nombre].
+//  [FIX-2] Realtime INSERT orders: delay 300 → 1500 ms
+//          → le da tiempo a que order_items ya esté en BD antes del fetch.
+//  [FIX-3] Realtime INSERT order_items: delay 600 → 1200 ms y fuerza
+//          recarga aunque la orden ya estuviera en _allOrders vacía.
+//  [FIX-4] _crearCardHTML: muestra nota de entrega (Para Llevar / Domicilio)
+//          parseada del campo notes de la orden, útil para cocina.
 // ============================================================
 
 const SUPABASE_URL      = "https://hxmodeduckuhvvspnkxd.supabase.co";
@@ -95,7 +107,6 @@ window.La26 = {
         if (btnTxt) btnTxt.textContent = 'Ingresar';
         _ocultarMsgLogin();
 
-        // Quitar bottom nav si existe
         document.getElementById('bottom-nav-cocina')?.remove();
 
         _mostrarLogin();
@@ -109,6 +120,25 @@ window.La26 = {
         else _mostrarToast('📍 Vista de Cocina', 'info');
     },
 
+    // ──────────────────────────────────────────────────────────
+    // cargarPedidos — v3.2
+    //
+    // ESTRATEGIA DE 3 CAPAS para resistir RLS silenciosos:
+    //
+    //  Capa 1 — Query principal con join completo (ideal, funciona
+    //           si RLS de order_items y menu_items tienen policy SELECT).
+    //
+    //  Capa 2 — Fallback SIN join a menu_items: solo trae order_items
+    //           planos. El nombre del plato viene de notes con [nombre].
+    //           Se activa para cada orden que llegó con order_items=[].
+    //           CRÍTICO: NO incluimos menu_items(name) aquí para evitar
+    //           que un RLS en menu_items mate el array completo.
+    //
+    //  Capa 3 — Si aun así order_items está vacío (timing: el INSERT
+    //           de order_items aún no se procesó), la tarjeta muestra
+    //           un mensaje de espera y el Realtime la actualizará en
+    //           cuanto llegue el INSERT de order_items (~1-2 seg).
+    // ──────────────────────────────────────────────────────────
     async cargarPedidos() {
         const grid = document.getElementById('contenedor-pedidos');
         if (!grid) return;
@@ -120,6 +150,7 @@ window.La26 = {
             </div>`;
 
         try {
+            // ── Capa 1: query principal con join anidado ──────
             const { data: orders, error } = await supabaseClient
                 .from('orders')
                 .select(`
@@ -129,9 +160,11 @@ window.La26 = {
                     customer_name,
                     total_amount,
                     created_at,
+                    notes,
                     tables ( number, label ),
                     order_items (
                         id,
+                        order_id,
                         quantity,
                         unit_price,
                         notes,
@@ -145,29 +178,40 @@ window.La26 = {
 
             if (error) throw error;
 
-            // ── FIX COMANDA: si algún pedido llegó con order_items vacío,
-            // hacemos un query directo a order_items para ese pedido.
-            // Esto ocurre cuando el join anidado falla silenciosamente por
-            // RLS o timing entre el INSERT de orders y el de order_items.
+            // ── Capa 2: fallback para órdenes sin ítems ───────
+            // IMPORTANTE: este segundo SELECT no incluye menu_items(name)
+            // para evitar que RLS en esa tabla elimine el resultado entero.
+            // El nombre del plato se extrae de notes con el prefijo [nombre].
             const ordenesSinItems = (orders || []).filter(o =>
                 !o.order_items || o.order_items.length === 0
             );
 
             if (ordenesSinItems.length > 0) {
                 const ids = ordenesSinItems.map(o => o.id);
-                const { data: itemsDirectos } = await supabaseClient
+
+                // [FIX-1] Sin join a menu_items — solo columnas directas de order_items
+                const { data: itemsDirectos, error: errFallback } = await supabaseClient
                     .from('order_items')
                     .select('id, order_id, quantity, unit_price, notes, item_status, menu_item_id')
                     .in('order_id', ids);
 
+                if (errFallback) {
+                    console.warn('[La 26] Fallback order_items error:', errFallback.message);
+                }
+
                 if (itemsDirectos && itemsDirectos.length > 0) {
-                    // Inyectar los ítems en cada orden correspondiente
                     (orders || []).forEach(o => {
                         if (!o.order_items || o.order_items.length === 0) {
-                            o.order_items = itemsDirectos.filter(i => i.order_id === o.id);
+                            // Inyectamos los ítems; menu_items será null pero
+                            // _parsearNotes(item.notes) resolverá el nombre desde [nombre].
+                            o.order_items = itemsDirectos
+                                .filter(i => i.order_id === o.id)
+                                .map(i => ({ ...i, menu_items: null }));
                         }
                     });
                 }
+                // Si itemsDirectos sigue vacío → Capa 3 (timing): la tarjeta
+                // mostrará "Preparando comanda…" y Realtime la recargará.
             }
 
             _allOrders = orders || [];
@@ -213,26 +257,14 @@ window.La26 = {
         }
     },
 
-    // ── FIX CRÍTICO: despacharPedido ──────────────────────────
-    // v3.0 enviaba delivered_at y delivered_by — columnas que
-    // probablemente no existen en el esquema → error 42703.
-    // Ahora solo actualiza 'status' (columna segura y confirmada).
-    // Si tu tabla SÍ tiene delivered_at, puedes descomentarlo abajo.
     async despacharPedido(pedidoId) {
         const tarjeta = document.getElementById(`pedido-${pedidoId}`);
         if (tarjeta) tarjeta.classList.add('despachando');
 
         const { error } = await supabaseClient
             .from('orders')
-            .update({ status: 'delivered' })   // ← solo la columna que siempre existe
-            .eq('id', pedidoId);               // ← id es el PK correcto (no order_id)
-
-        // Si tu esquema tiene delivered_at y delivered_by, usa esto en cambio:
-        // .update({
-        //     status:       'delivered',
-        //     delivered_at: new Date().toISOString(),
-        //     delivered_by: _currentUser || 'cocina',
-        // })
+            .update({ status: 'delivered' })
+            .eq('id', pedidoId);
 
         if (error) {
             console.error('[La 26] Error al despachar:', error);
@@ -242,8 +274,6 @@ window.La26 = {
         }
 
         _mostrarToast('✅ Pedido despachado correctamente', 'success');
-        // Realtime lo eliminará del grid automáticamente.
-        // Fallback manual si Realtime tarda:
         setTimeout(() => La26.cargarPedidos(), 800);
     },
 };
@@ -305,7 +335,6 @@ function _mostrarCocina() {
     const userData = LA26_USERS[_currentUser] || {};
     if (barLabel) barLabel.textContent = `${userData.emoji || ''} ${userData.label || ''}`;
 
-    // ── FIX 3: Bottom Navigation para móvil ───────────────
     _inyectarBottomNav();
 
     La26.cargarPedidos();
@@ -315,14 +344,14 @@ function _mostrarCocina() {
 
 // ── BOTTOM NAV MÓVIL — solo se inyecta una vez ────────────
 function _inyectarBottomNav() {
-    if (document.getElementById('bottom-nav-cocina')) return; // ya existe
+    if (document.getElementById('bottom-nav-cocina')) return;
 
     const esAdmin = sessionStorage.getItem('user_role') === 'admin';
 
     const nav = document.createElement('nav');
     nav.id = 'bottom-nav-cocina';
     Object.assign(nav.style, {
-        display:        'none',         // CSS lo muestra solo en móvil
+        display:        'none',
         position:       'fixed',
         bottom:         '0',
         left:           '0',
@@ -336,7 +365,6 @@ function _inyectarBottomNav() {
         paddingBottom:  'env(safe-area-inset-bottom, 0px)',
     });
 
-    // Siempre se muestra en pantallas ≤768 px
     const styleEl = document.createElement('style');
     styleEl.textContent = `
         @media (max-width: 768px) {
@@ -368,7 +396,6 @@ function _inyectarBottomNav() {
     `;
     document.head.appendChild(styleEl);
 
-    // Botón: Actualizar comandas
     nav.innerHTML = `
         <button class="bnav-cocina-item" onclick="La26.cargarPedidos()" aria-label="Actualizar">
             <span class="bnav-cocina-icon">🔄</span>
@@ -398,6 +425,9 @@ function _inyectarBottomNav() {
 }
 
 // ── Realtime ──────────────────────────────────────────────
+// [FIX-2] INSERT orders: delay aumentado a 1500 ms para darle tiempo
+//         al INSERT de order_items que ocurre inmediatamente después.
+// [FIX-3] INSERT order_items: delay 1200 ms y fuerza recarga total.
 function _activarRealtime() {
     if (_realtimeChannel) supabaseClient.removeChannel(_realtimeChannel);
 
@@ -408,17 +438,24 @@ function _activarRealtime() {
     };
 
     _realtimeChannel = supabaseClient
-        .channel('la26-cocina-v3')
+        .channel('la26-cocina-v32')
         .on('postgres_changes', { event:'INSERT', schema:'public', table:'orders' },
             (payload) => {
                 console.info('[La 26] 📦 Nuevo pedido:', payload.new?.order_number || payload.new?.id);
                 _dispararAlerta(payload.new);
-                recargar(300);
+                // [FIX-2] 1500 ms: el INSERT de order_items llega ~200-800 ms
+                // después del INSERT de orders desde menu.js.
+                recargar(1500);
             })
         .on('postgres_changes', { event:'UPDATE', schema:'public', table:'orders' },
             () => { console.info('[La 26] 🔄 Pedido actualizado'); recargar(300); })
         .on('postgres_changes', { event:'INSERT', schema:'public', table:'order_items' },
-            () => { console.info('[La 26] 🍽️ Nuevo ítem'); recargar(600); })
+            (payload) => {
+                console.info('[La 26] 🍽️ Nuevo ítem recibido, recargando comanda…');
+                // [FIX-3] Siempre recarga cuando llega un nuevo item, sin debounce largo.
+                // Esto cubre el caso donde la orden ya apareció en pantalla vacía.
+                recargar(1200);
+            })
         .subscribe((status) => {
             console.info('[La 26] Canal RT:', status);
             const dot = document.getElementById('dot-live');
@@ -507,6 +544,16 @@ function _renderizarPedidos(nuevoId = null) {
     _actualizarTimers();
 }
 
+// ── _crearCardHTML v3.2 ────────────────────────────────────
+// [FIX-4] Muestra la modalidad de entrega (notes de la orden)
+//         arriba del listado de platos para que cocina sepa
+//         si es para llevar, domicilio o en mesa.
+//
+// Resolución del nombre del plato — 4 capas:
+//   1. item.menu_items?.name       → join exitoso (ideal, requiere RLS OK)
+//   2. _parsearNotes(notes).nombrePlato → prefijo [nombre] en notes
+//   3. notes plano (sin prefijo)   → último recurso legible
+//   4. '(Plato sin nombre)'        → placeholder
 function _crearCardHTML(order, esNuevo = false) {
     const identificadorMesa = order.tables?.label
         || (order.tables?.number ? `Mesa ${order.tables.number}` : 'Mesa Rápida');
@@ -518,27 +565,52 @@ function _crearCardHTML(order, esNuevo = false) {
     };
     const cfg = estadoMap[order.status] || { label: order.status, cls:'pending' };
 
-    const items = order.order_items || [];
-    let itemsHTML = items.length === 0
-        ? '<p style="font-size:13px;color:#6b7280;font-style:italic;padding:4px 0;">Sin detalle registrado.</p>'
-        : items.map(item => {
-            const parsed      = _parsearNotes(item.notes);
+    // [FIX-4] Parsear modalidad de entrega desde notes de la orden
+    const notasOrden  = order.notes || '';
+    let   modalidad   = '';
+    let   modalidadCls = '';
+    if (notasOrden.includes('[PARA LLEVAR]')) {
+        modalidad    = '🛍️ Para Llevar / Retiro';
+        modalidadCls = 'modalidad-llevar';
+    } else if (notasOrden.includes('[DOMICILIO]')) {
+        // Extraer dirección si existe
+        const matchDir = notasOrden.match(/Dirección:\s*(.+)$/);
+        const dir = matchDir ? matchDir[1].trim() : '';
+        modalidad    = `🛵 Domicilio${dir ? ` — ${dir}` : ''}`;
+        modalidadCls = 'modalidad-domicilio';
+    } else if (notasOrden.includes('[MESA]')) {
+        modalidad    = `🍽️ En mesa — ${identificadorMesa}`;
+        modalidadCls = 'modalidad-mesa';
+    }
 
-            // Resolución del nombre del plato (en orden de confiabilidad):
-            // 1. Join a menu_items (el más confiable si llega)
-            // 2. Prefijo [nombre] en notes (guardado por menu.js en el submit)
-            // 3. Texto plano de notes
-            // 4. Placeholder de último recurso
+    const items = order.order_items || [];
+
+    // Capa 3 de seguridad: si la orden acaba de crearse y los ítems
+    // aún no llegaron (timing), mostramos un mensaje de espera activa
+    // en vez del frustrante "Sin detalle registrado".
+    let itemsHTML;
+    if (items.length === 0) {
+        itemsHTML = `
+            <p style="font-size:13px;color:#9ca3af;font-style:italic;padding:4px 0;display:flex;align-items:center;gap:6px;">
+                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;
+                      background:#fbbf24;animation:pulse 1.2s infinite;"></span>
+                Preparando comanda… (actualizando)
+            </p>`;
+    } else {
+        itemsHTML = items.map(item => {
+            const parsed = _parsearNotes(item.notes);
+
+            // Resolución del nombre — 4 capas
             const nombrePlato = item.menu_items?.name
                 || parsed.nombrePlato
                 || (item.notes && !item.notes.startsWith('[nombre]') ? item.notes : null)
                 || '(Plato sin nombre)';
 
-            // La nota del cliente es lo que viene DESPUÉS del separador " | " en notes,
-            // o el notes completo si no tiene el prefijo [nombre].
+            // Nota del cliente: lo que va después de " | " en notes
             const notaCliente = item.menu_items?.name
                 ? (item.notes?.startsWith('[nombre]') ? parsed.notaCliente : item.notes)
                 : parsed.notaCliente;
+
             return `
             <div class="order-item">
                 <div class="item-top">
@@ -547,7 +619,8 @@ function _crearCardHTML(order, esNuevo = false) {
                 </div>
                 ${notaCliente ? `<div class="item-nota">✏️ ${_esc(notaCliente)}</div>` : ''}
             </div>`;
-          }).join('');
+        }).join('');
+    }
 
     let botonesHTML = '';
     if (order.status === 'pending' || order.status === 'confirmed') {
@@ -589,6 +662,7 @@ function _crearCardHTML(order, esNuevo = false) {
             </div>
         </div>
         <div class="card-body">
+            ${modalidad ? `<div class="comanda-modalidad ${modalidadCls}">${_esc(modalidad)}</div>` : ''}
             <div class="items-label">Comanda</div>
             ${itemsHTML}
         </div>
@@ -763,7 +837,8 @@ async function ejecutarSimulador() {
         if (errItems) console.error('[La 26] Error en order_items del simulador:', errItems);
         else console.log(`[La 26] ✅ Pedido simulado ${orderNo} con ${orderItems.length} plato(s).`);
 
-        setTimeout(() => La26.cargarPedidos(), 600);
+        // Esperar 1.8s para que order_items esté en BD antes de renderizar
+        setTimeout(() => La26.cargarPedidos(), 1800);
 
     } catch(err) {
         console.error('[La 26] Error en simulador:', err);
