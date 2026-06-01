@@ -828,7 +828,10 @@ async function resolverMenuItemIds() {
 
         resultado.push({
             menuItemId,
-            slotId:   (item.slotId && item.slotId.startsWith('mock-')) ? null : item.slotId,
+            // daily_menu_slot_id solo aplica cuando hay menu del dia activo y el slot es real
+            // Si cargamos del catalogo directo (sin daily_menu), slot.id === menu_item_id,
+            // NO debe pasarse como daily_menu_slot_id o el join falla en Supabase.
+            slotId:   (item.slotId && item.slotId.startsWith("mock-") || !dailyMenuId) ? null : item.slotId,
             cantidad: item.cantidad,
             precio:   slot.precio,
             nombre:   slot.nombre,
@@ -956,6 +959,8 @@ const Order = {
         const totalMonto  = calcularTotal();
 
         // Construir notas de despacho para la cocina
+        // La dirección y modalidad van SIEMPRE en el campo notes (evita error 42703
+        // por columnas delivery_type / delivery_address que pueden no existir aún)
         let notasCocina = '';
         if (tipoDespacho === 'retiro') {
             notasCocina = `[PARA LLEVAR] Cliente: ${nombreFinal} — Retira en el restaurante`;
@@ -970,6 +975,10 @@ const Order = {
             const itemsResueltos = await resolverMenuItemIds();
 
             // ── Paso 2: insertar la orden maestra en 'orders' ────
+            // IMPORTANTE: Solo se usan columnas que siempre existen en el esquema.
+            // delivery_type y delivery_address NO se incluyen aquí porque generan
+            // error 42703 si la migración no se ha ejecutado en Supabase.
+            // Toda la info de modalidad/dirección queda guardada en 'notes'.
             const ordenPayload = {
                 restaurant_id: restaurantId,
                 table_id:      tableId,        // ← siempre tiene valor aquí gracias al guard
@@ -980,13 +989,6 @@ const Order = {
                 daily_menu_id: dailyMenuId  || null,
                 notes:         notasCocina  || null,
             };
-
-            // Columnas de modalidad/despacho — añadir solo si existen en el esquema
-            // (evita error 42703 si la migración no se ejecutó aún)
-            if (tipoDespacho !== 'mesa') {
-                ordenPayload.delivery_type    = tipoDespacho;
-                ordenPayload.delivery_address = direccionEntrega || null;
-            }
 
             const { data: orden, error: errorOrden } = await supabaseClient
                 .from('orders')
