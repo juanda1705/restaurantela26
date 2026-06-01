@@ -136,8 +136,7 @@ async function cargarDashboardReal() {
     try {
         const { data: orders, error } = await supabaseClient
             .from('orders')
-            .select(`id, order_number, customer_name, total_amount, status, payment_method,
-                     order_items ( quantity, notes, unit_price )`);
+            .select('id, order_number, customer_name, total_amount, status, payment_method, order_items ( quantity, notes, price )')
 
         if (error) throw error;
 
@@ -327,14 +326,14 @@ function registrarAperturaCaja() {
 }
 
 // ============================================================
-// EXPORTAR RECIBO PDF
+// EXPORTAR RECIBO PDF (CORREGIDO)
 // ============================================================
 async function exportarReciboPDF(orderId) {
     try {
         const { data: ord, error } = await supabaseClient
             .from('orders')
             .select(`order_number, customer_name, total_amount, created_at,
-                     order_items ( quantity, notes, unit_price )`)
+                     order_items ( quantity, notes, price )`) // Cambiado unit_price a price
             .eq('id', orderId)
             .single();
 
@@ -356,7 +355,7 @@ async function exportarReciboPDF(orderId) {
         pdf.text(`Fecha: ${new Date(ord.created_at).toLocaleString('es-CO')}`, 5, 39);
         pdf.text('----------------------------------------', 40, 44, { align: 'center' });
         pdf.setFont('monospace', 'bold');
-        pdf.text('Cant  Detalle                  Subtotal', 5, 49);
+        pdf.text('Cant   Detalle                     Subtotal', 5, 49);
         pdf.setFont('monospace', 'normal');
 
         let y = 55;
@@ -367,7 +366,10 @@ async function exportarReciboPDF(orderId) {
                     nombre = item.notes.split('[nombre]')[1].split('|')[0].trim();
                 }
                 if (nombre.length > 20) nombre = nombre.substring(0, 18) + '..';
-                const sub = (item.quantity || 1) * (item.unit_price || 0);
+                
+                // Cambiado item.unit_price a item.price
+                const sub = (item.quantity || 1) * (item.price || 0); 
+                
                 pdf.text(`${item.quantity}x    ${nombre.padEnd(22, ' ')} $${sub.toLocaleString()}`, 5, y);
                 y += 6;
             });
@@ -379,8 +381,10 @@ async function exportarReciboPDF(orderId) {
         pdf.setFontSize(9);
         pdf.text(`TOTAL: $${parseInt(ord.total_amount).toLocaleString()} COP`, 5, y);
         y += 8;
+        
         const base = ord.total_amount / (1 + TASA_IMPOCONSUMO);
         const impo = ord.total_amount - base;
+        
         pdf.setFontSize(7.5);
         pdf.setFont('monospace', 'normal');
         pdf.text(`Base gravable: $${Math.round(base).toLocaleString()}`, 5, y);
