@@ -1,7 +1,24 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE ADMINISTRACIÓN
-// admin.js · Versión 3.0
+// admin.js · Versión 3.1 — CORREGIDO
 // Bucaramanga, Santander — Colombia
+//
+// CAMBIOS v3.1 (fix crítico product_code):
+//  [FIX-1] Columna product_code confirmada en BD como INTEGER.
+//          El payload de inserción la incluye directamente sin
+//          lógica de reintento/fallback — ya no es necesaria.
+//  [FIX-2] cargarSlotsMenuReal ahora incluye product_code en
+//          el SELECT y lo muestra correctamente en las tarjetas.
+//  [FIX-3] Orden de tarjetas usa product_code cuando está
+//          disponible, igual que el catálogo original.
+//  [FIX-4] getRangoByCodigo ahora recibe el valor real de la BD.
+//
+// Esquema real confirmado en Supabase (menu_items):
+//   id uuid | restaurant_id uuid | category_id uuid |
+//   name varchar | description text | price numeric |
+//   item_type USER-DEFINED | image_url text |
+//   is_active boolean | created_at timestamptz |
+//   portions_today smallint | product_code integer  ← NUEVO
 // ============================================================
 
 // ============================================================
@@ -27,14 +44,13 @@ const TASA_IMPOCONSUMO = 0.08;    // 8% impoconsumo restaurantes
 let globalIngresos = 0;
 let globalEgresos  = 0;
 
-// Totales por método de pago (calculados al cargar el dashboard)
-let totalEfectivo     = 0;
+let totalEfectivo      = 0;
 let totalTransferencia = 0;
-let totalFiado        = 0;
-let baseInicial       = 0; // apertura de caja
+let totalFiado         = 0;
+let baseInicial        = 0;
 
 // ============================================================
-// TOAST NOTIFICATIONS — reemplaza alert() nativos
+// TOAST NOTIFICATIONS
 // ============================================================
 const Toast = (function() {
     let _c = null;
@@ -92,7 +108,6 @@ function formatCOP(valor) {
 
 // ============================================================
 // MAPA DE TIPOS DE PLATO
-// Soporta tanto 'protein' (legado) como 'executive_lunch' (nuevo)
 // ============================================================
 const MAPA_TIPO = {
     executive_lunch: { label: 'Proteína con Salsa', icono: '🥩', porciones: 35, badgeClass: 'badge-protein' },
@@ -103,7 +118,7 @@ const MAPA_TIPO = {
     dessert:         { label: 'Postre',              icono: '🍮', porciones: 10, badgeClass: 'badge-dessert' },
 };
 
-// Obtiene etiqueta de rango de código
+// [FIX-4] getRangoByCodigo ahora recibe el INTEGER real de product_code
 function getRangoByCodigo(codigo) {
     const n = parseInt(codigo) || 0;
     if (n >= 1  && n <= 10)  return { label: 'Vegetal/Salsa/Base', color: 'var(--olive)' };
@@ -134,33 +149,27 @@ async function cargarDashboardReal() {
             (acc, o) => acc + (parseFloat(o.total_amount) || 0), 0
         );
 
-        // Totales por método de pago
         totalEfectivo      = 0;
         totalTransferencia = 0;
         totalFiado         = 0;
         ordenesValidas.forEach(o => {
             const monto = parseFloat(o.total_amount) || 0;
-            if (o.payment_method === 'efectivo')      totalEfectivo      += monto;
+            if (o.payment_method === 'efectivo')           totalEfectivo      += monto;
             else if (o.payment_method === 'transferencia') totalTransferencia += monto;
-            else if (o.payment_method === 'fiado')    totalFiado         += monto;
+            else if (o.payment_method === 'fiado')         totalFiado         += monto;
         });
 
         const baseICA      = Math.max(0, globalIngresos - globalEgresos);
         const provisionICA = baseICA * TASA_RETE_ICA;
 
-        document.getElementById('gros-ventas')   ?.textContent && (document.getElementById('gros-ventas').textContent   = formatCOP(globalIngresos));
-        document.getElementById('total-pedidos') ?.textContent && (document.getElementById('total-pedidos').textContent = `${ordenesValidas.length} pedidos`);
-        document.getElementById('val-reteica')   ?.textContent && (document.getElementById('val-reteica').textContent   = formatCOP(provisionICA));
-
-        // Actualizar panel de métodos de pago
-        const elEf = document.getElementById('kpi-efectivo');
-        const elTr = document.getElementById('kpi-transferencia');
-        const elFi = document.getElementById('kpi-fiado');
-        const elSaldo = document.getElementById('kpi-saldo-caja');
-        if (elEf)    elEf.textContent    = formatCOP(totalEfectivo);
-        if (elTr)    elTr.textContent    = formatCOP(totalTransferencia);
-        if (elFi)    elFi.textContent    = formatCOP(totalFiado);
-        if (elSaldo) elSaldo.textContent = formatCOP(baseInicial + totalEfectivo + totalTransferencia);
+        const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+        set('gros-ventas',   formatCOP(globalIngresos));
+        set('total-pedidos', `${ordenesValidas.length} pedidos`);
+        set('val-reteica',   formatCOP(provisionICA));
+        set('kpi-efectivo',       formatCOP(totalEfectivo));
+        set('kpi-transferencia',  formatCOP(totalTransferencia));
+        set('kpi-fiado',          formatCOP(totalFiado));
+        set('kpi-saldo-caja',     formatCOP(baseInicial + totalEfectivo + totalTransferencia));
 
         // Historial de facturación
         const tbodyFacturas = document.getElementById('tabla-facturas');
@@ -168,11 +177,9 @@ async function cargarDashboardReal() {
             tbodyFacturas.innerHTML = '';
             if (ordenesValidas.length === 0) {
                 tbodyFacturas.innerHTML = `
-                    <tr>
-                        <td colspan="5" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
-                            Sin comandas registradas hoy.
-                        </td>
-                    </tr>`;
+                    <tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                        Sin comandas registradas hoy.
+                    </td></tr>`;
             } else {
                 ordenesValidas.forEach(ord => {
                     const metodo = ord.payment_method || '';
@@ -193,31 +200,21 @@ async function cargarDashboardReal() {
 
                     tbodyFacturas.insertAdjacentHTML('beforeend', `
                         <tr class="tbody-row">
-                            <td>
-                                <span class="mono" style="font-size:11.5px;font-weight:700;color:var(--olive);">${ord.order_number}</span>
-                            </td>
+                            <td><span class="mono" style="font-size:11.5px;font-weight:700;color:var(--olive);">${ord.order_number}</span></td>
                             <td style="font-size:13px;color:var(--text-1);font-weight:500;">${ord.customer_name || 'Consumidor Final'}</td>
-                            <td>
-                                <span class="mono" style="font-size:13px;font-weight:700;color:var(--olive);">${formatCOP(ord.total_amount)}</span>
-                            </td>
+                            <td><span class="mono" style="font-size:13px;font-weight:700;color:var(--olive);">${formatCOP(ord.total_amount)}</span></td>
                             <td style="text-align:center;">${badgeMetodo}</td>
                             <td style="text-align:center;">
                                 <div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;">
                                     <button onclick="exportarReciboPDF('${ord.id}')"
                                         style="background:var(--surface-2);border:1.5px solid var(--border);color:var(--text-2);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
                                         onmouseover="this.style.background='var(--surface-3)'"
-                                        onmouseout="this.style.background='var(--surface-2)'">
-                                        📄 PDF
-                                    </button>
+                                        onmouseout="this.style.background='var(--surface-2)'">📄 PDF</button>
                                     <button onclick="abrirModalFacturaElectronica('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
                                         style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
                                         onmouseover="this.style.background='rgba(74,103,65,.16)'"
-                                        onmouseout="this.style.background='var(--olive-lt)'">
-                                        🧾 DIAN
-                                    </button>
-                                    <button onclick="eliminarComandaReal('${ord.id}', '${ord.order_number}')" class="btn-danger">
-                                        🗑️
-                                    </button>
+                                        onmouseout="this.style.background='var(--olive-lt)'">🧾 DIAN</button>
+                                    <button onclick="eliminarComandaReal('${ord.id}', '${ord.order_number}')" class="btn-danger">🗑️</button>
                                 </div>
                             </td>
                         </tr>`);
@@ -225,7 +222,7 @@ async function cargarDashboardReal() {
             }
         }
 
-        // Top platos
+        // Top platos vendidos
         const ranking = {};
         (orders || []).forEach(ord => {
             if (!ord.order_items) return;
@@ -244,11 +241,9 @@ async function cargarDashboardReal() {
             const listaPlatos = Object.keys(ranking);
             if (listaPlatos.length === 0) {
                 tbodyTop.innerHTML = `
-                    <tr>
-                        <td colspan="2" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
-                            Sin datos de platos aún.
-                        </td>
-                    </tr>`;
+                    <tr><td colspan="2" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                        Sin datos de platos aún.
+                    </td></tr>`;
             } else {
                 listaPlatos
                     .sort((a, b) => ranking[b] - ranking[a])
@@ -264,7 +259,6 @@ async function cargarDashboardReal() {
             }
         }
 
-        // Cargar egresos para KPI
         const { data: gastos } = await supabaseClient
             .from('operating_expenses')
             .select('amount');
@@ -297,7 +291,7 @@ async function eliminarComandaReal(idComanda, nroOrden) {
 }
 
 // ============================================================
-// REGISTRAR MÉTODO DE PAGO EN UNA ORDEN
+// REGISTRAR MÉTODO DE PAGO
 // ============================================================
 async function registrarMetodoPago(orderId, metodo) {
     if (!metodo) return;
@@ -317,7 +311,7 @@ async function registrarMetodoPago(orderId, metodo) {
 }
 
 // ============================================================
-// APERTURA DE CAJA — base inicial en efectivo
+// APERTURA DE CAJA
 // ============================================================
 function registrarAperturaCaja() {
     const inp = document.getElementById('input-base-caja');
@@ -326,14 +320,15 @@ function registrarAperturaCaja() {
     baseInicial = val;
     sessionStorage.setItem('base_caja_hoy', String(val));
     Toast.ok(`Base de caja registrada: ${formatCOP(val)}`);
-    document.getElementById('kpi-saldo-caja')?.textContent && (
-        document.getElementById('kpi-saldo-caja').textContent = formatCOP(baseInicial + totalEfectivo + totalTransferencia)
-    );
+    const elSaldo = document.getElementById('kpi-saldo-caja');
+    if (elSaldo) elSaldo.textContent = formatCOP(baseInicial + totalEfectivo + totalTransferencia);
     const panel = document.getElementById('panel-apertura-caja');
     if (panel) panel.style.display = 'none';
 }
 
-
+// ============================================================
+// EXPORTAR RECIBO PDF
+// ============================================================
 async function exportarReciboPDF(orderId) {
     try {
         const { data: ord, error } = await supabaseClient
@@ -403,7 +398,7 @@ async function exportarReciboPDF(orderId) {
 }
 
 // ============================================================
-// 2. MODAL FACTURA ELECTRÓNICA DIAN (desde Dashboard)
+// 2. MODAL FACTURA ELECTRÓNICA DIAN
 // ============================================================
 let _feOrdenId   = null;
 let _feOrdenNo   = null;
@@ -417,23 +412,16 @@ function abrirModalFacturaElectronica(orderId, ordenNo, totalBruto) {
     const baseGravable = _feBaseTotal / (1 + TASA_IMPOCONSUMO);
     const impoconsumo  = _feBaseTotal - baseGravable;
 
-    const elOrdenNo  = document.getElementById('fe-orden-no');
-    const elSubtotal = document.getElementById('fe-subtotal');
-    const elIva      = document.getElementById('fe-iva');
-    const elTotal    = document.getElementById('fe-total');
-    if (elOrdenNo)  elOrdenNo.textContent  = ordenNo;
-    if (elSubtotal) elSubtotal.textContent = formatCOP(baseGravable);
-    if (elIva)      elIva.textContent      = formatCOP(impoconsumo);
-    if (elTotal)    elTotal.textContent    = formatCOP(_feBaseTotal);
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    set('fe-orden-no',  ordenNo);
+    set('fe-subtotal',  formatCOP(baseGravable));
+    set('fe-iva',       formatCOP(impoconsumo));
+    set('fe-total',     formatCOP(_feBaseTotal));
 
-    const modal = document.getElementById('modal-factura-dian');
-    const elNombre = document.getElementById('fe-nombre');
-    const elNit    = document.getElementById('fe-nit');
-    const elEmail  = document.getElementById('fe-email');
+    const modal  = document.getElementById('modal-factura-dian');
+    const fields = ['fe-nombre', 'fe-nit', 'fe-email'];
+    fields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     const elResult = document.getElementById('fe-resultado');
-    if (elNombre) elNombre.value = '';
-    if (elNit)    elNit.value    = '';
-    if (elEmail)  elEmail.value  = '';
     if (elResult) elResult.style.display = 'none';
     if (modal)    modal.style.display    = 'flex';
 }
@@ -441,9 +429,7 @@ function abrirModalFacturaElectronica(orderId, ordenNo, totalBruto) {
 function cerrarModalFactura() {
     const modal = document.getElementById('modal-factura-dian');
     if (modal) modal.style.display = 'none';
-    _feOrdenId   = null;
-    _feOrdenNo   = null;
-    _feBaseTotal = 0;
+    _feOrdenId = null; _feOrdenNo = null; _feBaseTotal = 0;
 }
 
 function _generarHashCUFE(semilla) {
@@ -476,41 +462,27 @@ async function generarFacturaElectronica() {
         cufe,
         estado_dian:     'Enviado — CUFE Generado',
         emisor: {
-            nit:          '900.123.456-7',
-            razon_social: 'Restaurante la 26 SAS',
-            municipio:    'Bucaramanga',
-            departamento: 'Santander',
-            actividad_ciiu: '5611',
+            nit: '900.123.456-7', razon_social: 'Restaurante la 26 SAS',
+            municipio: 'Bucaramanga', departamento: 'Santander', actividad_ciiu: '5611',
         },
-        receptor: {
-            tipo_doc:   nit.includes('-') ? 'NIT' : 'CC',
-            numero_doc: nit,
-            nombre,
-            email,
-        },
+        receptor: { tipo_doc: nit.includes('-') ? 'NIT' : 'CC', numero_doc: nit, nombre, email },
         tributos: {
             base_gravable_cop:    Math.round(baseGravable),
             impoconsumo_8pct_cop: Math.round(impoconsumo),
             rete_ica_bga_6_9_mil: Math.round(baseGravable * TASA_RETE_ICA),
             total_factura_cop:    Math.round(_feBaseTotal),
         },
-        referencia_interna: { order_id: _feOrdenId, order_number: _feOrdenNo },
+        referencia_interna:    { order_id: _feOrdenId, order_number: _feOrdenNo },
         proveedor_tecnologico: 'SIIGO S.A. — Habilitado DIAN Res. 000042 / 2020',
     };
 
     try {
         await supabaseClient.from('invoice_records').insert([{
-            order_id:        _feOrdenId,
-            order_number:    _feOrdenNo,
-            receptor_nombre: nombre,
-            receptor_nit:    nit,
-            receptor_email:  email,
-            subtotal:        Math.round(baseGravable),
-            iva:             Math.round(impoconsumo),
-            total:           Math.round(_feBaseTotal),
-            cufe,
-            payload:         JSON.stringify(payload),
-            created_at:      fechaStr,
+            order_id: _feOrdenId, order_number: _feOrdenNo,
+            receptor_nombre: nombre, receptor_nit: nit, receptor_email: email,
+            subtotal: Math.round(baseGravable), iva: Math.round(impoconsumo),
+            total: Math.round(_feBaseTotal), cufe, payload: JSON.stringify(payload),
+            created_at: fechaStr,
         }]);
     } catch (_) { /* tabla opcional */ }
 
@@ -536,6 +508,8 @@ async function generarFacturaElectronica() {
 
 // ============================================================
 // 3. MENÚ — EDITOR MODULAR CON CÓDIGO DE PRODUCTO
+// [FIX-2] SELECT ahora incluye product_code
+// [FIX-3] Orden de tarjetas usa product_code real de la BD
 // ============================================================
 let componenteFiltradoActual = 'todos';
 
@@ -549,9 +523,10 @@ async function cargarSlotsMenuReal() {
         </p>`;
 
     try {
+        // [FIX-2] Incluir product_code en el SELECT
         let query = supabaseClient
             .from('menu_items')
-            .select('id, name, description, price, item_type, is_active, portions_today, restaurant_id, category_id, created_at')
+            .select('id, name, description, price, item_type, is_active, portions_today, product_code, restaurant_id, category_id, created_at')
             .order('name', { ascending: true });
 
         if (componenteFiltradoActual !== 'todos') {
@@ -573,8 +548,11 @@ async function cargarSlotsMenuReal() {
             return;
         }
 
-        // Ordenar por tipo y luego por nombre (sin depender de product_code)
+        // [FIX-3] Ordenar por product_code real, luego por tipo y nombre
         const itemsOrdenados = [...items].sort((a, b) => {
+            const cA = a.product_code ?? 9999;
+            const cB = b.product_code ?? 9999;
+            if (cA !== cB) return cA - cB;
             const orden = { protein: 1, executive_lunch: 1, side: 2, drink: 3, a_la_carte: 4, dessert: 5 };
             const oA = orden[a.item_type] || 9;
             const oB = orden[b.item_type] || 9;
@@ -583,14 +561,14 @@ async function cargarSlotsMenuReal() {
         });
 
         itemsOrdenados.forEach((item, animIdx) => {
-            const cfg           = MAPA_TIPO[item.item_type] || { label: item.item_type, icono: '🍽️', porciones: 20, badgeClass: '' };
+            const cfg            = MAPA_TIPO[item.item_type] || { label: item.item_type, icono: '🍽️', porciones: 20, badgeClass: '' };
             const nombreEscapado = (item.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            const codigo        = '—';
-            const rango         = { color: 'var(--text-3)' };
+            // [FIX-4] Usar product_code real de la BD
+            const codigo         = item.product_code ?? '—';
+            const rango          = getRangoByCodigo(item.product_code);
 
             contenedor.insertAdjacentHTML('beforeend', `
                 <div class="card menu-card" style="display:flex;flex-direction:column;gap:12px;animation-delay:${animIdx * 40}ms;">
-                    <!-- Header tarjeta -->
                     <div style="display:flex;justify-content:space-between;align-items:flex-start;">
                         <div style="display:flex;align-items:center;gap:8px;min-width:0;">
                             <span style="font-size:11px;font-weight:700;color:${rango.color};background:rgba(0,0,0,.04);border:1.5px solid rgba(0,0,0,.07);border-radius:999px;padding:3px 9px;flex-shrink:0;" class="mono">#${codigo}</span>
@@ -603,12 +581,10 @@ async function cargarSlotsMenuReal() {
                             title="Eliminar">🗑️</button>
                     </div>
 
-                    <!-- Nombre -->
                     <h4 style="font-size:13.5px;font-weight:600;color:var(--text-1);line-height:1.4;margin:0;">
                         ${item.name}
                     </h4>
 
-                    <!-- Inputs precio / porciones -->
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:14px;padding:12px;">
                         <div>
                             <p style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Precio ($)</p>
@@ -624,7 +600,6 @@ async function cargarSlotsMenuReal() {
                         </div>
                     </div>
 
-                    <!-- Switch disponibilidad -->
                     <div style="display:flex;align-items:center;justify-content:space-between;border-top:1.5px solid var(--border);padding-top:10px;">
                         <span style="font-size:11.5px;color:var(--text-3);">¿Disponible hoy?</span>
                         <button data-switch-id="${item.id}"
@@ -650,16 +625,16 @@ async function cargarSlotsMenuReal() {
 // ============================================================
 function filtrarMenuComponente(cat) {
     componenteFiltradoActual = cat;
-    document.querySelectorAll('.btn-comp').forEach(btn => {
-        btn.classList.remove('filter-active');
-    });
+    document.querySelectorAll('.btn-comp').forEach(btn => btn.classList.remove('filter-active'));
     const btnActivo = document.getElementById(`btn-comp-${cat}`);
     if (btnActivo) btnActivo.classList.add('filter-active');
     cargarSlotsMenuReal();
 }
 
 // ============================================================
-// REGISTRAR NUEVO PLATO (con product_code)
+// REGISTRAR NUEVO PLATO
+// [FIX-1] product_code se incluye directamente en el payload.
+//         Columna confirmada en BD — eliminado código de reintento.
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
     const formNuevoPlato = document.getElementById('form-nuevo-plato');
@@ -667,17 +642,24 @@ document.addEventListener('DOMContentLoaded', () => {
         formNuevoPlato.addEventListener('submit', async (e) => {
             e.preventDefault();
 
-            const product_code = parseInt(document.getElementById('menu-codigo').value) || null;
-            const name         = document.getElementById('menu-nombre').value.trim();
-            const price        = parseFloat(document.getElementById('menu-precio').value);
-            const item_type    = document.getElementById('menu-tipo').value;
+            const product_code   = parseInt(document.getElementById('menu-codigo').value)    || null;
+            const name           = document.getElementById('menu-nombre').value.trim();
+            const price          = parseFloat(document.getElementById('menu-precio').value);
+            const item_type      = document.getElementById('menu-tipo').value;
             const portions_today = parseInt(document.getElementById('menu-porciones').value) || null;
 
+            if (!name) {
+                Toast.error('El nombre del plato es obligatorio.');
+                return;
+            }
+            if (!price || isNaN(price) || price <= 0) {
+                Toast.error('Ingresa un precio válido mayor a 0.');
+                return;
+            }
             if (item_type === 'sauce') {
                 Toast.error('El tipo "sauce" no está disponible como tipo independiente.');
                 return;
             }
-            // product_code es opcional — la columna puede no existir en la BD
 
             try {
                 // Obtener o crear restaurante
@@ -690,7 +672,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (errRes) throw errRes;
 
-                if (res && res.id) {
+                if (res?.id) {
                     restaurantId = res.id;
                 } else {
                     const { data: nuevoRest, error: errNuevo } = await supabaseClient
@@ -713,7 +695,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
                 const nombreCategoria = mapaCategoria[item_type] || 'General';
 
-                // Upsert categoría
                 await supabaseClient
                     .from('menu_categories')
                     .upsert(
@@ -729,9 +710,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     .maybeSingle();
 
                 if (errCat) throw errCat;
-                if (!cat || !cat.id) throw new Error(`No se pudo obtener la categoría "${nombreCategoria}".`);
+                if (!cat?.id) throw new Error(`No se pudo obtener la categoría "${nombreCategoria}".`);
 
-                // Payload base — sin product_code (columna opcional en el esquema)
+                // [FIX-1] Payload limpio — product_code va directo, sin fallback
+                // La columna product_code INTEGER ya existe en la BD (confirmado).
                 const payload = {
                     restaurant_id: restaurantId,
                     category_id:   cat.id,
@@ -740,40 +722,29 @@ document.addEventListener('DOMContentLoaded', () => {
                     item_type,
                     is_active:     true,
                 };
+                // Solo incluir si el usuario ingresó un código
+                if (product_code !== null) payload.product_code   = product_code;
                 if (portions_today !== null) payload.portions_today = portions_today;
-                // product_code: agregar solo si la columna existe en la BD
-                if (product_code) payload.product_code = product_code;
 
                 const { error: errItem } = await supabaseClient
                     .from('menu_items')
                     .insert([payload]);
 
                 if (errItem) {
-                    // Si falla por product_code inexistente, reintentar sin él
-                    if (errItem.code === '42703' && payload.product_code) {
-                        delete payload.product_code;
-                        const { error: errRetry } = await supabaseClient
-                            .from('menu_items').insert([payload]);
-                        if (errRetry) {
-                            if (errRetry.code === '23505') {
-                                Toast.error(`Ya existe un plato llamado "${name}" en el catálogo.`);
-                                return;
-                            }
-                            throw errRetry;
-                        }
-                    } else if (errItem.code === '23505') {
+                    if (errItem.code === '23505') {
                         Toast.error(`Ya existe un plato llamado "${name}" en el catálogo.`);
                         return;
-                    } else {
-                        throw errItem;
                     }
+                    throw errItem;
                 }
 
-                document.getElementById('menu-codigo').value   = '';
-                document.getElementById('menu-nombre').value   = '';
-                document.getElementById('menu-precio').value   = '';
+                // Limpiar formulario
+                document.getElementById('menu-codigo').value    = '';
+                document.getElementById('menu-nombre').value    = '';
+                document.getElementById('menu-precio').value    = '';
                 document.getElementById('menu-porciones').value = '';
-                Toast.ok(`"${name}" registrado en el catálogo correctamente.`);
+
+                Toast.ok(`"${name}" registrado correctamente.`);
                 cargarSlotsMenuReal();
 
             } catch (err) {
@@ -801,7 +772,7 @@ async function eliminarComponenteCatalogo(idItem, nombreItem) {
 }
 
 // ============================================================
-// ACTUALIZAR PRECIO DEL PLATO
+// ACTUALIZAR PRECIO
 // ============================================================
 async function actualizarPrecioPlatoReal(idPlato, nuevoPrecio) {
     try {
@@ -812,11 +783,12 @@ async function actualizarPrecioPlatoReal(idPlato, nuevoPrecio) {
         if (error) throw error;
     } catch (err) {
         console.error('Error actualizando precio:', err);
+        Toast.error('No se pudo actualizar el precio.');
     }
 }
 
 // ============================================================
-// HELPER: actualizar switch de disponibilidad en DOM
+// HELPER: actualizar switch en DOM
 // ============================================================
 function _actualizarSwitchDOM(idPlato, activo) {
     const btn = document.querySelector(`[data-switch-id="${idPlato}"]`);
@@ -841,17 +813,7 @@ async function actualizarPorcionesHoy(idPlato, valor) {
             .from('menu_items')
             .update(payload)
             .eq('id', idPlato);
-
-        if (error) {
-            if (error.code === '42703' || (error.message && error.message.includes('portions_today'))) {
-                console.warn('Columna portions_today no existe. Ejecuta: ALTER TABLE menu_items ADD COLUMN portions_today INTEGER;');
-                if (porciones === 0) {
-                    await supabaseClient.from('menu_items').update({ is_active: false }).eq('id', idPlato);
-                }
-                return;
-            }
-            throw error;
-        }
+        if (error) throw error;
     } catch (err) {
         console.error('Error actualizando porciones:', err.message || err);
         if (porciones === 0) _actualizarSwitchDOM(idPlato, true);
@@ -916,18 +878,14 @@ async function cargarGastosReal() {
         }
 
         egresos.forEach(g => {
-            const hora = new Date(g.created_at).toLocaleTimeString('es-CO', {
-                hour: '2-digit', minute: '2-digit'
-            });
+            const hora = new Date(g.created_at).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
             tbody.insertAdjacentHTML('beforeend', `
                 <tr class="tbody-row">
                     <td>
                         <span style="background:var(--red-lt);color:var(--red);border:1.5px solid var(--red-bd);border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;">${g.expense_type}</span>
                     </td>
                     <td style="color:var(--text-1);font-size:13px;">${g.description}</td>
-                    <td>
-                        <span class="mono" style="font-size:13px;font-weight:600;color:var(--red);">- ${formatCOP(g.amount)}</span>
-                    </td>
+                    <td><span class="mono" style="font-size:13px;font-weight:600;color:var(--red);">- ${formatCOP(g.amount)}</span></td>
                     <td style="text-align:right;font-size:11.5px;color:var(--text-3);" class="mono">${hora}</td>
                 </tr>`);
         });
@@ -1006,11 +964,11 @@ async function cargarInventarioReal() {
                     <td style="text-align:center;">
                         <div style="display:flex;justify-content:center;gap:4px;">
                             <button onclick="ajustarExistenciasFisicas('${inv.id}',${cant},-1)"
-                                style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);border-radius:999px;width:28px;height:28px;cursor:pointer;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;font-family:'DM Sans',sans-serif;transition:all .2s;"
+                                style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);border-radius:999px;width:28px;height:28px;cursor:pointer;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all .2s;"
                                 onmouseover="this.style.background='rgba(192,57,43,.16)'"
                                 onmouseout="this.style.background='var(--red-lt)'">−</button>
                             <button onclick="ajustarExistenciasFisicas('${inv.id}',${cant},1)"
-                                style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:999px;width:28px;height:28px;cursor:pointer;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;font-family:'DM Sans',sans-serif;transition:all .2s;"
+                                style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:999px;width:28px;height:28px;cursor:pointer;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all .2s;"
                                 onmouseover="this.style.background='rgba(74,103,65,.18)'"
                                 onmouseout="this.style.background='var(--olive-lt)'">+</button>
                         </div>
@@ -1043,7 +1001,6 @@ async function ajustarExistenciasFisicas(idInsumo, stockActual, delta) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Restaurar base de caja persistida en la jornada
     const basePersistida = parseFloat(sessionStorage.getItem('base_caja_hoy') || '0');
     if (basePersistida > 0) {
         baseInicial = basePersistida;
@@ -1064,10 +1021,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     .from('inventory_supplies')
                     .insert([{ item_name, category, current_stock, unit_of_measure, updated_at: new Date().toISOString() }]);
                 if (error) {
-                    if (error.code === '23505') {
-                        Toast.error('Ya existe un insumo con ese nombre.');
-                        return;
-                    }
+                    if (error.code === '23505') { Toast.error('Ya existe un insumo con ese nombre.'); return; }
                     throw error;
                 }
                 formNuevoInsumo.reset();
@@ -1136,5 +1090,4 @@ document.addEventListener('DOMContentLoaded', () => {
             weekday: 'short', year: 'numeric', month: 'short', day: 'numeric'
         });
     }
-    // El dashboard se carga desde admin.html vía cambiarTab inicial
 });
