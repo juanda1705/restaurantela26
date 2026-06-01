@@ -326,14 +326,14 @@ function registrarAperturaCaja() {
 }
 
 // ============================================================
-// EXPORTAR RECIBO PDF (CORREGIDO)
+// EXPORTAR RECIBO PDF (CORREGIDO CON EL NOMBRE DE COLUMNA REAL)
 // ============================================================
 async function exportarReciboPDF(orderId) {
     try {
         const { data: ord, error } = await supabaseClient
             .from('orders')
             .select(`order_number, customer_name, total_amount, created_at,
-                     order_items ( quantity, notes, price )`) // Cambiado unit_price a price
+                     order_items ( quantity, notes, unit_price )`) // Corregido a unit_price[cite: 3]
             .eq('id', orderId)
             .single();
 
@@ -355,7 +355,7 @@ async function exportarReciboPDF(orderId) {
         pdf.text(`Fecha: ${new Date(ord.created_at).toLocaleString('es-CO')}`, 5, 39);
         pdf.text('----------------------------------------', 40, 44, { align: 'center' });
         pdf.setFont('monospace', 'bold');
-        pdf.text('Cant   Detalle                     Subtotal', 5, 49);
+        pdf.text('Cant    Detalle                     Subtotal', 5, 49);
         pdf.setFont('monospace', 'normal');
 
         let y = 55;
@@ -367,8 +367,8 @@ async function exportarReciboPDF(orderId) {
                 }
                 if (nombre.length > 20) nombre = nombre.substring(0, 18) + '..';
                 
-                // Cambiado item.unit_price a item.price
-                const sub = (item.quantity || 1) * (item.price || 0); 
+                // Corregido a item.unit_price para coincidir con la BD[cite: 3]
+                const sub = (item.quantity || 1) * (item.unit_price || 0); 
                 
                 pdf.text(`${item.quantity}x    ${nombre.padEnd(22, ' ')} $${sub.toLocaleString()}`, 5, y);
                 y += 6;
