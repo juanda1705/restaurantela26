@@ -136,6 +136,7 @@ window.La26 = {
                         unit_price,
                         notes,
                         item_status,
+                        menu_item_id,
                         menu_items ( name )
                     )
                 `)
@@ -143,6 +144,31 @@ window.La26 = {
                 .order('created_at', { ascending: true });
 
             if (error) throw error;
+
+            // ── FIX COMANDA: si algún pedido llegó con order_items vacío,
+            // hacemos un query directo a order_items para ese pedido.
+            // Esto ocurre cuando el join anidado falla silenciosamente por
+            // RLS o timing entre el INSERT de orders y el de order_items.
+            const ordenesSinItems = (orders || []).filter(o =>
+                !o.order_items || o.order_items.length === 0
+            );
+
+            if (ordenesSinItems.length > 0) {
+                const ids = ordenesSinItems.map(o => o.id);
+                const { data: itemsDirectos } = await supabaseClient
+                    .from('order_items')
+                    .select('id, order_id, quantity, unit_price, notes, item_status, menu_item_id, menu_items ( name )')
+                    .in('order_id', ids);
+
+                if (itemsDirectos && itemsDirectos.length > 0) {
+                    // Inyectar los ítems en cada orden correspondiente
+                    (orders || []).forEach(o => {
+                        if (!o.order_items || o.order_items.length === 0) {
+                            o.order_items = itemsDirectos.filter(i => i.order_id === o.id);
+                        }
+                    });
+                }
+            }
 
             _allOrders = orders || [];
             _actualizarContadores();
@@ -497,9 +523,21 @@ function _crearCardHTML(order, esNuevo = false) {
         ? '<p style="font-size:13px;color:#6b7280;font-style:italic;padding:4px 0;">Sin detalle registrado.</p>'
         : items.map(item => {
             const parsed      = _parsearNotes(item.notes);
-            const nombrePlato = item.menu_items?.name || parsed.nombrePlato || '(Plato sin nombre)';
+
+            // Resolución del nombre del plato (en orden de confiabilidad):
+            // 1. Join a menu_items (el más confiable si llega)
+            // 2. Prefijo [nombre] en notes (guardado por menu.js en el submit)
+            // 3. Texto plano de notes
+            // 4. Placeholder de último recurso
+            const nombrePlato = item.menu_items?.name
+                || parsed.nombrePlato
+                || (item.notes && !item.notes.startsWith('[nombre]') ? item.notes : null)
+                || '(Plato sin nombre)';
+
+            // La nota del cliente es lo que viene DESPUÉS del separador " | " en notes,
+            // o el notes completo si no tiene el prefijo [nombre].
             const notaCliente = item.menu_items?.name
-                ? (item.notes?.startsWith('[nombre]') ? _parsearNotes(item.notes).notaCliente : item.notes)
+                ? (item.notes?.startsWith('[nombre]') ? parsed.notaCliente : item.notes)
                 : parsed.notaCliente;
             return `
             <div class="order-item">
