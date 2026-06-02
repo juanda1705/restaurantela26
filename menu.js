@@ -779,8 +779,8 @@ async function resolverMenuItemIds() {
         .select('id, name, price, item_type')
         .eq('is_active', true)
         .eq('restaurant_id', restaurantId)
-        .neq('item_type', 'sauce')
-        .in('item_type', ['protein', 'side', 'drink', 'a_la_carte']);
+        // [FIX] Solo tipos validos del enum (protein/sauce NO existen)
+        .in('item_type', ['executive_lunch', 'a_la_carte', 'drink', 'dessert', 'side']);
 
     if (error) {
         console.warn('[La 26] No se pudieron cargar menu_items:', error);
@@ -1124,8 +1124,8 @@ async function cargarSlotsDesdeMenuDia() {
             item_type
         `)
         .eq('daily_menu_id', dailyMenuId)
-        .neq('item_type', 'sauce')
-        .in('item_type', ['protein', 'side', 'drink', 'a_la_carte'])
+        // [FIX] Solo tipos validos del enum (protein/sauce NO existen)
+        .in('item_type', ['executive_lunch', 'a_la_carte', 'drink', 'dessert', 'side'])
         .order('category_order', { ascending: true })
         .order('display_order',  { ascending: true });
 
@@ -1164,8 +1164,8 @@ async function cargarSlotsDesdeCatalogo() {
         .select('id, name, price, item_type, is_active, description')
         .eq('restaurant_id', restaurantId)
         .eq('is_active', true)
-        .neq('item_type', 'sauce')
-        .in('item_type', ['protein', 'side', 'drink', 'a_la_carte'])
+        // [FIX] Solo tipos validos del enum (protein/sauce NO existen)
+        .in('item_type', ['executive_lunch', 'a_la_carte', 'drink', 'dessert', 'side'])
         .order('item_type', { ascending: true })
         .order('name',      { ascending: true });
 
