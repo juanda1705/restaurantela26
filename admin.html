@@ -1576,6 +1576,50 @@
                     </div>
                 </div>
 
+                <!-- Código de integración para app.js -->
+                <div class="card" style="padding:0;overflow:hidden;">
+                    <div style="padding:16px 20px;border-bottom:1.5px solid var(--border);background:var(--surface-2);">
+                        <h3 style="font-size:13.5px;font-weight:700;color:var(--text-1);">📋 Guard para <code style="font-size:12px;font-weight:700;">app.js</code> — Copiar en la pantalla de mesero</h3>
+                        <p style="font-size:11.5px;color:var(--text-3);margin-top:3px;">Pega este bloque al inicio de la inicialización de la pantalla de pedidos (mesero/app.js).</p>
+                    </div>
+                    <pre style="padding:18px;font-size:11.5px;color:var(--text-2);font-family:'DM Mono',monospace;line-height:1.7;overflow-x:auto;background:var(--surface);"><code>// ═══ GUARD: Verificar si el sistema está habilitado ═══
+async function verificarAccesoPedidos() {
+    try {
+        const { data } = await supabaseClient
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'orders_enabled')
+            .maybeSingle();
+
+        const habilitado = data ? data.value === 'true' : true;
+
+        if (!habilitado) {
+            // Ocultar toda la UI de pedidos y mostrar aviso
+            document.getElementById('app-pedidos').style.display = 'none';
+            document.getElementById('panel-fuera-servicio').style.display = 'flex';
+            return false;
+        }
+        return true;
+    } catch {
+        return true; // En caso de error de red, permitir acceso
+    }
+}
+
+// Llamar al inicio del DOMContentLoaded de app.js:
+// document.addEventListener('DOMContentLoaded', async () => {
+//     const ok = await verificarAccesoPedidos();
+//     if (!ok) return;
+//     // ... resto de la inicialización
+// });
+
+// HTML que debes tener en app.html / mesero.html:
+// &lt;div id="panel-fuera-servicio" style="display:none;..."&gt;
+//   &lt;p&gt;🔒 Sistema Fuera de Servicio&lt;/p&gt;
+//   &lt;p&gt;El administrador ha cerrado el sistema temporalmente.&lt;/p&gt;
+// &lt;/div&gt;</code></pre>
+                </div>
+
+            </section>
 
             <!-- TAB: PRODUCCIÓN / RECETARIO ════════════════════════════ -->
             <section id="tab-produccion" style="display:none;flex-direction:column;gap:20px;">
@@ -1891,56 +1935,58 @@
         const TABS = ['dashboard', 'menu', 'personal', 'nomina', 'inventario', 'dian', 'permisos', 'produccion', 'calendario'];
 
         function cambiarTab(dest) {
+            // 1. Ocultar todos los tabs de forma atómica
             TABS.forEach(t => {
-                const el = document.getElementById(`tab-${t}`);
+                const el  = document.getElementById(`tab-${t}`);
                 const btn = document.getElementById(`btn-tab-${t}`);
-                if (el) el.style.display = 'none';
+                if (el)  el.style.cssText = 'display:none;';
                 if (btn) { btn.classList.remove('tab-active'); btn.classList.add('tab-inactive'); }
             });
 
-            const target = document.getElementById(`tab-${dest}`);
+            // 2. Mostrar el tab destino con bloque de estilos atómico
+            const target    = document.getElementById(`tab-${dest}`);
             const btnTarget = document.getElementById(`btn-tab-${dest}`);
 
             if (target) {
-                if (dest === 'nomina') {
-                    target.style.display = 'grid';
-                } else {
-                    target.style.display = 'flex';
-                    target.style.flexDirection = 'column';
-                }
+                target.style.cssText = dest === 'nomina'
+                    ? 'display:grid;'
+                    : 'display:flex;flex-direction:column;gap:24px;';
             }
             if (btnTarget) { btnTarget.classList.remove('tab-inactive'); btnTarget.classList.add('tab-active'); }
 
-            // Sincronizar Bottom Nav
+            // 3. Sincronizar Bottom Nav (móvil)
             document.querySelectorAll('.bnav-item').forEach(b => b.classList.remove('bnav-active'));
             const bnavEl = document.getElementById(`bnav-${dest}`);
             if (bnavEl) bnavEl.classList.add('bnav-active');
 
-            if (dest === 'dashboard') cargarDashboardReal();
-            if (dest === 'menu') cargarSlotsMenuReal();
-            if (dest === 'personal') renderTablaEmpleados();
-            if (dest === 'nomina') cargarGastosReal();
+            // 4. Disparar carga de datos — solo cuando el contenedor ya es visible
+            if (dest === 'dashboard')  cargarDashboardReal();
+            if (dest === 'menu')       cargarSlotsMenuReal();
+            if (dest === 'personal')   renderTablaEmpleados();
+            if (dest === 'nomina')     cargarGastosReal();
             if (dest === 'inventario') cargarInventarioReal();
-            if (dest === 'permisos') cargarEstadoSistema();
-            if (dest === 'produccion') { cargarRecetas(); if (document.querySelectorAll('#tabla-form-ingredientes .ing-row').length === 0) agregarFilaIngrediente(); }
+            if (dest === 'permisos')   cargarEstadoSistema();
             if (dest === 'calendario') cargarCalendarioCierres();
+            if (dest === 'produccion') {
+                cargarRecetas();
+                if (document.querySelectorAll('#tabla-form-ingredientes .ing-row').length === 0)
+                    agregarFilaIngrediente();
+            }
         }
 
         // ═══ INICIALIZACIÓN ═══
         // NOTA: admin.js ya tiene su propio DOMContentLoaded que llama cargarDashboardReal().
-        // Este bloque solo inicializa lo propio del HTML inline.
+        // Este bloque solo inicializa la visibilidad de tabs usando la misma lógica atómica.
         document.addEventListener('DOMContentLoaded', () => {
-            // Asegurar que solo el tab dashboard esté visible al inicio
             TABS.forEach(t => {
                 const el = document.getElementById(`tab-${t}`);
                 if (!el) return;
-                if (t === 'dashboard') {
-                    el.style.display = 'flex';
-                    el.style.flexDirection = 'column';
-                } else {
-                    el.style.display = 'none';
-                }
+                el.style.cssText = t === 'dashboard'
+                    ? 'display:flex;flex-direction:column;gap:24px;'
+                    : 'display:none;';
             });
+            // cargarDashboardReal() la ejecuta admin.js en su propio DOMContentLoaded.
+            // No se duplica aquí para evitar doble llamada a Supabase.
         });
 
         // ═══ MÓDULO DIAN — historial local del día ═══
