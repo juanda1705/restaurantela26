@@ -1114,9 +1114,9 @@ async function eliminarInsumoReal(idInsumo, nombreInsumo) {
 }
 
 // ============================================================
-// 6. CIERRE DE CAJA DIARIO — INFORME Z
+// 6. CIERRE DE CAJA INTELIGENTE — INFORME Z + historial_cierres
 // ============================================================
-function ejecutarCierreCaja() {
+async function ejecutarCierreCaja() {
     const baseReteICA  = Math.max(0, globalIngresos - globalEgresos);
     const totalICA     = baseReteICA * TASA_RETE_ICA;
     const ivaConsumo   = globalIngresos * TASA_IMPOCONSUMO;
@@ -1137,9 +1137,116 @@ Restaurante la 26 · Bucaramanga, Santander
 
 ¿Cerrar y validar el flujo de caja de este ciclo?`;
 
-    if (confirm(msg)) {
-        Toast.ok('Ciclo contable cerrado. Reporte archivado.');
+    if (!confirm(msg)) return;
+
+    // ── Guardar en historial_cierres ─────────────────────────
+    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    const cierrePayload = {
+        fecha:          hoy,
+        ingresos:       Math.round(globalIngresos),
+        egresos:        Math.round(globalEgresos),
+        utilidad_neta:  Math.round(utilidadNeta),
+        provision_ica:  Math.round(totalICA),
+        impoconsumo:    Math.round(ivaConsumo),
+        efectivo:       Math.round(totalEfectivo),
+        transferencia:  Math.round(totalTransferencia),
+        fiado:          Math.round(totalFiado),
+        base_caja:      Math.round(baseInicial),
+        created_at:     new Date().toISOString(),
+    };
+
+    try {
+        const { error } = await supabaseClient
+            .from('historial_cierres')
+            .insert([cierrePayload]);
+        if (error) throw error;
+        Toast.ok(`✅ Cierre del ${hoy} archivado en el calendario.`, 6000);
+    } catch (err) {
+        console.warn('historial_cierres no disponible aún — guardando localmente:', err.message);
+        // Fallback: guardar en localStorage
+        const histLocal = JSON.parse(localStorage.getItem('cierres_local') || '[]');
+        histLocal.unshift({ ...cierrePayload, local: true });
+        localStorage.setItem('cierres_local', JSON.stringify(histLocal.slice(0, 90)));
+        Toast.ok('Cierre archivado localmente. Ejecuta el SQL de historial_cierres para persistir en la nube.');
     }
+
+    // ── Resetear contadores del día ───────────────────────────
+    ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(k));
+    totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
+
+    // ── Actualizar calendario si está visible ──────────────────
+    if (document.getElementById('tab-calendario')?.style.display !== 'none') {
+        cargarCalendarioCierres();
+    }
+
+    Toast.ok('Ciclo contable cerrado. Contadores reseteados a $0.');
+    setTimeout(() => cargarDashboardReal(), 500);
+}
+
+// ── Calendario de cierres ────────────────────────────────────
+async function cargarCalendarioCierres() {
+    const tbody = document.getElementById('tabla-calendario-cierres');
+    const resumen = document.getElementById('resumen-calendario');
+    if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-3);">Cargando historial…</td></tr>`;
+
+    // Leer de Supabase primero, fallback a localStorage
+    let cierres = [];
+    try {
+        const { data, error } = await supabaseClient
+            .from('historial_cierres')
+            .select('*')
+            .order('fecha', { ascending: false })
+            .limit(60);
+        if (error) throw error;
+        cierres = data || [];
+    } catch (_) {
+        cierres = JSON.parse(localStorage.getItem('cierres_local') || '[]');
+    }
+
+    if (cierres.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--text-3);">Sin cierres registrados aún.</td></tr>`;
+        return;
+    }
+
+    // Totales acumulados
+    const totAcc = cierres.reduce((a, c) => ({
+        ing: a.ing + (c.ingresos || 0),
+        eg:  a.eg  + (c.egresos  || 0),
+        ut:  a.ut  + (c.utilidad_neta || 0),
+    }), { ing: 0, eg: 0, ut: 0 });
+
+    if (resumen) {
+        resumen.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px;" class="tables-grid">
+                <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px;text-align:center;">
+                    <p style="font-size:10px;font-weight:700;color:var(--olive);text-transform:uppercase;margin-bottom:4px;">Ingresos Acumulados</p>
+                    <p style="font-size:18px;font-weight:800;color:var(--olive);" class="mono">${formatCOP(totAcc.ing)}</p>
+                </div>
+                <div style="background:var(--red-lt);border:1.5px solid var(--red-bd);border-radius:14px;padding:14px;text-align:center;">
+                    <p style="font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;margin-bottom:4px;">Egresos Acumulados</p>
+                    <p style="font-size:18px;font-weight:800;color:var(--red);" class="mono">${formatCOP(totAcc.eg)}</p>
+                </div>
+                <div style="background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.25);border-radius:14px;padding:14px;text-align:center;">
+                    <p style="font-size:10px;font-weight:700;color:var(--blue);text-transform:uppercase;margin-bottom:4px;">Utilidad Acumulada</p>
+                    <p style="font-size:18px;font-weight:800;color:var(--blue);" class="mono">${formatCOP(totAcc.ut)}</p>
+                </div>
+            </div>`;
+    }
+
+    tbody.innerHTML = cierres.map(c => {
+        const utClass = (c.utilidad_neta || 0) >= 0 ? 'color:var(--olive)' : 'color:var(--red)';
+        const localBadge = c.local ? `<span style="font-size:9px;color:var(--amber);font-weight:700;"> (local)</span>` : '';
+        return `<tr class="tbody-row">
+            <td class="mono" style="font-size:12.5px;font-weight:600;">${c.fecha}${localBadge}</td>
+            <td class="mono" style="color:var(--olive);font-weight:600;">${formatCOP(c.ingresos || 0)}</td>
+            <td class="mono" style="color:var(--red);">${formatCOP(c.egresos || 0)}</td>
+            <td class="mono" style="${utClass};font-weight:700;">${formatCOP(c.utilidad_neta || 0)}</td>
+            <td class="mono" style="font-size:11.5px;">${formatCOP(c.efectivo || 0)}</td>
+            <td class="mono" style="font-size:11.5px;">${formatCOP(c.transferencia || 0)}</td>
+            <td class="mono" style="font-size:11.5px;color:var(--amber);">${formatCOP(c.fiado || 0)}</td>
+        </tr>`;
+    }).join('');
 }
 
 // ============================================================
