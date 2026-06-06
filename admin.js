@@ -1255,101 +1255,108 @@ function _renderToggleSistema(habilitado) {
 // ============================================================
 // MÓDULO B: INTELIGENCIA DE PRODUCCIÓN — RECETARIO
 // ============================================================
-// Tablas Supabase:
-//   production_recipes   { id, name, description, yield_portions, created_at }
-//   recipe_ingredients   { id, recipe_id, supply_id, supply_name, quantity_required, unit }
+// Tablas Supabase necesarias (DDL en basededatos.txt):
+//   production_recipes  { id, name, description, created_at }
+//   recipe_ingredients  { id, recipe_id, supply_id, supply_name, quantity_per_dish, unit }
 //
-// Lógica matemática:
-//   platos_posibles = FLOOR( MIN( stock_i / cantidad_requerida_i ) )  para todos los insumos i de la receta
-//   Al marcar N "platos vendidos":
-//       new_stock_i = stock_i - (cantidad_requerida_i * N)
+// LÓGICA MATEMÁTICA:
+//   La receta define cuánto insumo consume UN solo plato.
+//   Con el stock actual se calcula:
+//     platos_estimados = FLOOR( MIN( stock_i / qty_per_dish_i ) )  ∀ insumo i
+//   El insumo con menor cobertura es el cuello de botella.
+//   El resultado es una ESTIMACIÓN — no es exacto porque en cocina
+//   real hay merme (10-20%). El admin toma ese número y pone las
+//   porciones en el menú; cuando llegan a 0 el plato se bloquea.
+// ============================================================
 
-let _recetasCache  = [];
-let _supplyCache   = [];
-let _calcResult    = null; // { recetaId, platosMaximos, ingredientes[] }
+let _recetasCache = [];
+let _supplyCache  = [];
+let _calcResult   = null;
 
-/**
- * Carga recetas desde Supabase y renderiza la tabla.
- */
+// ── Carga recetas y puebla el selector ──────────────────────
 async function cargarRecetas() {
     const tbody = document.getElementById('tabla-recetas');
+    const badge = document.getElementById('badge-recetas-count');
     if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-3);">Cargando recetas...</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-3);">Cargando recetas…</td></tr>`;
 
     try {
         const { data: recetas, error } = await supabaseClient
             .from('production_recipes')
-            .select(`id, name, description, yield_portions,
-                     recipe_ingredients ( id, supply_id, supply_name, quantity_required, unit )`)
+            .select(`id, name, description,
+                     recipe_ingredients ( id, supply_id, supply_name, quantity_per_dish, unit )`)
             .order('name', { ascending: true });
 
         if (error) throw error;
         _recetasCache = recetas || [];
-        _renderTablaRecetas();
 
-        // Poblar selector de receta para el calculador
+        if (badge) badge.textContent = `${_recetasCache.length} receta${_recetasCache.length !== 1 ? 's' : ''}`;
+
+        // Poblar selector de la calculadora
         const sel = document.getElementById('sel-receta-calculo');
         if (sel) {
-            sel.innerHTML = '<option value="">— Seleccionar receta base —</option>';
+            sel.innerHTML = '<option value="">— Seleccionar receta —</option>';
             _recetasCache.forEach(r => {
-                sel.insertAdjacentHTML('beforeend', `<option value="${r.id}">${r.name} (rinde ${r.yield_portions} platos/ciclo)</option>`);
+                sel.insertAdjacentHTML('beforeend',
+                    `<option value="${r.id}">${r.name}</option>`);
             });
         }
+
+        _renderTablaRecetas();
     } catch (err) {
         console.error('Error cargando recetas:', err);
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--red);font-size:12.5px;">Error al cargar recetas. Revisa la consola.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--red);font-size:12.5px;">Error al cargar. Revisa la consola.</td></tr>`;
     }
 }
 
 function _renderTablaRecetas() {
     const tbody = document.getElementById('tabla-recetas');
     if (!tbody) return;
+
     if (_recetasCache.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">No hay recetas registradas.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Sin recetas. Crea la primera arriba.</td></tr>`;
         return;
     }
+
     tbody.innerHTML = _recetasCache.map(r => {
-        const ings = (r.recipe_ingredients || [])
-            .map(i => `<span style="background:var(--olive-lt);border:1px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:1px 8px;font-size:10.5px;font-weight:600;">${i.quantity_required} ${i.unit} ${i.supply_name}</span>`)
-            .join(' ');
+        const ings = (r.recipe_ingredients || []).map(i =>
+            `<span style="background:var(--olive-lt);border:1px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:2px 9px;font-size:10.5px;font-weight:600;white-space:nowrap;">
+                ${i.quantity_per_dish} ${i.unit} ${i.supply_name}
+            </span>`
+        ).join('');
+
         return `<tr class="tbody-row">
-            <td style="font-size:13px;font-weight:600;color:var(--text-1);">${r.name}</td>
+            <td style="font-size:13px;font-weight:600;color:var(--text-1);white-space:nowrap;">${r.name}</td>
             <td style="font-size:12px;color:var(--text-3);">${r.description || '—'}</td>
-            <td style="text-align:center;"><span class="mono" style="font-size:13px;font-weight:700;color:var(--olive);">${r.yield_portions}</span></td>
-            <td style="max-width:280px;"><div style="display:flex;flex-wrap:wrap;gap:4px;">${ings || '<span style="color:var(--text-3);font-size:11.5px;">Sin ingredientes</span>'}</div></td>
+            <td><div style="display:flex;flex-wrap:wrap;gap:4px;padding:4px 0;">${ings || '<span style="color:var(--text-3);font-size:11.5px;">Sin ingredientes</span>'}</div></td>
             <td style="text-align:center;">
-                <button onclick="eliminarReceta('${r.id}','${(r.name||'').replace(/'/g,"\\'")}') " class="btn-danger">🗑️</button>
+                <button onclick="eliminarReceta('${r.id}','${(r.name||'').replace(/'/g,"\'")}')" class="btn-danger">🗑️ Eliminar</button>
             </td>
         </tr>`;
     }).join('');
 }
 
-/**
- * Registra una nueva receta base con sus ingredientes.
- * La UI pasa el objeto mediante el formulario dinámico.
- */
+// ── Guardar nueva receta ─────────────────────────────────────
 async function guardarReceta() {
-    const nombre    = document.getElementById('rec-nombre')?.value.trim();
-    const desc      = document.getElementById('rec-descripcion')?.value.trim();
-    const porciones = parseInt(document.getElementById('rec-porciones')?.value) || 1;
+    const nombre = document.getElementById('rec-nombre')?.value.trim();
+    const desc   = document.getElementById('rec-descripcion')?.value.trim();
 
     if (!nombre) { Toast.error('El nombre de la receta es obligatorio.'); return; }
 
-    // Leer ingredientes del constructor dinámico
     const filas = document.querySelectorAll('#tabla-form-ingredientes .ing-row');
     const ingredientes = [];
-    let valido = true;
 
     filas.forEach(fila => {
-        const supplyId   = fila.querySelector('.ing-supply-id')?.value;
+        const supplyId   = fila.querySelector('.ing-supply-id')?.value || null;
         const supplyName = fila.querySelector('.ing-supply-name')?.value?.trim();
         const qty        = parseFloat(fila.querySelector('.ing-qty')?.value);
         const unit       = fila.querySelector('.ing-unit')?.value?.trim();
-        if (!supplyName || isNaN(qty) || qty <= 0 || !unit) { valido = false; return; }
-        ingredientes.push({ supply_id: supplyId || null, supply_name: supplyName, quantity_required: qty, unit });
+        if (supplyName && !isNaN(qty) && qty > 0 && unit) {
+            ingredientes.push({ supply_id: supplyId, supply_name: supplyName, quantity_per_dish: qty, unit });
+        }
     });
 
-    if (!valido || ingredientes.length === 0) {
+    if (ingredientes.length === 0) {
         Toast.error('Agrega al menos un ingrediente válido (nombre, cantidad y unidad).');
         return;
     }
@@ -1357,94 +1364,83 @@ async function guardarReceta() {
     try {
         const { data: receta, error: errR } = await supabaseClient
             .from('production_recipes')
-            .insert([{ name: nombre, description: desc, yield_portions: porciones }])
-            .select('id')
-            .single();
+            .insert([{ name: nombre, description: desc || null }])
+            .select('id').single();
         if (errR) throw errR;
 
-        const ingsPayload = ingredientes.map(i => ({ ...i, recipe_id: receta.id }));
         const { error: errI } = await supabaseClient
             .from('recipe_ingredients')
-            .insert(ingsPayload);
+            .insert(ingredientes.map(i => ({ ...i, recipe_id: receta.id })));
         if (errI) throw errI;
 
-        Toast.ok(`Receta "${nombre}" guardada correctamente.`);
-        _resetFormReceta();
+        Toast.ok(`Receta "${nombre}" guardada.`);
+        // Limpiar formulario
+        document.getElementById('rec-nombre').value = '';
+        document.getElementById('rec-descripcion').value = '';
+        document.getElementById('tabla-form-ingredientes').innerHTML = '';
+        agregarFilaIngrediente();
         cargarRecetas();
     } catch (err) {
         console.error('Error guardando receta:', err);
-        Toast.error(`Error al guardar: ${err.message}`);
+        Toast.error(`Error: ${err.message}`);
     }
 }
 
-function _resetFormReceta() {
-    ['rec-nombre','rec-descripcion','rec-porciones'].forEach(id => {
-        const el = document.getElementById(id); if (el) el.value = '';
-    });
-    const tbody = document.getElementById('tabla-form-ingredientes');
-    if (tbody) tbody.innerHTML = '';
-    agregarFilaIngrediente(); // Deja una fila vacía lista
-}
-
-/**
- * Añade una fila dinámica al constructor de ingredientes.
- * Popula el select de insumos desde el inventario cargado.
- */
+// ── Fila dinámica de ingrediente ─────────────────────────────
 async function agregarFilaIngrediente() {
     const tbody = document.getElementById('tabla-form-ingredientes');
     if (!tbody) return;
 
-    // Cargar insumos si no están en caché
     if (_supplyCache.length === 0) {
         const { data } = await supabaseClient
             .from('inventory_supplies')
-            .select('id, item_name, unit_of_measure')
+            .select('id, item_name, unit_of_measure, current_stock')
             .order('item_name');
         _supplyCache = data || [];
     }
 
     const opts = _supplyCache.map(s =>
-        `<option value="${s.id}" data-unit="${s.unit_of_measure}">${s.item_name} (${s.unit_of_measure})</option>`
+        `<option value="${s.id}" data-unit="${s.unit_of_measure}" data-name="${s.item_name}">
+            ${s.item_name} (${s.current_stock} ${s.unit_of_measure} en stock)
+        </option>`
     ).join('');
 
-    const idFila = `ing_${Date.now()}`;
+    const filaId = `ing_${Date.now()}`;
     tbody.insertAdjacentHTML('beforeend', `
-        <tr id="${idFila}" class="ing-row" style="border-bottom:1px solid var(--border);">
+        <tr id="${filaId}" class="ing-row">
             <td style="padding:6px 8px;">
-                <select class="ing-supply-select" onchange="_autoFillUnit(this,'${idFila}')"
-                    style="font-size:12px;border-radius:999px;padding:6px 12px;height:34px;min-width:200px;">
-                    <option value="">— Insumo del inventario —</option>
+                <select class="ing-supply-select" onchange="_autoFillUnit(this,'${filaId}')"
+                    style="font-size:12px;border-radius:999px;padding:5px 10px;height:34px;width:100%;min-width:160px;">
+                    <option value="">— Del inventario o escribe abajo —</option>
                     ${opts}
                 </select>
                 <input type="hidden" class="ing-supply-id">
-                <input type="text" class="ing-supply-name" placeholder="o escribe nombre manual"
-                    style="font-size:12px;border-radius:999px;padding:5px 12px;height:34px;margin-top:4px;">
+                <input type="text" class="ing-supply-name" placeholder="Nombre (si no está en inventario)"
+                    style="font-size:12px;border-radius:999px;padding:5px 10px;height:34px;margin-top:4px;width:100%;">
+            </td>
+            <td style="padding:6px 8px;width:130px;">
+                <input type="number" class="ing-qty" placeholder="Ej: 0.2" min="0.001" step="0.001"
+                    style="font-size:12px;border-radius:999px;padding:5px 10px;height:34px;width:100%;text-align:center;">
             </td>
             <td style="padding:6px 8px;width:110px;">
-                <input type="number" class="ing-qty" placeholder="Ej: 1" min="0.01" step="0.01"
-                    style="font-size:12px;border-radius:999px;padding:5px 12px;height:34px;">
+                <input type="text" class="ing-unit" placeholder="Kg, Libras…"
+                    style="font-size:12px;border-radius:999px;padding:5px 10px;height:34px;width:100%;">
             </td>
-            <td style="padding:6px 8px;width:120px;">
-                <input type="text" class="ing-unit" placeholder="Libras, Kg…"
-                    style="font-size:12px;border-radius:999px;padding:5px 12px;height:34px;">
-            </td>
-            <td style="padding:6px 8px;width:40px;text-align:center;">
-                <button onclick="document.getElementById('${idFila}').remove()"
-                    style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);border-radius:999px;width:28px;height:28px;cursor:pointer;font-size:14px;font-family:'DM Sans',sans-serif;">×</button>
+            <td style="padding:6px 8px;width:36px;text-align:center;">
+                <button onclick="document.getElementById('${filaId}').remove()"
+                    style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);border-radius:999px;width:28px;height:28px;cursor:pointer;font-size:15px;font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;">×</button>
             </td>
         </tr>`);
 }
 
 function _autoFillUnit(selectEl, filaId) {
-    const fila   = document.getElementById(filaId);
+    const fila = document.getElementById(filaId);
     if (!fila) return;
-    const opt    = selectEl.options[selectEl.selectedIndex];
-    const unit   = opt?.dataset?.unit || '';
-    const name   = opt?.text?.split(' (')[0] || '';
-    const id     = opt?.value || '';
-    fila.querySelector('.ing-supply-id').value   = id;
-    fila.querySelector('.ing-supply-name').value = name;
-    fila.querySelector('.ing-unit').value        = unit;
+    const opt  = selectEl.options[selectEl.selectedIndex];
+    if (!opt?.value) return;
+    fila.querySelector('.ing-supply-id').value   = opt.value;
+    fila.querySelector('.ing-supply-name').value = opt.dataset.name || '';
+    fila.querySelector('.ing-unit').value        = opt.dataset.unit || '';
 }
 
 async function eliminarReceta(id, nombre) {
@@ -1459,27 +1455,22 @@ async function eliminarReceta(id, nombre) {
     }
 }
 
-// ──────────────────────────────────────────────
-// CALCULADORA DE PRODUCCIÓN
-// Lógica: platos = FLOOR( MIN(stock_i / qty_requerida_i) )
-// ──────────────────────────────────────────────
+// ── Calculadora: platos ≈ FLOOR( MIN( stock_i / qty_per_dish_i ) ) ──
 async function calcularProduccion() {
-    const sel       = document.getElementById('sel-receta-calculo');
-    const recetaId  = sel?.value;
-    if (!recetaId) { Toast.error('Selecciona una receta base primero.'); return; }
+    const sel      = document.getElementById('sel-receta-calculo');
+    const recetaId = sel?.value;
+    if (!recetaId) { Toast.error('Selecciona una receta primero.'); return; }
 
     const receta = _recetasCache.find(r => r.id === recetaId);
-    if (!receta || !receta.recipe_ingredients?.length) {
-        Toast.error('La receta seleccionada no tiene ingredientes definidos.');
+    if (!receta?.recipe_ingredients?.length) {
+        Toast.error('La receta no tiene ingredientes. Edítala primero.');
         return;
     }
 
-    // Obtener stocks actuales de los insumos usados en la receta
-    const supplyIds = receta.recipe_ingredients
-        .filter(i => i.supply_id)
-        .map(i => i.supply_id);
-
+    // Obtener stocks frescos de Supabase
+    const supplyIds = receta.recipe_ingredients.filter(i => i.supply_id).map(i => i.supply_id);
     let stockMap = {};
+
     if (supplyIds.length > 0) {
         const { data: stocks } = await supabaseClient
             .from('inventory_supplies')
@@ -1488,109 +1479,124 @@ async function calcularProduccion() {
         (stocks || []).forEach(s => { stockMap[s.id] = s; });
     }
 
-    // Calcular platos posibles por cada ingrediente: FLOOR(stock / qty_requerida)
-    let platosMaximos = Infinity;
-    const detalleIngredientes = receta.recipe_ingredients.map(ing => {
-        const stockActual = stockMap[ing.supply_id]?.current_stock ?? 0;
-        const posibles    = ing.quantity_required > 0
-            ? Math.floor(stockActual / ing.quantity_required)
-            : Infinity;
-        if (posibles < platosMaximos) platosMaximos = posibles;
-        return {
-            ...ing,
-            stockActual,
-            posibles,
-            consumo_por_plato: ing.quantity_required,
-        };
+    // Calcular cobertura por insumo
+    let platosEstimados = Infinity;
+    const detalleIng = receta.recipe_ingredients.map(ing => {
+        const stockActual  = stockMap[ing.supply_id]?.current_stock ?? null;
+        const coberturaEst = (stockActual !== null && ing.quantity_per_dish > 0)
+            ? Math.floor(stockActual / ing.quantity_per_dish)
+            : null;
+
+        if (coberturaEst !== null && coberturaEst < platosEstimados) {
+            platosEstimados = coberturaEst;
+        }
+        return { ...ing, stockActual, coberturaEst };
     });
 
-    if (!isFinite(platosMaximos)) platosMaximos = 0;
+    if (!isFinite(platosEstimados)) platosEstimados = 0;
 
-    _calcResult = { recetaId, receta, platosMaximos, ingredientes: detalleIngredientes };
+    _calcResult = { recetaId, receta, platosEstimados, detalleIng };
     _renderResultadoCalculo();
 }
 
 function _renderResultadoCalculo() {
     const panel = document.getElementById('panel-resultado-calculo');
     if (!panel || !_calcResult) return;
-    const { receta, platosMaximos, ingredientes } = _calcResult;
+    const { receta, platosEstimados, detalleIng } = _calcResult;
 
-    const filasIng = ingredientes.map(i => {
-        const consumoTotal = (i.consumo_por_plato * platosMaximos).toFixed(2);
-        const stockRestante = Math.max(0, i.stockActual - i.consumo_por_plato * platosMaximos).toFixed(2);
-        const alerta = parseFloat(stockRestante) <= 2
-            ? `<span style="color:var(--red);font-size:10px;font-weight:700;">⚠️ Stock bajo tras producción</span>` : '';
-        return `<tr style="border-bottom:1px solid var(--border);">
-            <td style="padding:8px 10px;font-size:12.5px;font-weight:600;color:var(--text-1);">${i.supply_name}</td>
-            <td style="padding:8px 10px;text-align:center;" class="mono">${i.stockActual} ${i.unit}</td>
-            <td style="padding:8px 10px;text-align:center;" class="mono">${i.consumo_por_plato} ${i.unit}</td>
-            <td style="padding:8px 10px;text-align:center;color:var(--red);" class="mono">-${consumoTotal} ${i.unit}</td>
-            <td style="padding:8px 10px;text-align:center;color:var(--olive);" class="mono">${stockRestante} ${i.unit} ${alerta}</td>
+    const isCuello = (ing) => ing.coberturaEst !== null && ing.coberturaEst === platosEstimados;
+
+    const filasIng = detalleIng.map(i => {
+        const cuello       = isCuello(i);
+        const consumoTotal = i.stockActual !== null ? (i.quantity_per_dish * platosEstimados).toFixed(3) : '—';
+        const restante     = i.stockActual !== null ? Math.max(0, i.stockActual - i.quantity_per_dish * platosEstimados).toFixed(3) : '—';
+        const stockLabel   = i.stockActual !== null
+            ? `<span class="mono" style="font-size:12.5px;font-weight:600;">${i.stockActual} ${i.unit}</span>`
+            : `<span style="color:var(--amber);font-size:11.5px;font-weight:600;">⚠️ Sin link inventario</span>`;
+        const cuelloLabel  = cuello
+            ? `<span style="font-size:9.5px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.4px;">🔴 Cuello</span>` : '';
+
+        return `<tr style="border-bottom:1px solid var(--border);${cuello ? 'background:rgba(192,57,43,.04);' : ''}">
+            <td style="padding:9px 12px;font-size:12.5px;font-weight:600;color:var(--text-1);">${i.supply_name} ${cuelloLabel}</td>
+            <td style="padding:9px 12px;text-align:center;">${stockLabel}</td>
+            <td style="padding:9px 12px;text-align:center;" class="mono">${i.quantity_per_dish} ${i.unit}</td>
+            <td style="padding:9px 12px;text-align:center;color:${cuello?'var(--red)':'var(--text-2)'};" class="mono">${i.coberturaEst ?? '—'}</td>
+            <td style="padding:9px 12px;text-align:center;color:var(--red);" class="mono">-${consumoTotal}</td>
+            <td style="padding:9px 12px;text-align:center;color:var(--olive);" class="mono">${restante}</td>
         </tr>`;
     }).join('');
 
+    panel.className = 'card';
     panel.style.display = 'block';
     panel.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px;">
             <div>
-                <p style="font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">
-                    Resultado — ${receta.name}
-                </p>
-                <div style="display:flex;align-items:center;gap:10px;">
-                    <span style="font-size:32px;font-weight:800;color:var(--olive);" class="mono">${platosMaximos}</span>
-                    <span style="font-size:14px;color:var(--text-2);">platos posibles con el stock actual</span>
+                <p style="font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">${receta.name} — Resultado</p>
+                <div style="display:flex;align-items:baseline;gap:10px;">
+                    <span style="font-size:42px;font-weight:800;color:var(--olive);font-family:'DM Mono',monospace;line-height:1;">${platosEstimados}</span>
+                    <div>
+                        <p style="font-size:14px;font-weight:600;color:var(--text-1);">platos estimados</p>
+                        <p style="font-size:11px;color:var(--text-3);">con el stock actual del inventario</p>
+                    </div>
                 </div>
             </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <div style="text-align:center;background:var(--surface-2);border:1.5px solid var(--border);border-radius:12px;padding:10px 18px;">
-                    <p style="font-size:9.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;margin-bottom:3px;">Rinde por ciclo</p>
-                    <p style="font-size:18px;font-weight:700;color:var(--blue);" class="mono">${receta.yield_portions}</p>
-                </div>
-            </div>
+            ${platosEstimados > 0 ? `
+            <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px 18px;">
+                <p style="font-size:11px;font-weight:700;color:var(--olive);margin-bottom:8px;">📋 Siguiente paso</p>
+                <p style="font-size:12px;color:var(--text-2);line-height:1.6;">Ve a <strong>Control de Menú</strong> y pon<br><strong>${platosEstimados}</strong> en "Porciones del día" del plato.</p>
+            </div>` : ''}
         </div>
+
         <div style="overflow-x:auto;border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px;">
-            <table style="width:100%;border-collapse:collapse;">
+            <table style="width:100%;border-collapse:collapse;min-width:500px;">
                 <thead>
                     <tr style="background:var(--surface-2);">
-                        <th style="padding:9px 10px;font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:left;">Insumo</th>
-                        <th style="padding:9px 10px;font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;">Stock Actual</th>
-                        <th style="padding:9px 10px;font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;">Por Plato</th>
-                        <th style="padding:9px 10px;font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;">Consumo Total</th>
-                        <th style="padding:9px 10px;font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;">Stock Restante</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:left;">Insumo</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Stock Actual</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Por 1 plato</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Alcanza para</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Consume total</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Queda</th>
                     </tr>
                 </thead>
                 <tbody>${filasIng}</tbody>
             </table>
         </div>
-        ${platosMaximos > 0 ? `
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <label style="font-size:12.5px;font-weight:600;color:var(--text-2);margin:0;">Platos vendidos a descontar:</label>
-            <input type="number" id="inp-platos-vendidos" value="${platosMaximos}" min="1" max="${platosMaximos}"
-                style="width:90px;font-size:13px;font-weight:700;text-align:center;border-radius:999px;padding:6px 12px;">
-            <button onclick="descontarInsumos()" class="btn-olive">
-                📦 Descontar del Inventario
-            </button>
-        </div>` : `<p style="font-size:12.5px;color:var(--red);font-weight:600;">⚠️ Stock insuficiente para producir al menos un plato.</p>`}`;
+
+        ${platosEstimados > 0 ? `
+        <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:12px;padding:14px 16px;">
+            <p style="font-size:12px;font-weight:700;color:var(--olive);margin-bottom:10px;">📦 Descontar insumos al cerrar el día</p>
+            <p style="font-size:11.5px;color:var(--text-2);margin-bottom:10px;">Ingresa cuántos platos se vendieron realmente y descuenta ese consumo del inventario.</p>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <label style="font-size:12.5px;font-weight:600;color:var(--text-2);margin:0;white-space:nowrap;">Platos vendidos:</label>
+                <input type="number" id="inp-platos-vendidos" value="${platosEstimados}" min="1" max="${platosEstimados}"
+                    style="width:90px;font-size:14px;font-weight:700;text-align:center;border-radius:999px;padding:6px 12px;border:1.5px solid var(--olive-bd);">
+                <button onclick="descontarInsumos()" class="btn-olive">📦 Descontar del Inventario</button>
+                <span style="font-size:11px;color:var(--text-3);">(máx. ${platosEstimados})</span>
+            </div>
+        </div>` : `
+        <div style="background:var(--red-lt);border:1.5px solid var(--red-bd);border-radius:12px;padding:14px 16px;">
+            <p style="font-size:13px;font-weight:700;color:var(--red);">⚠️ Stock insuficiente para producir al menos un plato.</p>
+            <p style="font-size:12px;color:var(--text-2);margin-top:4px;">Revisa el insumo marcado como cuello de botella y repón stock.</p>
+        </div>`}`;
 }
 
-/**
- * Descuenta los insumos del inventario según los platos vendidos.
- * new_stock_i = current_stock_i - (qty_requerida_i × platos_vendidos)
- */
+// ── Descuento real del inventario ────────────────────────────
 async function descontarInsumos() {
     if (!_calcResult) return;
     const platosVendidos = parseInt(document.getElementById('inp-platos-vendidos')?.value) || 0;
-    if (platosVendidos <= 0 || platosVendidos > _calcResult.platosMaximos) {
-        Toast.error(`Ingresa una cantidad entre 1 y ${_calcResult.platosMaximos}.`);
+
+    if (platosVendidos <= 0 || platosVendidos > _calcResult.platosEstimados) {
+        Toast.error(`Ingresa un número entre 1 y ${_calcResult.platosEstimados}.`);
         return;
     }
-    if (!confirm(`¿Descontar insumos por ${platosVendidos} plato(s) del inventario?`)) return;
+    if (!confirm(`¿Descontar del inventario el consumo de ${platosVendidos} plato(s)?`)) return;
 
-    const ings = _calcResult.ingredientes.filter(i => i.supply_id);
+    const ingsConLink = _calcResult.detalleIng.filter(i => i.supply_id && i.stockActual !== null);
     let errores = 0;
 
-    for (const ing of ings) {
-        const nuevoStock = Math.max(0, ing.stockActual - ing.consumo_por_plato * platosVendidos);
+    for (const ing of ingsConLink) {
+        const nuevoStock = Math.max(0, ing.stockActual - ing.quantity_per_dish * platosVendidos);
         const { error } = await supabaseClient
             .from('inventory_supplies')
             .update({ current_stock: nuevoStock, updated_at: new Date().toISOString() })
@@ -1599,14 +1605,16 @@ async function descontarInsumos() {
     }
 
     if (errores === 0) {
-        Toast.ok(`✅ ${platosVendidos} plato(s) registrados. Inventario actualizado.`);
+        Toast.ok(`✅ ${platosVendidos} plato(s) descontados del inventario correctamente.`);
     } else {
-        Toast.error(`Se actualizaron algunos insumos, pero ${errores} fallaron. Revisa la consola.`);
+        Toast.error(`${errores} insumo(s) no se actualizaron. Revisa la consola.`);
     }
 
     _calcResult = null;
-    document.getElementById('panel-resultado-calculo').style.display = 'none';
+    const panel = document.getElementById('panel-resultado-calculo');
+    if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
     document.getElementById('sel-receta-calculo').value = '';
+    _supplyCache = []; // forzar recarga fresca
     cargarInventarioReal();
     cargarRecetas();
 }
