@@ -1620,35 +1620,71 @@ async function verificarAccesoPedidos() {
             <!-- TAB: PRODUCCIÓN / RECETARIO ════════════════════════════ -->
             <section id="tab-produccion" style="display:none;flex-direction:column;gap:20px;">
 
-                <!-- ── FORMULARIO NUEVA RECETA ── -->
+                <!-- ═══ EXPLICACIÓN DEL SISTEMA ═══ -->
+                <div class="card" style="background:var(--olive-lt);border-color:var(--olive-bd);">
+                    <div style="display:flex;gap:14px;align-items:flex-start;">
+                        <span style="font-size:28px;flex-shrink:0;">🧪</span>
+                        <div>
+                            <h3 style="font-size:15px;font-weight:700;color:var(--olive);margin-bottom:6px;">¿Cómo funciona el Recetario de Producción?</h3>
+                            <p style="font-size:12.5px;color:var(--text-2);line-height:1.8;">
+                                El sistema <strong>no cuenta platos exactos</strong> — eso es imposible en cocina real porque depende de la habilidad del cocinero, el merme y el tamaño de la porción.
+                                Lo que hace es darte una <strong>estimación máxima</strong> basada en la fórmula:
+                            </p>
+                            <div style="background:var(--surface);border:1.5px solid var(--olive-bd);border-radius:12px;padding:12px 16px;margin:10px 0;font-family:'DM Mono',monospace;font-size:13px;color:var(--olive);font-weight:700;">
+                                Platos ≈ PISO( MÍN( stock_insumo ÷ gramos_por_plato ) )
+                            </div>
+                            <p style="font-size:12px;color:var(--text-2);line-height:1.7;">
+                                El insumo que menos alcanza es el <strong>cuello de botella</strong>. Con ese número el admin decide cuántas porciones poner en el menú del día (campo "Porciones" en Control de Menú).
+                                Cuando se venden esas porciones, el inventario se descuenta automáticamente.
+                            </p>
+                        </div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px;" class="tables-grid">
+                        <div style="background:var(--surface);border:1.5px solid var(--olive-bd);border-radius:12px;padding:12px;">
+                            <p style="font-size:11px;font-weight:700;color:var(--olive);margin-bottom:4px;">📖 Ejemplo real</p>
+                            <p style="font-size:11.5px;color:var(--text-2);line-height:1.6;">Stock: 5 Kg pollo · 24 Kg arroz<br>Receta: 200g pollo + 150g arroz por plato<br>→ Pollo: 25 platos · Arroz: 160 platos<br><strong>→ Estimado: ~25 platos</strong></p>
+                        </div>
+                        <div style="background:var(--surface);border:1.5px solid rgba(154,108,26,.3);border-radius:12px;padding:12px;">
+                            <p style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:4px;">⚠️ Factor merme</p>
+                            <p style="font-size:11.5px;color:var(--text-2);line-height:1.6;">En cocina real se pierde un 10–20% por limpieza, cocción y porcionado. Ingresa la cantidad <strong>ya limpia y lista</strong> para cocinar, o define la receta incluyendo el merme.</p>
+                        </div>
+                        <div style="background:var(--surface);border:1.5px solid rgba(37,99,168,.25);border-radius:12px;padding:12px;">
+                            <p style="font-size:11px;font-weight:700;color:var(--blue);margin-bottom:4px;">🔗 Flujo completo</p>
+                            <p style="font-size:11.5px;color:var(--text-2);line-height:1.6;">Calcular → ver estimado → ir a Control de Menú → poner ese número en "Porciones del día" → al llegar a 0 el plato se bloquea automáticamente.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ═══ FORMULARIO NUEVA RECETA ═══ -->
                 <div class="card">
                     <div style="margin-bottom:16px;">
                         <h3 style="font-size:15px;font-weight:700;color:var(--text-1);">📖 Registrar Nueva Receta Base</h3>
                         <p style="font-size:12px;color:var(--text-3);margin-top:3px;">
-                            Define la relación insumos → porciones. Ejemplo: 1 libra arroz + 1 pechuga = 10 platos.
+                            Define cuánto insumo consume <strong>un solo plato</strong>. Usa gramos o la unidad más precisa posible.
                         </p>
                     </div>
-
-                    <div style="display:grid;grid-template-columns:1fr 1fr 130px;gap:12px;margin-bottom:14px;" class="tables-grid">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;" class="tables-grid">
                         <div><label>Nombre de la Receta *</label><input type="text" id="rec-nombre" placeholder="Ej: Bandeja Corriente · Pollo"></div>
-                        <div><label>Descripción (opcional)</label><input type="text" id="rec-descripcion" placeholder="Ej: Menú del día con proteína"></div>
-                        <div><label>Platos que rinde (ciclo)</label><input type="number" id="rec-porciones" placeholder="Ej: 10" min="1" value="10"></div>
+                        <div><label>Descripción (opcional)</label><input type="text" id="rec-descripcion" placeholder="Ej: Menú del día con pechuga"></div>
                     </div>
 
                     <!-- Constructor dinámico de ingredientes -->
                     <div style="border:1.5px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:12px;">
-                        <div style="padding:12px 16px;background:var(--surface-2);border-bottom:1.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-                            <p style="font-size:12px;font-weight:700;color:var(--text-2);">🧂 Ingredientes de la Receta</p>
-                            <button onclick="agregarFilaIngrediente()" class="btn-ghost" style="padding:5px 14px;font-size:12px;">+ Agregar Ingrediente</button>
+                        <div style="padding:12px 16px;background:var(--surface-2);border-bottom:1.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <div>
+                                <p style="font-size:12px;font-weight:700;color:var(--text-2);">🧂 Ingredientes — consumo por <strong>1 plato</strong></p>
+                                <p style="font-size:11px;color:var(--text-3);">Usa la misma unidad que en el inventario (Kg, Libras, Unidades…)</p>
+                            </div>
+                            <button onclick="agregarFilaIngrediente()" class="btn-ghost" style="padding:5px 14px;font-size:12px;">+ Agregar</button>
                         </div>
                         <div style="overflow-x:auto;">
-                            <table style="width:100%;border-collapse:collapse;">
+                            <table style="width:100%;border-collapse:collapse;min-width:400px;">
                                 <thead>
                                     <tr style="background:var(--surface-2);">
-                                        <th style="padding:9px 10px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:left;">Insumo (inventario o manual)</th>
-                                        <th style="padding:9px 10px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;width:110px;">Cantidad</th>
-                                        <th style="padding:9px 10px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;width:120px;">Unidad</th>
-                                        <th style="width:40px;"></th>
+                                        <th style="padding:9px 10px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:left;">Insumo del Inventario</th>
+                                        <th style="padding:9px 10px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;width:130px;">Cant. por plato</th>
+                                        <th style="padding:9px 10px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;width:110px;">Unidad</th>
+                                        <th style="width:36px;"></th>
                                     </tr>
                                 </thead>
                                 <tbody id="tabla-form-ingredientes"></tbody>
@@ -1656,7 +1692,7 @@ async function verificarAccesoPedidos() {
                         </div>
                         <div style="padding:10px 16px;background:var(--surface-2);border-top:1.5px solid var(--border);">
                             <p style="font-size:11px;color:var(--text-3);">
-                                Selecciona el insumo del inventario para que el descuento sea automático. Si el insumo no está en el kárdex, escríbelo manualmente (solo se mostrará en el informe, no descontará stock).
+                                ⚡ Selecciona del inventario para que el descuento sea automático. Si escribes un nombre manual no se descontará stock (solo aparece en el informe).
                             </p>
                         </div>
                     </div>
@@ -1666,35 +1702,38 @@ async function verificarAccesoPedidos() {
                     </div>
                 </div>
 
-                <!-- ── CALCULADORA DE PRODUCCIÓN ── -->
-                <div class="card" style="background:var(--olive-lt);border-color:var(--olive-bd);">
-                    <h3 style="font-size:14px;font-weight:700;color:var(--olive);margin-bottom:14px;">🧮 Calculadora de Producción</h3>
+                <!-- ═══ CALCULADORA DE PRODUCCIÓN ═══ -->
+                <div class="card" style="border-color:var(--olive-bd);">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);flex:1;">🧮 Calcular Producción del Día</h3>
+                        <span style="font-size:11px;color:var(--text-3);">Lee el stock actual del inventario</span>
+                    </div>
                     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
-                        <div style="flex:1;min-width:240px;">
-                            <label>Receta Base a Calcular</label>
+                        <div style="flex:1;min-width:200px;">
+                            <label>Receta a calcular</label>
                             <select id="sel-receta-calculo" style="border-radius:999px;height:40px;font-size:13px;">
-                                <option value="">— Seleccionar receta base —</option>
+                                <option value="">— Seleccionar receta —</option>
                             </select>
                         </div>
-                        <button onclick="calcularProduccion()" class="btn-olive" style="height:40px;padding:0 24px;font-size:13px;white-space:nowrap;">
-                            ▶ Calcular Platos Posibles
+                        <button onclick="calcularProduccion()" class="btn-olive" style="height:40px;padding:0 22px;font-size:13px;white-space:nowrap;">
+                            ▶ Calcular
                         </button>
                     </div>
-                    <div style="background:var(--surface-2);border:1.5px solid var(--border);border-radius:12px;padding:10px 14px;margin-top:12px;">
-                        <p style="font-size:11px;color:var(--text-3);">
-                            <strong>Fórmula:</strong> platos = PISO( MÍN( stock_insumo ÷ cantidad_por_plato ) ) para cada insumo de la receta.
-                            El insumo con menor cobertura es el cuello de botella.
+                    <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:12px;padding:10px 14px;margin-top:12px;">
+                        <p style="font-size:11.5px;color:var(--olive);">
+                            <strong>Fórmula:</strong> platos ≈ PISO( MÍN( stock_i ÷ cantidad_por_plato_i ) ) — el insumo con menor cobertura marca el límite.
                         </p>
                     </div>
                 </div>
 
-                <!-- Resultado del cálculo (se muestra dinámicamente) -->
-                <div id="panel-resultado-calculo" class="card" style="display:none;"></div>
+                <!-- Resultado del cálculo (dinámico) -->
+                <div id="panel-resultado-calculo" style="display:none;"></div>
 
-                <!-- ── TABLA DE RECETAS REGISTRADAS ── -->
+                <!-- ═══ TABLA DE RECETAS ═══ -->
                 <div class="card" style="padding:0;overflow:hidden;">
-                    <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
-                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📋 Recetas Base Registradas</h3>
+                    <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📋 Recetas Registradas</h3>
+                        <span id="badge-recetas-count" style="background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;">0 recetas</span>
                     </div>
                     <div style="overflow-x:auto;">
                         <table style="width:100%;border-collapse:collapse;">
@@ -1702,13 +1741,12 @@ async function verificarAccesoPedidos() {
                                 <tr class="thead-row">
                                     <th>Nombre</th>
                                     <th>Descripción</th>
-                                    <th style="text-align:center;">Rinde</th>
-                                    <th>Ingredientes</th>
+                                    <th style="text-align:left;">Ingredientes (por plato)</th>
                                     <th style="text-align:center;">Acción</th>
                                 </tr>
                             </thead>
                             <tbody id="tabla-recetas">
-                                <tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Cargando recetas...</td></tr>
+                                <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Sin recetas registradas.</td></tr>
                             </tbody>
                         </table>
                     </div>
