@@ -1263,6 +1263,51 @@ elOrderForm.addEventListener('submit', Order.submit.bind(Order));
 async function cargarMenu() {
     mostrarLoader();
 
+    // ── 0. GUARD: Verificar si el sistema está habilitado por el admin ─────
+    // Lee la tabla system_settings en Supabase. Si orders_enabled === 'false',
+    // muestra pantalla de "fuera de servicio" y bloquea el flujo.
+    try {
+        const _supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const { data: _ss } = await _supa
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'orders_enabled')
+            .maybeSingle();
+
+        if (_ss && _ss.value === 'false') {
+            elLoader.style.display = 'none';
+            elError.style.display  = 'none';
+            elMenu.style.display   = 'none';
+            // Mostrar panel de fuera de servicio
+            let panelFS = document.getElementById('panel-fuera-servicio');
+            if (!panelFS) {
+                panelFS = document.createElement('div');
+                panelFS.id = 'panel-fuera-servicio';
+                Object.assign(panelFS.style, {
+                    display:'flex', position:'fixed', inset:'0',
+                    background:'var(--cream, #f8f5ee)',
+                    flexDirection:'column', alignItems:'center',
+                    justifyContent:'center', gap:'16px', zIndex:'9999',
+                    fontFamily:"'DM Sans', sans-serif",
+                });
+                panelFS.innerHTML = `
+                    <span style="font-size:64px;">🔒</span>
+                    <h2 style="font-size:22px;font-weight:800;color:#2e4028;margin:0;">Sistema Fuera de Servicio</h2>
+                    <p style="font-size:14px;color:#5a6b58;text-align:center;max-width:320px;line-height:1.6;margin:0;">
+                        El administrador ha cerrado temporalmente el sistema de pedidos.<br>
+                        Por favor vuelve más tarde o llama a un mesero.
+                    </p>`;
+                document.body.appendChild(panelFS);
+            } else {
+                panelFS.style.display = 'flex';
+            }
+            return; // Detener toda inicialización
+        }
+    } catch (_guardErr) {
+        // Si la tabla no existe o hay error de red, permitir acceso (fail-open)
+        console.warn('[La 26] Guard system_settings no disponible:', _guardErr?.message);
+    }
+
     // ── 1. Capturar contexto de mesa/modalidad (sessionStorage > URL params) ──
     //    ACCESO PÚBLICO: nunca pide contraseña, solo valida ubicación del cliente.
     const sesion = capturarContexto();
