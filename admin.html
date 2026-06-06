@@ -923,7 +923,7 @@
 
         <!-- ════ SIDEBAR ════ -->
         <aside
-            style="width:236px;min-height:calc(100vh - 102px);background:var(--surface);border-right:1.5px solid var(--border);padding:20px 12px;display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+            style="width:236px;height:calc(100vh - 102px);background:var(--surface);border-right:1.5px solid var(--border);padding:20px 12px;display:flex;flex-direction:column;gap:4px;flex-shrink:0;overflow-y:auto;position:sticky;top:0;">
             <p
                 style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:1.2px;padding:0 8px 10px;">
                 Control del Negocio</p>
@@ -951,6 +951,16 @@
             <button onclick="cambiarTab('dian')" id="btn-tab-dian" class="tab-inactive w-full text-left"
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
                 🧾 Facturación DIAN
+            </button>
+            <div style="height:1.5px;background:var(--border);margin:6px 8px;"></div>
+            <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:1.2px;padding:4px 8px 2px;">Gestión Avanzada</p>
+            <button onclick="cambiarTab('permisos')" id="btn-tab-permisos" class="tab-inactive w-full text-left"
+                style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
+                🔐 Permisos de Acceso
+            </button>
+            <button onclick="cambiarTab('produccion')" id="btn-tab-produccion" class="tab-inactive w-full text-left"
+                style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
+                🧪 Producción / Recetario
             </button>
         </aside>
 
@@ -1520,6 +1530,191 @@
                 </details>
             </section>
 
+
+            <!-- TAB: PERMISOS DE ACCESO ════════════════════════════════ -->
+            <section id="tab-permisos" style="display:none;flex-direction:column;gap:20px;">
+
+                <!-- Banner de estado global -->
+                <div class="card" style="background:var(--olive-lt);border-color:var(--olive-bd);">
+                    <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+                        <span style="font-size:28px;">🔐</span>
+                        <div style="flex:1;min-width:200px;">
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap;">
+                                <h3 style="font-size:15px;font-weight:700;color:var(--olive);">Gestión de Usuarios y Permisos</h3>
+                                <span id="badge-estado-sistema" style="background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;">Cargando…</span>
+                            </div>
+                            <p id="desc-estado-sistema" style="font-size:12.5px;color:var(--text-2);line-height:1.6;">Consultando estado del sistema…</p>
+                        </div>
+                        <button id="btn-toggle-sistema" data-estado="true"
+                            onclick="toggleEstadoSistema()" class="sw-on"
+                            style="flex-shrink:0;padding:10px 22px;font-size:13px;font-weight:700;">
+                            🟢 Pedidos Habilitados
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Explicación de la lógica -->
+                <div class="card" style="background:var(--surface-2);border-style:dashed;">
+                    <p style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.9px;margin-bottom:10px;">🔒 ¿Cómo funciona el Cierre de Pedidos?</p>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;" class="tables-grid">
+                        <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px;">
+                            <p style="font-size:13px;font-weight:700;color:var(--olive);margin-bottom:6px;">1 · Admin desactiva</p>
+                            <p style="font-size:12px;color:var(--text-2);line-height:1.6;">El admin mueve el toggle a <strong>"Pedidos Bloqueados"</strong>. El estado se guarda en Supabase (<code style="font-size:10px;">system_settings</code>).</p>
+                        </div>
+                        <div style="background:var(--red-lt);border:1.5px solid var(--red-bd);border-radius:14px;padding:14px;">
+                            <p style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:6px;">2 · Mesero intenta acceder</p>
+                            <p style="font-size:12px;color:var(--text-2);line-height:1.6;">Al ingresar a la toma de pedidos, la app lee <code style="font-size:10px;">orders_enabled</code> y muestra la pantalla de <strong>"Sistema fuera de servicio"</strong>.</p>
+                        </div>
+                        <div style="background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.28);border-radius:14px;padding:14px;">
+                            <p style="font-size:13px;font-weight:700;color:var(--blue);margin-bottom:6px;">3 · Sin registros contables</p>
+                            <p style="font-size:12px;color:var(--text-2);line-height:1.6;">No se puede crear ningún pedido. Protege la contabilidad en días <strong>no laborables</strong> o fuera de horario.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Código de integración para app.js -->
+                <div class="card" style="padding:0;overflow:hidden;">
+                    <div style="padding:16px 20px;border-bottom:1.5px solid var(--border);background:var(--surface-2);">
+                        <h3 style="font-size:13.5px;font-weight:700;color:var(--text-1);">📋 Guard para <code style="font-size:12px;font-weight:700;">app.js</code> — Copiar en la pantalla de mesero</h3>
+                        <p style="font-size:11.5px;color:var(--text-3);margin-top:3px;">Pega este bloque al inicio de la inicialización de la pantalla de pedidos (mesero/app.js).</p>
+                    </div>
+                    <pre style="padding:18px;font-size:11.5px;color:var(--text-2);font-family:'DM Mono',monospace;line-height:1.7;overflow-x:auto;background:var(--surface);"><code>// ═══ GUARD: Verificar si el sistema está habilitado ═══
+async function verificarAccesoPedidos() {
+    try {
+        const { data } = await supabaseClient
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'orders_enabled')
+            .maybeSingle();
+
+        const habilitado = data ? data.value === 'true' : true;
+
+        if (!habilitado) {
+            // Ocultar toda la UI de pedidos y mostrar aviso
+            document.getElementById('app-pedidos').style.display = 'none';
+            document.getElementById('panel-fuera-servicio').style.display = 'flex';
+            return false;
+        }
+        return true;
+    } catch {
+        return true; // En caso de error de red, permitir acceso
+    }
+}
+
+// Llamar al inicio del DOMContentLoaded de app.js:
+// document.addEventListener('DOMContentLoaded', async () => {
+//     const ok = await verificarAccesoPedidos();
+//     if (!ok) return;
+//     // ... resto de la inicialización
+// });
+
+// HTML que debes tener en app.html / mesero.html:
+// &lt;div id="panel-fuera-servicio" style="display:none;..."&gt;
+//   &lt;p&gt;🔒 Sistema Fuera de Servicio&lt;/p&gt;
+//   &lt;p&gt;El administrador ha cerrado el sistema temporalmente.&lt;/p&gt;
+// &lt;/div&gt;</code></pre>
+                </div>
+
+            </section>
+
+            <!-- TAB: PRODUCCIÓN / RECETARIO ════════════════════════════ -->
+            <section id="tab-produccion" style="display:none;flex-direction:column;gap:20px;">
+
+                <!-- ── FORMULARIO NUEVA RECETA ── -->
+                <div class="card">
+                    <div style="margin-bottom:16px;">
+                        <h3 style="font-size:15px;font-weight:700;color:var(--text-1);">📖 Registrar Nueva Receta Base</h3>
+                        <p style="font-size:12px;color:var(--text-3);margin-top:3px;">
+                            Define la relación insumos → porciones. Ejemplo: 1 libra arroz + 1 pechuga = 10 platos.
+                        </p>
+                    </div>
+
+                    <div style="display:grid;grid-template-columns:1fr 1fr 130px;gap:12px;margin-bottom:14px;" class="tables-grid">
+                        <div><label>Nombre de la Receta *</label><input type="text" id="rec-nombre" placeholder="Ej: Bandeja Corriente · Pollo"></div>
+                        <div><label>Descripción (opcional)</label><input type="text" id="rec-descripcion" placeholder="Ej: Menú del día con proteína"></div>
+                        <div><label>Platos que rinde (ciclo)</label><input type="number" id="rec-porciones" placeholder="Ej: 10" min="1" value="10"></div>
+                    </div>
+
+                    <!-- Constructor dinámico de ingredientes -->
+                    <div style="border:1.5px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:12px;">
+                        <div style="padding:12px 16px;background:var(--surface-2);border-bottom:1.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+                            <p style="font-size:12px;font-weight:700;color:var(--text-2);">🧂 Ingredientes de la Receta</p>
+                            <button onclick="agregarFilaIngrediente()" class="btn-ghost" style="padding:5px 14px;font-size:12px;">+ Agregar Ingrediente</button>
+                        </div>
+                        <div style="overflow-x:auto;">
+                            <table style="width:100%;border-collapse:collapse;">
+                                <thead>
+                                    <tr style="background:var(--surface-2);">
+                                        <th style="padding:9px 10px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:left;">Insumo (inventario o manual)</th>
+                                        <th style="padding:9px 10px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;width:110px;">Cantidad</th>
+                                        <th style="padding:9px 10px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;width:120px;">Unidad</th>
+                                        <th style="width:40px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabla-form-ingredientes"></tbody>
+                            </table>
+                        </div>
+                        <div style="padding:10px 16px;background:var(--surface-2);border-top:1.5px solid var(--border);">
+                            <p style="font-size:11px;color:var(--text-3);">
+                                Selecciona el insumo del inventario para que el descuento sea automático. Si el insumo no está en el kárdex, escríbelo manualmente (solo se mostrará en el informe, no descontará stock).
+                            </p>
+                        </div>
+                    </div>
+
+                    <div style="display:flex;justify-content:flex-end;">
+                        <button onclick="guardarReceta()" class="btn-olive" style="padding:10px 26px;">💾 Guardar Receta</button>
+                    </div>
+                </div>
+
+                <!-- ── CALCULADORA DE PRODUCCIÓN ── -->
+                <div class="card" style="background:var(--olive-lt);border-color:var(--olive-bd);">
+                    <h3 style="font-size:14px;font-weight:700;color:var(--olive);margin-bottom:14px;">🧮 Calculadora de Producción</h3>
+                    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+                        <div style="flex:1;min-width:240px;">
+                            <label>Receta Base a Calcular</label>
+                            <select id="sel-receta-calculo" style="border-radius:999px;height:40px;font-size:13px;">
+                                <option value="">— Seleccionar receta base —</option>
+                            </select>
+                        </div>
+                        <button onclick="calcularProduccion()" class="btn-olive" style="height:40px;padding:0 24px;font-size:13px;white-space:nowrap;">
+                            ▶ Calcular Platos Posibles
+                        </button>
+                    </div>
+                    <div style="background:var(--surface-2);border:1.5px solid var(--border);border-radius:12px;padding:10px 14px;margin-top:12px;">
+                        <p style="font-size:11px;color:var(--text-3);">
+                            <strong>Fórmula:</strong> platos = PISO( MÍN( stock_insumo ÷ cantidad_por_plato ) ) para cada insumo de la receta.
+                            El insumo con menor cobertura es el cuello de botella.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Resultado del cálculo (se muestra dinámicamente) -->
+                <div id="panel-resultado-calculo" class="card" style="display:none;"></div>
+
+                <!-- ── TABLA DE RECETAS REGISTRADAS ── -->
+                <div class="card" style="padding:0;overflow:hidden;">
+                    <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
+                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📋 Recetas Base Registradas</h3>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;">
+                            <thead>
+                                <tr class="thead-row">
+                                    <th>Nombre</th>
+                                    <th>Descripción</th>
+                                    <th style="text-align:center;">Rinde</th>
+                                    <th>Ingredientes</th>
+                                    <th style="text-align:center;">Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabla-recetas">
+                                <tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Cargando recetas...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </section>
         </main>
     </div>
 
@@ -1542,6 +1737,12 @@
         </button>
         <button class="bnav-item" id="bnav-dian" onclick="cambiarTab('dian')">
             <span class="bnav-icon">🧾</span><span class="bnav-label">Factura</span>
+        </button>
+        <button class="bnav-item" id="bnav-permisos" onclick="cambiarTab('permisos')">
+            <span class="bnav-icon">🔐</span><span class="bnav-label">Permisos</span>
+        </button>
+        <button class="bnav-item" id="bnav-produccion" onclick="cambiarTab('produccion')">
+            <span class="bnav-icon">🧪</span><span class="bnav-label">Recetario</span>
         </button>
         <a class="bnav-item" href="index.html">
             <span class="bnav-icon">🔥</span><span class="bnav-label">Cocina</span>
@@ -1643,7 +1844,7 @@
         })();
 
         // ═══ GESTIÓN DE TABS ═══
-        const TABS = ['dashboard', 'menu', 'personal', 'nomina', 'inventario', 'dian'];
+        const TABS = ['dashboard', 'menu', 'personal', 'nomina', 'inventario', 'dian', 'permisos', 'produccion'];
 
         function cambiarTab(dest) {
             TABS.forEach(t => {
@@ -1676,6 +1877,8 @@
             if (dest === 'personal') renderTablaEmpleados();
             if (dest === 'nomina') cargarGastosReal();
             if (dest === 'inventario') cargarInventarioReal();
+            if (dest === 'permisos') cargarEstadoSistema();
+            if (dest === 'produccion') { cargarRecetas(); if (document.querySelectorAll('#tabla-form-ingredientes .ing-row').length === 0) agregarFilaIngrediente(); }
         }
 
         // ═══ INICIALIZACIÓN ═══
