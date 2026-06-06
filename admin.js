@@ -1154,3 +1154,459 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     // El dashboard se carga desde admin.html vía cambiarTab inicial
 });
+// ============================================================
+// MÓDULO A: CONTROL DE ACCESO — SISTEMA DE CIERRE DE PEDIDOS
+// ============================================================
+// Clave en Supabase: tabla 'system_settings', row { key: 'orders_enabled', value: 'true'|'false' }
+// Fallback local: localStorage['orders_enabled_local']
+
+const SETTING_KEY = 'orders_enabled';
+
+/**
+ * Lee el estado del sistema desde Supabase.
+ * Si la tabla no existe aún, usa localStorage como fallback.
+ */
+async function cargarEstadoSistema() {
+    try {
+        const { data, error } = await supabaseClient
+            .from('system_settings')
+            .select('value')
+            .eq('key', SETTING_KEY)
+            .maybeSingle();
+
+        if (error) throw error;
+
+        // Si no hay fila aún, el sistema está habilitado por defecto
+        const habilitado = data ? data.value === 'true' : true;
+        _renderToggleSistema(habilitado);
+        return habilitado;
+    } catch (_) {
+        // Fallback: leer de localStorage si la tabla no existe
+        const local = localStorage.getItem(SETTING_KEY);
+        const habilitado = local === null ? true : local === 'true';
+        _renderToggleSistema(habilitado);
+        return habilitado;
+    }
+}
+
+/**
+ * Alterna el estado del sistema (habilitado ↔ deshabilitado).
+ * Persiste en Supabase y en localStorage como backup.
+ */
+async function toggleEstadoSistema() {
+    const btnToggle = document.getElementById('btn-toggle-sistema');
+    if (!btnToggle) return;
+
+    const estadoActual = btnToggle.dataset.estado === 'true';
+    const nuevoEstado  = !estadoActual;
+
+    // Optimista: actualizar UI de inmediato
+    _renderToggleSistema(nuevoEstado);
+    localStorage.setItem(SETTING_KEY, String(nuevoEstado));
+
+    try {
+        // Upsert en Supabase
+        const { error } = await supabaseClient
+            .from('system_settings')
+            .upsert([{ key: SETTING_KEY, value: String(nuevoEstado) }], { onConflict: 'key' });
+
+        if (error) throw error;
+
+        const msg = nuevoEstado
+            ? '✅ Sistema habilitado: los meseros pueden tomar pedidos.'
+            : '🔒 Sistema bloqueado: los meseros verán aviso de "Fuera de servicio".';
+        Toast.ok(msg, 5000);
+    } catch (err) {
+        console.error('Error al persistir estado del sistema:', err);
+        Toast.info('Estado guardado localmente. Sincronizar cuando haya conexión.');
+    }
+}
+
+/**
+ * Actualiza el toggle en el DOM según el estado actual.
+ */
+function _renderToggleSistema(habilitado) {
+    const btn      = document.getElementById('btn-toggle-sistema');
+    const estadoBadge = document.getElementById('badge-estado-sistema');
+    const desc     = document.getElementById('desc-estado-sistema');
+    if (!btn) return;
+
+    btn.dataset.estado = String(habilitado);
+
+    if (habilitado) {
+        btn.className = 'sw-on';
+        btn.innerHTML = '🟢 Pedidos Habilitados';
+        if (estadoBadge) {
+            estadoBadge.textContent = 'Operativo';
+            estadoBadge.style.cssText = 'background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;';
+        }
+        if (desc) desc.textContent = 'Los meseros pueden crear y registrar pedidos con normalidad.';
+    } else {
+        btn.className = 'sw-off';
+        btn.innerHTML = '🔴 Pedidos Bloqueados';
+        if (estadoBadge) {
+            estadoBadge.textContent = 'Fuera de Servicio';
+            estadoBadge.style.cssText = 'background:var(--red-lt);color:var(--red);border:1.5px solid var(--red-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;';
+        }
+        if (desc) desc.textContent = 'Sistema cerrado. Los meseros recibirán aviso de "Sistema fuera de servicio" al intentar acceder.';
+    }
+}
+
+// ============================================================
+// MÓDULO B: INTELIGENCIA DE PRODUCCIÓN — RECETARIO
+// ============================================================
+// Tablas Supabase:
+//   production_recipes   { id, name, description, yield_portions, created_at }
+//   recipe_ingredients   { id, recipe_id, supply_id, supply_name, quantity_required, unit }
+//
+// Lógica matemática:
+//   platos_posibles = FLOOR( MIN( stock_i / cantidad_requerida_i ) )  para todos los insumos i de la receta
+//   Al marcar N "platos vendidos":
+//       new_stock_i = stock_i - (cantidad_requerida_i * N)
+
+let _recetasCache  = [];
+let _supplyCache   = [];
+let _calcResult    = null; // { recetaId, platosMaximos, ingredientes[] }
+
+/**
+ * Carga recetas desde Supabase y renderiza la tabla.
+ */
+async function cargarRecetas() {
+    const tbody = document.getElementById('tabla-recetas');
+    if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-3);">Cargando recetas...</td></tr>`;
+
+    try {
+        const { data: recetas, error } = await supabaseClient
+            .from('production_recipes')
+            .select(`id, name, description, yield_portions,
+                     recipe_ingredients ( id, supply_id, supply_name, quantity_required, unit )`)
+            .order('name', { ascending: true });
+
+        if (error) throw error;
+        _recetasCache = recetas || [];
+        _renderTablaRecetas();
+
+        // Poblar selector de receta para el calculador
+        const sel = document.getElementById('sel-receta-calculo');
+        if (sel) {
+            sel.innerHTML = '<option value="">— Seleccionar receta base —</option>';
+            _recetasCache.forEach(r => {
+                sel.insertAdjacentHTML('beforeend', `<option value="${r.id}">${r.name} (rinde ${r.yield_portions} platos/ciclo)</option>`);
+            });
+        }
+    } catch (err) {
+        console.error('Error cargando recetas:', err);
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--red);font-size:12.5px;">Error al cargar recetas. Revisa la consola.</td></tr>`;
+    }
+}
+
+function _renderTablaRecetas() {
+    const tbody = document.getElementById('tabla-recetas');
+    if (!tbody) return;
+    if (_recetasCache.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">No hay recetas registradas.</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = _recetasCache.map(r => {
+        const ings = (r.recipe_ingredients || [])
+            .map(i => `<span style="background:var(--olive-lt);border:1px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:1px 8px;font-size:10.5px;font-weight:600;">${i.quantity_required} ${i.unit} ${i.supply_name}</span>`)
+            .join(' ');
+        return `<tr class="tbody-row">
+            <td style="font-size:13px;font-weight:600;color:var(--text-1);">${r.name}</td>
+            <td style="font-size:12px;color:var(--text-3);">${r.description || '—'}</td>
+            <td style="text-align:center;"><span class="mono" style="font-size:13px;font-weight:700;color:var(--olive);">${r.yield_portions}</span></td>
+            <td style="max-width:280px;"><div style="display:flex;flex-wrap:wrap;gap:4px;">${ings || '<span style="color:var(--text-3);font-size:11.5px;">Sin ingredientes</span>'}</div></td>
+            <td style="text-align:center;">
+                <button onclick="eliminarReceta('${r.id}','${(r.name||'').replace(/'/g,"\\'")}') " class="btn-danger">🗑️</button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+/**
+ * Registra una nueva receta base con sus ingredientes.
+ * La UI pasa el objeto mediante el formulario dinámico.
+ */
+async function guardarReceta() {
+    const nombre    = document.getElementById('rec-nombre')?.value.trim();
+    const desc      = document.getElementById('rec-descripcion')?.value.trim();
+    const porciones = parseInt(document.getElementById('rec-porciones')?.value) || 1;
+
+    if (!nombre) { Toast.error('El nombre de la receta es obligatorio.'); return; }
+
+    // Leer ingredientes del constructor dinámico
+    const filas = document.querySelectorAll('#tabla-form-ingredientes .ing-row');
+    const ingredientes = [];
+    let valido = true;
+
+    filas.forEach(fila => {
+        const supplyId   = fila.querySelector('.ing-supply-id')?.value;
+        const supplyName = fila.querySelector('.ing-supply-name')?.value?.trim();
+        const qty        = parseFloat(fila.querySelector('.ing-qty')?.value);
+        const unit       = fila.querySelector('.ing-unit')?.value?.trim();
+        if (!supplyName || isNaN(qty) || qty <= 0 || !unit) { valido = false; return; }
+        ingredientes.push({ supply_id: supplyId || null, supply_name: supplyName, quantity_required: qty, unit });
+    });
+
+    if (!valido || ingredientes.length === 0) {
+        Toast.error('Agrega al menos un ingrediente válido (nombre, cantidad y unidad).');
+        return;
+    }
+
+    try {
+        const { data: receta, error: errR } = await supabaseClient
+            .from('production_recipes')
+            .insert([{ name: nombre, description: desc, yield_portions: porciones }])
+            .select('id')
+            .single();
+        if (errR) throw errR;
+
+        const ingsPayload = ingredientes.map(i => ({ ...i, recipe_id: receta.id }));
+        const { error: errI } = await supabaseClient
+            .from('recipe_ingredients')
+            .insert(ingsPayload);
+        if (errI) throw errI;
+
+        Toast.ok(`Receta "${nombre}" guardada correctamente.`);
+        _resetFormReceta();
+        cargarRecetas();
+    } catch (err) {
+        console.error('Error guardando receta:', err);
+        Toast.error(`Error al guardar: ${err.message}`);
+    }
+}
+
+function _resetFormReceta() {
+    ['rec-nombre','rec-descripcion','rec-porciones'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.value = '';
+    });
+    const tbody = document.getElementById('tabla-form-ingredientes');
+    if (tbody) tbody.innerHTML = '';
+    agregarFilaIngrediente(); // Deja una fila vacía lista
+}
+
+/**
+ * Añade una fila dinámica al constructor de ingredientes.
+ * Popula el select de insumos desde el inventario cargado.
+ */
+async function agregarFilaIngrediente() {
+    const tbody = document.getElementById('tabla-form-ingredientes');
+    if (!tbody) return;
+
+    // Cargar insumos si no están en caché
+    if (_supplyCache.length === 0) {
+        const { data } = await supabaseClient
+            .from('inventory_supplies')
+            .select('id, item_name, unit_of_measure')
+            .order('item_name');
+        _supplyCache = data || [];
+    }
+
+    const opts = _supplyCache.map(s =>
+        `<option value="${s.id}" data-unit="${s.unit_of_measure}">${s.item_name} (${s.unit_of_measure})</option>`
+    ).join('');
+
+    const idFila = `ing_${Date.now()}`;
+    tbody.insertAdjacentHTML('beforeend', `
+        <tr id="${idFila}" class="ing-row" style="border-bottom:1px solid var(--border);">
+            <td style="padding:6px 8px;">
+                <select class="ing-supply-select" onchange="_autoFillUnit(this,'${idFila}')"
+                    style="font-size:12px;border-radius:999px;padding:6px 12px;height:34px;min-width:200px;">
+                    <option value="">— Insumo del inventario —</option>
+                    ${opts}
+                </select>
+                <input type="hidden" class="ing-supply-id">
+                <input type="text" class="ing-supply-name" placeholder="o escribe nombre manual"
+                    style="font-size:12px;border-radius:999px;padding:5px 12px;height:34px;margin-top:4px;">
+            </td>
+            <td style="padding:6px 8px;width:110px;">
+                <input type="number" class="ing-qty" placeholder="Ej: 1" min="0.01" step="0.01"
+                    style="font-size:12px;border-radius:999px;padding:5px 12px;height:34px;">
+            </td>
+            <td style="padding:6px 8px;width:120px;">
+                <input type="text" class="ing-unit" placeholder="Libras, Kg…"
+                    style="font-size:12px;border-radius:999px;padding:5px 12px;height:34px;">
+            </td>
+            <td style="padding:6px 8px;width:40px;text-align:center;">
+                <button onclick="document.getElementById('${idFila}').remove()"
+                    style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);border-radius:999px;width:28px;height:28px;cursor:pointer;font-size:14px;font-family:'DM Sans',sans-serif;">×</button>
+            </td>
+        </tr>`);
+}
+
+function _autoFillUnit(selectEl, filaId) {
+    const fila   = document.getElementById(filaId);
+    if (!fila) return;
+    const opt    = selectEl.options[selectEl.selectedIndex];
+    const unit   = opt?.dataset?.unit || '';
+    const name   = opt?.text?.split(' (')[0] || '';
+    const id     = opt?.value || '';
+    fila.querySelector('.ing-supply-id').value   = id;
+    fila.querySelector('.ing-supply-name').value = name;
+    fila.querySelector('.ing-unit').value        = unit;
+}
+
+async function eliminarReceta(id, nombre) {
+    if (!confirm(`¿Eliminar la receta "${nombre}"?`)) return;
+    try {
+        await supabaseClient.from('recipe_ingredients').delete().eq('recipe_id', id);
+        await supabaseClient.from('production_recipes').delete().eq('id', id);
+        Toast.ok(`Receta "${nombre}" eliminada.`);
+        cargarRecetas();
+    } catch (err) {
+        Toast.error('Error al eliminar la receta.');
+    }
+}
+
+// ──────────────────────────────────────────────
+// CALCULADORA DE PRODUCCIÓN
+// Lógica: platos = FLOOR( MIN(stock_i / qty_requerida_i) )
+// ──────────────────────────────────────────────
+async function calcularProduccion() {
+    const sel       = document.getElementById('sel-receta-calculo');
+    const recetaId  = sel?.value;
+    if (!recetaId) { Toast.error('Selecciona una receta base primero.'); return; }
+
+    const receta = _recetasCache.find(r => r.id === recetaId);
+    if (!receta || !receta.recipe_ingredients?.length) {
+        Toast.error('La receta seleccionada no tiene ingredientes definidos.');
+        return;
+    }
+
+    // Obtener stocks actuales de los insumos usados en la receta
+    const supplyIds = receta.recipe_ingredients
+        .filter(i => i.supply_id)
+        .map(i => i.supply_id);
+
+    let stockMap = {};
+    if (supplyIds.length > 0) {
+        const { data: stocks } = await supabaseClient
+            .from('inventory_supplies')
+            .select('id, item_name, current_stock, unit_of_measure')
+            .in('id', supplyIds);
+        (stocks || []).forEach(s => { stockMap[s.id] = s; });
+    }
+
+    // Calcular platos posibles por cada ingrediente: FLOOR(stock / qty_requerida)
+    let platosMaximos = Infinity;
+    const detalleIngredientes = receta.recipe_ingredients.map(ing => {
+        const stockActual = stockMap[ing.supply_id]?.current_stock ?? 0;
+        const posibles    = ing.quantity_required > 0
+            ? Math.floor(stockActual / ing.quantity_required)
+            : Infinity;
+        if (posibles < platosMaximos) platosMaximos = posibles;
+        return {
+            ...ing,
+            stockActual,
+            posibles,
+            consumo_por_plato: ing.quantity_required,
+        };
+    });
+
+    if (!isFinite(platosMaximos)) platosMaximos = 0;
+
+    _calcResult = { recetaId, receta, platosMaximos, ingredientes: detalleIngredientes };
+    _renderResultadoCalculo();
+}
+
+function _renderResultadoCalculo() {
+    const panel = document.getElementById('panel-resultado-calculo');
+    if (!panel || !_calcResult) return;
+    const { receta, platosMaximos, ingredientes } = _calcResult;
+
+    const filasIng = ingredientes.map(i => {
+        const consumoTotal = (i.consumo_por_plato * platosMaximos).toFixed(2);
+        const stockRestante = Math.max(0, i.stockActual - i.consumo_por_plato * platosMaximos).toFixed(2);
+        const alerta = parseFloat(stockRestante) <= 2
+            ? `<span style="color:var(--red);font-size:10px;font-weight:700;">⚠️ Stock bajo tras producción</span>` : '';
+        return `<tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:8px 10px;font-size:12.5px;font-weight:600;color:var(--text-1);">${i.supply_name}</td>
+            <td style="padding:8px 10px;text-align:center;" class="mono">${i.stockActual} ${i.unit}</td>
+            <td style="padding:8px 10px;text-align:center;" class="mono">${i.consumo_por_plato} ${i.unit}</td>
+            <td style="padding:8px 10px;text-align:center;color:var(--red);" class="mono">-${consumoTotal} ${i.unit}</td>
+            <td style="padding:8px 10px;text-align:center;color:var(--olive);" class="mono">${stockRestante} ${i.unit} ${alerta}</td>
+        </tr>`;
+    }).join('');
+
+    panel.style.display = 'block';
+    panel.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+            <div>
+                <p style="font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">
+                    Resultado — ${receta.name}
+                </p>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span style="font-size:32px;font-weight:800;color:var(--olive);" class="mono">${platosMaximos}</span>
+                    <span style="font-size:14px;color:var(--text-2);">platos posibles con el stock actual</span>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <div style="text-align:center;background:var(--surface-2);border:1.5px solid var(--border);border-radius:12px;padding:10px 18px;">
+                    <p style="font-size:9.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;margin-bottom:3px;">Rinde por ciclo</p>
+                    <p style="font-size:18px;font-weight:700;color:var(--blue);" class="mono">${receta.yield_portions}</p>
+                </div>
+            </div>
+        </div>
+        <div style="overflow-x:auto;border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px;">
+            <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr style="background:var(--surface-2);">
+                        <th style="padding:9px 10px;font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:left;">Insumo</th>
+                        <th style="padding:9px 10px;font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;">Stock Actual</th>
+                        <th style="padding:9px 10px;font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;">Por Plato</th>
+                        <th style="padding:9px 10px;font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;">Consumo Total</th>
+                        <th style="padding:9px 10px;font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;text-align:center;">Stock Restante</th>
+                    </tr>
+                </thead>
+                <tbody>${filasIng}</tbody>
+            </table>
+        </div>
+        ${platosMaximos > 0 ? `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <label style="font-size:12.5px;font-weight:600;color:var(--text-2);margin:0;">Platos vendidos a descontar:</label>
+            <input type="number" id="inp-platos-vendidos" value="${platosMaximos}" min="1" max="${platosMaximos}"
+                style="width:90px;font-size:13px;font-weight:700;text-align:center;border-radius:999px;padding:6px 12px;">
+            <button onclick="descontarInsumos()" class="btn-olive">
+                📦 Descontar del Inventario
+            </button>
+        </div>` : `<p style="font-size:12.5px;color:var(--red);font-weight:600;">⚠️ Stock insuficiente para producir al menos un plato.</p>`}`;
+}
+
+/**
+ * Descuenta los insumos del inventario según los platos vendidos.
+ * new_stock_i = current_stock_i - (qty_requerida_i × platos_vendidos)
+ */
+async function descontarInsumos() {
+    if (!_calcResult) return;
+    const platosVendidos = parseInt(document.getElementById('inp-platos-vendidos')?.value) || 0;
+    if (platosVendidos <= 0 || platosVendidos > _calcResult.platosMaximos) {
+        Toast.error(`Ingresa una cantidad entre 1 y ${_calcResult.platosMaximos}.`);
+        return;
+    }
+    if (!confirm(`¿Descontar insumos por ${platosVendidos} plato(s) del inventario?`)) return;
+
+    const ings = _calcResult.ingredientes.filter(i => i.supply_id);
+    let errores = 0;
+
+    for (const ing of ings) {
+        const nuevoStock = Math.max(0, ing.stockActual - ing.consumo_por_plato * platosVendidos);
+        const { error } = await supabaseClient
+            .from('inventory_supplies')
+            .update({ current_stock: nuevoStock, updated_at: new Date().toISOString() })
+            .eq('id', ing.supply_id);
+        if (error) { console.error('Error descontando', ing.supply_name, error); errores++; }
+    }
+
+    if (errores === 0) {
+        Toast.ok(`✅ ${platosVendidos} plato(s) registrados. Inventario actualizado.`);
+    } else {
+        Toast.error(`Se actualizaron algunos insumos, pero ${errores} fallaron. Revisa la consola.`);
+    }
+
+    _calcResult = null;
+    document.getElementById('panel-resultado-calculo').style.display = 'none';
+    document.getElementById('sel-receta-calculo').value = '';
+    cargarInventarioReal();
+    cargarRecetas();
+}
