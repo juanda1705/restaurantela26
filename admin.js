@@ -130,10 +130,15 @@ function getRangoByCodigo(codigo) {
 async function cargarDashboardReal() {
     try {
         // [FIX-1] 'payment_method' eliminado — columna no existe en orders → causaba error 400
+        const hoyStr  = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+        const desdeDia = hoyStr + 'T00:00:00';
+        const hastaDia = hoyStr + 'T23:59:59';
         const { data: orders, error } = await supabaseClient
             .from('orders')
-            .select(`id, order_number, customer_name, total_amount, status, notes,
-                     order_items ( quantity, notes, unit_price )`);
+            .select(`id, order_number, customer_name, total_amount, status, notes, created_at,
+                     order_items ( quantity, notes, unit_price )`)
+            .gte('created_at', desdeDia)
+            .lte('created_at', hastaDia);
 
         if (error) throw error;
 
@@ -231,6 +236,11 @@ async function cargarDashboardReal() {
             }
         }
 
+        // Actualizar totales de métodos de pago desde sessionStorage
+        totalEfectivo      = parseFloat(sessionStorage.getItem('pm_efectivo')      || '0');
+        totalTransferencia = parseFloat(sessionStorage.getItem('pm_transferencia') || '0');
+        totalFiado         = parseFloat(sessionStorage.getItem('pm_fiado')         || '0');
+
         // Top platos
         const ranking = {};
         (orders || []).forEach(ord => {
@@ -270,15 +280,14 @@ async function cargarDashboardReal() {
             }
         }
 
-        // Cargar egresos para KPI
-        const { data: gastos } = await supabaseClient
-            .from('operating_expenses')
-            .select('amount');
+        // globalEgresos se actualiza via cargarGastosParaKPI() en iniciarDashboard()
+        // No se re-consulta aquí para evitar sumar días anteriores sin filtro de fecha
         globalEgresos = (gastos || []).reduce(
             (acc, g) => acc + (parseFloat(g.amount) || 0), 0
         );
         const elTotalGastos = document.getElementById('total-gastos');
         if (elTotalGastos) elTotalGastos.textContent = formatCOP(globalEgresos);
+        renderizarTotales();
 
     } catch (err) {
         console.error('Error cargando dashboard:', err);
@@ -322,8 +331,12 @@ async function registrarMetodoPago(orderId, metodo) {
         sessionStorage.setItem(keyPm, String(acum + monto));
         if (error) throw error;
         const label = { efectivo: 'Efectivo 💵', transferencia: 'Transferencia 📲', fiado: 'Fiado 🤝' };
+        // Actualizar totales en memoria y refrescar UI sin recargar toda la tabla
+        totalEfectivo      = parseFloat(sessionStorage.getItem('pm_efectivo')      || '0');
+        totalTransferencia = parseFloat(sessionStorage.getItem('pm_transferencia') || '0');
+        totalFiado         = parseFloat(sessionStorage.getItem('pm_fiado')         || '0');
+        renderizarTotales();
         Toast.ok(`Pago registrado: ${label[metodo] || metodo}`);
-        cargarDashboardReal();
     } catch (err) {
         console.error('Error registrando método de pago:', err);
         Toast.error('No se pudo registrar el método de pago.');
@@ -907,9 +920,14 @@ async function cargarGastosReal() {
         </td></tr>`;
 
     try {
+        const hoyG   = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+        const desdeG = hoyG + 'T00:00:00';
+        const hastaG = hoyG + 'T23:59:59';
         const { data: egresos, error } = await supabaseClient
             .from('operating_expenses')
             .select('*')
+            .gte('created_at', desdeG)
+            .lte('created_at', hastaG)
             .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -920,6 +938,7 @@ async function cargarGastosReal() {
 
         const elTotalGastos = document.getElementById('total-gastos');
         if (elTotalGastos) elTotalGastos.textContent = formatCOP(globalEgresos);
+        renderizarTotales();
 
         tbody.innerHTML = '';
 
@@ -1059,14 +1078,6 @@ async function ajustarExistenciasFisicas(idInsumo, stockActual, delta) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Restaurar base de caja persistida en la jornada
-    const basePersistida = parseFloat(sessionStorage.getItem('base_caja_hoy') || '0');
-    if (basePersistida > 0) {
-        baseInicial = basePersistida;
-        const panel = document.getElementById('panel-apertura-caja');
-        if (panel) panel.style.display = 'none';
-    }
-
     const formNuevoInsumo = document.getElementById('form-nuevo-insumo');
     if (formNuevoInsumo) {
         formNuevoInsumo.addEventListener('submit', async (e) => {
@@ -1116,140 +1127,150 @@ async function eliminarInsumoReal(idInsumo, nombreInsumo) {
 // ============================================================
 // 6. CIERRE DE CAJA INTELIGENTE — INFORME Z + historial_cierres
 // ============================================================
-async function ejecutarCierreCaja() {
+// ============================================================
+// INICIALIZACIÓN PARALELA DEL DASHBOARD
+// ============================================================
+async function iniciarDashboard() {
+    const basePersistida = parseFloat(sessionStorage.getItem('base_caja_hoy') || '0');
+    if (basePersistida > 0) {
+        baseInicial = basePersistida;
+        const panel = document.getElementById('panel-apertura-caja');
+        if (panel) panel.style.display = 'none';
+    }
+    await Promise.all([
+        cargarDashboardReal(),
+        cargarGastosParaKPI(),
+    ]);
+}
+
+// Query ligera solo para el KPI de gastos en el dashboard (solo del día de hoy)
+async function cargarGastosParaKPI() {
+    const hoy   = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    const desde = hoy + 'T00:00:00';
+    const hasta = hoy + 'T23:59:59';
+    try {
+        const { data } = await supabaseClient
+            .from('operating_expenses')
+            .select('amount')
+            .gte('created_at', desde)
+            .lte('created_at', hasta);
+        globalEgresos = (data || []).reduce((a, g) => a + (parseFloat(g.amount) || 0), 0);
+        const el = document.getElementById('total-gastos');
+        if (el) el.textContent = formatCOP(globalEgresos);
+    } catch (_) {}
+}
+
+// ============================================================
+// RENDERIZAR TOTALES — refresca el UI tras cada operación
+// ============================================================
+function renderizarTotales() {
+    const baseICA      = Math.max(0, globalIngresos - globalEgresos);
+    const provisionICA = baseICA * TASA_RETE_ICA;
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    set('gros-ventas',       formatCOP(globalIngresos));
+    set('val-reteica',       formatCOP(provisionICA));
+    set('kpi-efectivo',      formatCOP(totalEfectivo));
+    set('kpi-transferencia', formatCOP(totalTransferencia));
+    set('kpi-fiado',         formatCOP(totalFiado));
+    set('kpi-saldo-caja',    formatCOP(baseInicial + totalEfectivo + totalTransferencia));
+    set('total-gastos',      formatCOP(globalEgresos));
+}
+
+// ============================================================
+// MODAL CIERRE DE CAJA — abre modal profesional
+// ============================================================
+function ejecutarCierreCaja() {
     const baseReteICA  = Math.max(0, globalIngresos - globalEgresos);
     const totalICA     = baseReteICA * TASA_RETE_ICA;
     const ivaConsumo   = globalIngresos * TASA_IMPOCONSUMO;
     const utilidadNeta = globalIngresos - globalEgresos - totalICA;
-
-    const msg = `
-══════ CIERRE DE CAJA — INFORME Z ══════
-Restaurante la 26 · Bucaramanga, Santander
-
-(+) Ingresos Brutos:          ${formatCOP(globalIngresos)}
-(-) Gastos y Nómina:          ${formatCOP(globalEgresos)}
-(-) Provisión Rete-ICA 6.9‰:  ${formatCOP(totalICA)}
-    Base: ingresos - egresos = ${formatCOP(baseReteICA)}
-(ref) Impoconsumo 8%:         ${formatCOP(ivaConsumo)}
-════════════════════════════════════════
-(=) UTILIDAD NETA ESTIMADA:   ${formatCOP(utilidadNeta)}
-════════════════════════════════════════
-
-¿Cerrar y validar el flujo de caja de este ciclo?`;
-
-    if (!confirm(msg)) return;
-
-    // ── Guardar en historial_cierres ─────────────────────────
-    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
-    const cierrePayload = {
-        fecha:          hoy,
-        ingresos:       Math.round(globalIngresos),
-        egresos:        Math.round(globalEgresos),
-        utilidad_neta:  Math.round(utilidadNeta),
-        provision_ica:  Math.round(totalICA),
-        impoconsumo:    Math.round(ivaConsumo),
-        efectivo:       Math.round(totalEfectivo),
-        transferencia:  Math.round(totalTransferencia),
-        fiado:          Math.round(totalFiado),
-        base_caja:      Math.round(baseInicial),
-        created_at:     new Date().toISOString(),
-    };
-
-    try {
-        const { error } = await supabaseClient
-            .from('historial_cierres')
-            .insert([cierrePayload]);
-        if (error) throw error;
-        Toast.ok(`✅ Cierre del ${hoy} archivado en el calendario.`, 6000);
-    } catch (err) {
-        console.warn('historial_cierres no disponible aún — guardando localmente:', err.message);
-        // Fallback: guardar en localStorage
-        const histLocal = JSON.parse(localStorage.getItem('cierres_local') || '[]');
-        histLocal.unshift({ ...cierrePayload, local: true });
-        localStorage.setItem('cierres_local', JSON.stringify(histLocal.slice(0, 90)));
-        Toast.ok('Cierre archivado localmente. Ejecuta el SQL de historial_cierres para persistir en la nube.');
-    }
-
-    // ── Resetear contadores del día ───────────────────────────
-    ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(k));
-    totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
-
-    // ── Actualizar calendario si está visible ──────────────────
-    if (document.getElementById('tab-calendario')?.style.display !== 'none') {
-        cargarCalendarioCierres();
-    }
-
-    Toast.ok('Ciclo contable cerrado. Contadores reseteados a $0.');
-    setTimeout(() => cargarDashboardReal(), 500);
+    const modal = document.getElementById('modal-cierre-caja');
+    if (!modal) return;
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    set('cierre-ing',   formatCOP(globalIngresos));
+    set('cierre-eg',    formatCOP(globalEgresos));
+    set('cierre-ica',   formatCOP(totalICA));
+    set('cierre-impo',  formatCOP(ivaConsumo));
+    set('cierre-ef',    formatCOP(totalEfectivo));
+    set('cierre-tr',    formatCOP(totalTransferencia));
+    set('cierre-fi',    formatCOP(totalFiado));
+    set('cierre-saldo', formatCOP(baseInicial + totalEfectivo + totalTransferencia));
+    const utEl = document.getElementById('cierre-ut');
+    if (utEl) { utEl.textContent = formatCOP(utilidadNeta); utEl.style.color = utilidadNeta >= 0 ? 'var(--olive)' : 'var(--red)'; }
+    modal.style.cssText = 'display:flex;';
 }
 
-// ── Calendario de cierres ────────────────────────────────────
-async function cargarCalendarioCierres() {
-    const tbody = document.getElementById('tabla-calendario-cierres');
-    const resumen = document.getElementById('resumen-calendario');
-    if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-3);">Cargando historial…</td></tr>`;
-
-    // Leer de Supabase primero, fallback a localStorage
-    let cierres = [];
-    try {
-        const { data, error } = await supabaseClient
-            .from('historial_cierres')
-            .select('*')
-            .order('fecha', { ascending: false })
-            .limit(60);
-        if (error) throw error;
-        cierres = data || [];
-    } catch (_) {
-        cierres = JSON.parse(localStorage.getItem('cierres_local') || '[]');
-    }
-
-    if (cierres.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--text-3);">Sin cierres registrados aún.</td></tr>`;
-        return;
-    }
-
-    // Totales acumulados
-    const totAcc = cierres.reduce((a, c) => ({
-        ing: a.ing + (c.ingresos || 0),
-        eg:  a.eg  + (c.egresos  || 0),
-        ut:  a.ut  + (c.utilidad_neta || 0),
-    }), { ing: 0, eg: 0, ut: 0 });
-
-    if (resumen) {
-        resumen.innerHTML = `
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px;" class="tables-grid">
-                <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px;text-align:center;">
-                    <p style="font-size:10px;font-weight:700;color:var(--olive);text-transform:uppercase;margin-bottom:4px;">Ingresos Acumulados</p>
-                    <p style="font-size:18px;font-weight:800;color:var(--olive);" class="mono">${formatCOP(totAcc.ing)}</p>
-                </div>
-                <div style="background:var(--red-lt);border:1.5px solid var(--red-bd);border-radius:14px;padding:14px;text-align:center;">
-                    <p style="font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;margin-bottom:4px;">Egresos Acumulados</p>
-                    <p style="font-size:18px;font-weight:800;color:var(--red);" class="mono">${formatCOP(totAcc.eg)}</p>
-                </div>
-                <div style="background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.25);border-radius:14px;padding:14px;text-align:center;">
-                    <p style="font-size:10px;font-weight:700;color:var(--blue);text-transform:uppercase;margin-bottom:4px;">Utilidad Acumulada</p>
-                    <p style="font-size:18px;font-weight:800;color:var(--blue);" class="mono">${formatCOP(totAcc.ut)}</p>
-                </div>
-            </div>`;
-    }
-
-    tbody.innerHTML = cierres.map(c => {
-        const utClass = (c.utilidad_neta || 0) >= 0 ? 'color:var(--olive)' : 'color:var(--red)';
-        const localBadge = c.local ? `<span style="font-size:9px;color:var(--amber);font-weight:700;"> (local)</span>` : '';
-        return `<tr class="tbody-row">
-            <td class="mono" style="font-size:12.5px;font-weight:600;">${c.fecha}${localBadge}</td>
-            <td class="mono" style="color:var(--olive);font-weight:600;">${formatCOP(c.ingresos || 0)}</td>
-            <td class="mono" style="color:var(--red);">${formatCOP(c.egresos || 0)}</td>
-            <td class="mono" style="${utClass};font-weight:700;">${formatCOP(c.utilidad_neta || 0)}</td>
-            <td class="mono" style="font-size:11.5px;">${formatCOP(c.efectivo || 0)}</td>
-            <td class="mono" style="font-size:11.5px;">${formatCOP(c.transferencia || 0)}</td>
-            <td class="mono" style="font-size:11.5px;color:var(--amber);">${formatCOP(c.fiado || 0)}</td>
-        </tr>`;
-    }).join('');
+function cerrarModalCierre() {
+    const modal = document.getElementById('modal-cierre-caja');
+    if (modal) modal.style.cssText = 'display:none;';
 }
 
 // ============================================================
+// REALIZAR CIERRE — snapshot + reset del dashboard
+// ============================================================
+async function realizarCierre() {
+    const btnConfirm = document.getElementById('btn-confirmar-cierre');
+    if (btnConfirm) { btnConfirm.disabled = true; btnConfirm.textContent = 'Guardando…'; }
+
+    const baseReteICA  = Math.max(0, globalIngresos - globalEgresos);
+    const totalICA     = baseReteICA * TASA_RETE_ICA;
+    const ivaConsumo   = globalIngresos * TASA_IMPOCONSUMO;
+    const utilidadNeta = globalIngresos - globalEgresos - totalICA;
+    const hoy          = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+
+    const cierrePayload = {
+        fecha:         hoy,
+        ingresos:      Math.round(globalIngresos),
+        egresos:       Math.round(globalEgresos),
+        utilidad_neta: Math.round(utilidadNeta),
+        provision_ica: Math.round(totalICA),
+        impoconsumo:   Math.round(ivaConsumo),
+        efectivo:      Math.round(totalEfectivo),
+        transferencia: Math.round(totalTransferencia),
+        fiado:         Math.round(totalFiado),
+        base_caja:     Math.round(baseInicial),
+        created_at:    new Date().toISOString(),
+    };
+
+    try {
+        const { error } = await supabaseClient.from('historial_cierres').insert([cierrePayload]);
+        if (error) throw error;
+        Toast.ok('\u2705 Cierre del ' + hoy + ' archivado en la nube.', 6000);
+    } catch (err) {
+        console.warn('Guardando cierre localmente:', err.message);
+        const histLocal = JSON.parse(localStorage.getItem('cierres_local') || '[]');
+        histLocal.unshift({ ...cierrePayload, local: true });
+        localStorage.setItem('cierres_local', JSON.stringify(histLocal.slice(0, 90)));
+        Toast.ok('Cierre archivado localmente.');
+    }
+
+    // Reset total de contadores del ciclo
+    ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(k));
+    globalIngresos = 0; globalEgresos = 0;
+    totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
+
+    cerrarModalCierre();
+    renderizarTotales();
+
+    // Limpiar tablas del dashboard
+    const tbodyF = document.getElementById('tabla-facturas');
+    if (tbodyF) tbodyF.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Sin comandas registradas hoy.</td></tr>';
+    const tbodyT = document.getElementById('tabla-top-platos');
+    if (tbodyT) tbodyT.innerHTML = '<tr><td colspan="2" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Sin datos.</td></tr>';
+    const elPedidos = document.getElementById('total-pedidos');
+    if (elPedidos) elPedidos.textContent = '0 pedidos';
+
+    // Mostrar panel de apertura para la nueva jornada
+    const panelApertura = document.getElementById('panel-apertura-caja');
+    if (panelApertura) panelApertura.style.display = 'block';
+
+    Toast.ok('Ciclo cerrado. Dashboard reseteado a $0.');
+
+    if (document.getElementById('tab-calendario')?.style.cssText?.includes('flex')) {
+        cargarCalendarioCierres();
+    }
+}
+
 // INICIALIZACIÓN PRINCIPAL
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
@@ -1259,7 +1280,8 @@ document.addEventListener('DOMContentLoaded', () => {
             weekday: 'short', year: 'numeric', month: 'short', day: 'numeric'
         });
     }
-    // El dashboard se carga desde admin.html vía cambiarTab inicial
+    // Carga paralela del dashboard al arrancar
+    iniciarDashboard();
 });
 // ============================================================
 // MÓDULO A: CONTROL DE ACCESO — SISTEMA DE CIERRE DE PEDIDOS
