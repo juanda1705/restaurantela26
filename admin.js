@@ -1364,7 +1364,7 @@ function _renderToggleSistema(habilitado) {
 // ============================================================
 // Tablas Supabase necesarias (DDL en basededatos.txt):
 //   production_recipes  { id, name, description, created_at }
-//   recipe_ingredients  { id, recipe_id, supply_id, supply_name, quantity_per_dish, unit }
+//   recipe_ingredients  { id, recipe_id, supply_id, supply_name, quantity_required, unit }
 //
 // LÓGICA MATEMÁTICA:
 //   La receta define cuánto insumo consume UN solo plato.
@@ -1391,7 +1391,7 @@ async function cargarRecetas() {
         const { data: recetas, error } = await supabaseClient
             .from('production_recipes')
             .select(`id, name, description,
-                     recipe_ingredients ( id, supply_id, supply_name, quantity_per_dish, unit )`)
+                     recipe_ingredients ( id, supply_id, supply_name, quantity_required, unit )`)
             .order('name', { ascending: true });
 
         if (error) throw error;
@@ -1428,7 +1428,7 @@ function _renderTablaRecetas() {
     tbody.innerHTML = _recetasCache.map(r => {
         const ings = (r.recipe_ingredients || []).map(i =>
             `<span style="background:var(--olive-lt);border:1px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:2px 9px;font-size:10.5px;font-weight:600;white-space:nowrap;">
-                ${i.quantity_per_dish} ${i.unit} ${i.supply_name}
+                ${i.quantity_required} ${i.unit} ${i.supply_name}
             </span>`
         ).join('');
 
@@ -1459,7 +1459,7 @@ async function guardarReceta() {
         const qty        = parseFloat(fila.querySelector('.ing-qty')?.value);
         const unit       = fila.querySelector('.ing-unit')?.value?.trim();
         if (supplyName && !isNaN(qty) && qty > 0 && unit) {
-            ingredientes.push({ supply_id: supplyId, supply_name: supplyName, quantity_per_dish: qty, unit });
+            ingredientes.push({ supply_id: supplyId, supply_name: supplyName, quantity_required: qty, unit });
         }
     });
 
@@ -1590,8 +1590,8 @@ async function calcularProduccion() {
     let platosEstimados = Infinity;
     const detalleIng = receta.recipe_ingredients.map(ing => {
         const stockActual  = stockMap[ing.supply_id]?.current_stock ?? null;
-        const coberturaEst = (stockActual !== null && ing.quantity_per_dish > 0)
-            ? Math.floor(stockActual / ing.quantity_per_dish)
+        const coberturaEst = (stockActual !== null && ing.quantity_required > 0)
+            ? Math.floor(stockActual / ing.quantity_required)
             : null;
 
         if (coberturaEst !== null && coberturaEst < platosEstimados) {
@@ -1615,8 +1615,8 @@ function _renderResultadoCalculo() {
 
     const filasIng = detalleIng.map(i => {
         const cuello       = isCuello(i);
-        const consumoTotal = i.stockActual !== null ? (i.quantity_per_dish * platosEstimados).toFixed(3) : '—';
-        const restante     = i.stockActual !== null ? Math.max(0, i.stockActual - i.quantity_per_dish * platosEstimados).toFixed(3) : '—';
+        const consumoTotal = i.stockActual !== null ? (i.quantity_required * platosEstimados).toFixed(3) : '—';
+        const restante     = i.stockActual !== null ? Math.max(0, i.stockActual - i.quantity_required * platosEstimados).toFixed(3) : '—';
         const stockLabel   = i.stockActual !== null
             ? `<span class="mono" style="font-size:12.5px;font-weight:600;">${i.stockActual} ${i.unit}</span>`
             : `<span style="color:var(--amber);font-size:11.5px;font-weight:600;">⚠️ Sin link inventario</span>`;
@@ -1626,7 +1626,7 @@ function _renderResultadoCalculo() {
         return `<tr style="border-bottom:1px solid var(--border);${cuello ? 'background:rgba(192,57,43,.04);' : ''}">
             <td style="padding:9px 12px;font-size:12.5px;font-weight:600;color:var(--text-1);">${i.supply_name} ${cuelloLabel}</td>
             <td style="padding:9px 12px;text-align:center;">${stockLabel}</td>
-            <td style="padding:9px 12px;text-align:center;" class="mono">${i.quantity_per_dish} ${i.unit}</td>
+            <td style="padding:9px 12px;text-align:center;" class="mono">${i.quantity_required} ${i.unit}</td>
             <td style="padding:9px 12px;text-align:center;color:${cuello?'var(--red)':'var(--text-2)'};" class="mono">${i.coberturaEst ?? '—'}</td>
             <td style="padding:9px 12px;text-align:center;color:var(--red);" class="mono">-${consumoTotal}</td>
             <td style="padding:9px 12px;text-align:center;color:var(--olive);" class="mono">${restante}</td>
@@ -1703,7 +1703,7 @@ async function descontarInsumos() {
     let errores = 0;
 
     for (const ing of ingsConLink) {
-        const nuevoStock = Math.max(0, ing.stockActual - ing.quantity_per_dish * platosVendidos);
+        const nuevoStock = Math.max(0, ing.stockActual - ing.quantity_required * platosVendidos);
         const { error } = await supabaseClient
             .from('inventory_supplies')
             .update({ current_stock: nuevoStock, updated_at: new Date().toISOString() })
