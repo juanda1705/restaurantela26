@@ -954,6 +954,10 @@
             </button>
             <div style="height:1.5px;background:var(--border);margin:6px 8px;"></div>
             <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:1.2px;padding:4px 8px 2px;">Gestión Avanzada</p>
+            <button onclick="cambiarTab('calendario')" id="btn-tab-calendario" class="tab-inactive w-full text-left"
+                style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
+                📅 Calendario de Cierres
+            </button>
             <button onclick="cambiarTab('permisos')" id="btn-tab-permisos" class="tab-inactive w-full text-left"
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
                 🔐 Permisos de Acceso
@@ -1753,6 +1757,49 @@ async function verificarAccesoPedidos() {
                 </div>
 
             </section>
+
+            <!-- TAB: CALENDARIO DE CIERRES ════════════════════════════ -->
+            <section id="tab-calendario" style="display:none;flex-direction:column;gap:20px;">
+
+                <div class="card" style="background:var(--blue-lt);border-color:rgba(37,99,168,.25);">
+                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                        <span style="font-size:28px;">📅</span>
+                        <div style="flex:1;">
+                            <h3 style="font-size:15px;font-weight:700;color:var(--blue);margin-bottom:3px;">Historial de Cierres de Caja</h3>
+                            <p style="font-size:12px;color:var(--text-2);">Cada vez que ejecutas el Cierre de Caja (Z), el ciclo queda registrado aquí para auditoría contable.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Resumen acumulado -->
+                <div id="resumen-calendario"></div>
+
+                <!-- Tabla de cierres -->
+                <div class="card" style="padding:0;overflow:hidden;">
+                    <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
+                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📋 Registro de Ciclos Contables</h3>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;min-width:640px;">
+                            <thead>
+                                <tr class="thead-row">
+                                    <th>Fecha</th>
+                                    <th style="text-align:right;">Ingresos</th>
+                                    <th style="text-align:right;">Egresos</th>
+                                    <th style="text-align:right;">Utilidad Neta</th>
+                                    <th style="text-align:right;">Efectivo</th>
+                                    <th style="text-align:right;">Transferencia</th>
+                                    <th style="text-align:right;">Fiado</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabla-calendario-cierres">
+                                <tr><td colspan="7" style="text-align:center;padding:28px;color:var(--text-3);">Cargando historial…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </section>
         </main>
     </div>
 
@@ -1781,6 +1828,9 @@ async function verificarAccesoPedidos() {
         </button>
         <button class="bnav-item" id="bnav-produccion" onclick="cambiarTab('produccion')">
             <span class="bnav-icon">🧪</span><span class="bnav-label">Recetario</span>
+        </button>
+        <button class="bnav-item" id="bnav-calendario" onclick="cambiarTab('calendario')">
+            <span class="bnav-icon">📅</span><span class="bnav-label">Cierres</span>
         </button>
         <a class="bnav-item" href="index.html">
             <span class="bnav-icon">🔥</span><span class="bnav-label">Cocina</span>
@@ -1882,7 +1932,7 @@ async function verificarAccesoPedidos() {
         })();
 
         // ═══ GESTIÓN DE TABS ═══
-        const TABS = ['dashboard', 'menu', 'personal', 'nomina', 'inventario', 'dian', 'permisos', 'produccion'];
+        const TABS = ['dashboard', 'menu', 'personal', 'nomina', 'inventario', 'dian', 'permisos', 'produccion', 'calendario'];
 
         function cambiarTab(dest) {
             TABS.forEach(t => {
@@ -1917,6 +1967,7 @@ async function verificarAccesoPedidos() {
             if (dest === 'inventario') cargarInventarioReal();
             if (dest === 'permisos') cargarEstadoSistema();
             if (dest === 'produccion') { cargarRecetas(); if (document.querySelectorAll('#tabla-form-ingredientes .ing-row').length === 0) agregarFilaIngrediente(); }
+            if (dest === 'calendario') cargarCalendarioCierres();
         }
 
         // ═══ INICIALIZACIÓN ═══
