@@ -1576,50 +1576,6 @@
                     </div>
                 </div>
 
-                <!-- Código de integración para app.js -->
-                <div class="card" style="padding:0;overflow:hidden;">
-                    <div style="padding:16px 20px;border-bottom:1.5px solid var(--border);background:var(--surface-2);">
-                        <h3 style="font-size:13.5px;font-weight:700;color:var(--text-1);">📋 Guard para <code style="font-size:12px;font-weight:700;">app.js</code> — Copiar en la pantalla de mesero</h3>
-                        <p style="font-size:11.5px;color:var(--text-3);margin-top:3px;">Pega este bloque al inicio de la inicialización de la pantalla de pedidos (mesero/app.js).</p>
-                    </div>
-                    <pre style="padding:18px;font-size:11.5px;color:var(--text-2);font-family:'DM Mono',monospace;line-height:1.7;overflow-x:auto;background:var(--surface);"><code>// ═══ GUARD: Verificar si el sistema está habilitado ═══
-async function verificarAccesoPedidos() {
-    try {
-        const { data } = await supabaseClient
-            .from('system_settings')
-            .select('value')
-            .eq('key', 'orders_enabled')
-            .maybeSingle();
-
-        const habilitado = data ? data.value === 'true' : true;
-
-        if (!habilitado) {
-            // Ocultar toda la UI de pedidos y mostrar aviso
-            document.getElementById('app-pedidos').style.display = 'none';
-            document.getElementById('panel-fuera-servicio').style.display = 'flex';
-            return false;
-        }
-        return true;
-    } catch {
-        return true; // En caso de error de red, permitir acceso
-    }
-}
-
-// Llamar al inicio del DOMContentLoaded de app.js:
-// document.addEventListener('DOMContentLoaded', async () => {
-//     const ok = await verificarAccesoPedidos();
-//     if (!ok) return;
-//     // ... resto de la inicialización
-// });
-
-// HTML que debes tener en app.html / mesero.html:
-// &lt;div id="panel-fuera-servicio" style="display:none;..."&gt;
-//   &lt;p&gt;🔒 Sistema Fuera de Servicio&lt;/p&gt;
-//   &lt;p&gt;El administrador ha cerrado el sistema temporalmente.&lt;/p&gt;
-// &lt;/div&gt;</code></pre>
-                </div>
-
-            </section>
 
             <!-- TAB: PRODUCCIÓN / RECETARIO ════════════════════════════ -->
             <section id="tab-produccion" style="display:none;flex-direction:column;gap:20px;">
