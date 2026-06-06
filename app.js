@@ -864,3 +864,38 @@ document.addEventListener('DOMContentLoaded', () => {
         _mostrarLogin();
     }
 });
+// ═══ GUARD: Verificar si el sistema está habilitado ═══
+async function verificarAccesoPedidos() {
+    try {
+        const { data } = await supabaseClient
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'orders_enabled')
+            .maybeSingle();
+
+        const habilitado = data ? data.value === 'true' : true;
+
+        if (!habilitado) {
+            // Ocultar toda la UI de pedidos y mostrar aviso
+            document.getElementById('app-pedidos').style.display = 'none';
+            document.getElementById('panel-fuera-servicio').style.display = 'flex';
+            return false;
+        }
+        return true;
+    } catch {
+        return true; // En caso de error de red, permitir acceso
+    }
+}
+
+// Llamar al inicio del DOMContentLoaded de app.js:
+// document.addEventListener('DOMContentLoaded', async () => {
+//     const ok = await verificarAccesoPedidos();
+//     if (!ok) return;
+//     // ... resto de la inicialización
+// });
+
+// HTML que debes tener en app.html / mesero.html:
+// <div id="panel-fuera-servicio" style="display:none;...">
+//   <p>🔒 Sistema Fuera de Servicio</p>
+//   <p>El administrador ha cerrado el sistema temporalmente.</p>
+// </div>
