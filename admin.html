@@ -966,6 +966,11 @@
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
                 🧪 Producción / Recetario
             </button>
+            <div style="height:1.5px;background:var(--border);margin:6px 8px;"></div>
+            <a href="menu.html?modo=mesero" target="_blank"
+                style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;color:var(--blue);background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.22);text-decoration:none;font-weight:600;">
+                🍽️ Vista Mesero
+            </a>
         </aside>
 
         <!-- ════ MAIN ════ -->
@@ -1095,6 +1100,7 @@
                                 <thead>
                                     <tr class="thead-row">
                                         <th>Código</th>
+                                        <th>Mesa</th>
                                         <th>Cliente</th>
                                         <th>Total</th>
                                         <th style="text-align:center;">Método</th>
@@ -1103,7 +1109,7 @@
                                 </thead>
                                 <tbody id="tabla-facturas">
                                     <tr>
-                                        <td colspan="5"
+                                        <td colspan="6"
                                             style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
                                             Cargando...</td>
                                     </tr>
@@ -1791,6 +1797,9 @@
         </button>
         <a class="bnav-item" href="index.html">
             <span class="bnav-icon">🔥</span><span class="bnav-label">Cocina</span>
+        </a>
+        <a class="bnav-item" href="menu.html?modo=mesero" target="_blank">
+            <span class="bnav-icon">🍽️</span><span class="bnav-label">Mesero</span>
         </a>
     </nav>
 
