@@ -437,9 +437,6 @@ function setConexion(estado) {
 
 // ── Muestra el badge de mesa y el banner de bienvenida ──────
 function mostrarInfoMesa(numero, nombre) {
-    // En modo mesero no se muestra badge de mesa del cliente en el header
-    if (_MODO_MESERO) return;
-
     // Badge compacto en el header
     if (elBadgeMesa) {
         elBadgeMesa.textContent   = numero;
@@ -1261,786 +1258,1151 @@ function suscribirTiempoReal() {
 elOrderForm.addEventListener('submit', Order.submit.bind(Order));
 
 // ============================================================
-// MÓDULO MESERO — WaiterFlow v2.0
+// PANEL MESERO — MeseroPanel v2.0
 // ============================================================
-// Flujo correcto:
-//   1. Login PIN
-//   2. Carta real cargada (misma carta del cliente)
-//      → El mesero selecciona los platos con + / −
-//   3. Modal de confirmación: tipo entrega + mesa/datos + nombre del cliente
-//   4. Envío a cocina (orders + order_items en Supabase)
-//
 // Activación: menu.html?modo=mesero
-// En modo mesero el cart-bar dice "Confirmar pedido" en lugar de "Ver pedido"
+// Login con usuario/contraseña → Dashboard de mesas en tiempo real
+// → Bottom sheet por mesa → Tomar pedido con carta completa
+// → Realtime: orders, order_items, menu_items
 // ============================================================
-const WaiterFlow = (function() {
 
-    // Estado interno
-    let _mesero  = null;  // { nombre, pin, cargo }
-    let _tipoEntrega = 'mesa'; // 'mesa' | 'para_llevar' | 'domicilio'
+// ── CREDENCIALES HARDCODED (sin Supabase Auth) ──────────────
+const MESERO_CREDS = { usuario: 'cliente', password: 'cliente26', nombre: 'Mesero', cargo: 'Mesero' };
 
-    // PIN hardcoded hasta que exista tabla waiter_sessions
-    const PINES = {
-        '1111': 'Mesero 1',
-        '2222': 'Mesero 2',
-        '3333': 'Mesero 3',
-        '0000': 'Supervisor',
-    };
+// ── ESTADO DEL PANEL ────────────────────────────────────────
+const MeseroState = {
+    mesero:         null,   // { nombre, cargo }
+    restaurantId:   null,
+    mesas:          [],     // filas de la tabla tables
+    pedidosActivos: [],     // orders activos del turno
+    orderItems:     [],     // order_items de esos pedidos
+    menuItems:      [],     // menu_items activos
+    dailyMenuId:    null,
+    slots:          [],     // slots del menú del día o catálogo
+    mesaSeleccionada: null, // mesa abierta en el drawer
+    carritoMesero:  [],     // [{ slotId, cantidad }]
+    cronometroInterval: null,
+    realtimeChannel: null,
+    alertasAgotados: [],
+};
 
-    // CSS del overlay de login y del modal de confirmación de pedido
-    const CSS = `
-        /* ── Overlay de login ── */
-        #wf-login-overlay {
-            position:fixed;inset:0;background:#1a1f18;z-index:10000;
-            display:flex;align-items:center;justify-content:center;
-            font-family:'DM Sans',sans-serif;
-        }
-        .wf-card {
-            background:#fff;border-radius:24px;padding:32px;
-            width:min(400px,calc(100vw - 32px));
-            box-shadow:0 24px 80px rgba(0,0,0,.45);
-        }
-        .wf-logo-wrap {
-            text-align:center;margin-bottom:24px;
-        }
-        .wf-logo-wrap .wf-icon {
-            font-size:48px;display:block;margin-bottom:8px;
-        }
-        .wf-logo-wrap h2 {
-            font-family:'Cormorant Garamond',serif;font-size:1.6rem;
-            font-weight:400;color:#1a1f18;letter-spacing:-.02em;margin-bottom:2px;
-        }
-        .wf-logo-wrap h2 em { font-style:italic;color:#4a6741; }
-        .wf-logo-wrap p {
-            font-size:11px;color:#8a9388;letter-spacing:.08em;text-transform:uppercase;
-        }
-        .wf-label {
-            font-size:10.5px;font-weight:600;text-transform:uppercase;
-            letter-spacing:.07em;color:#4a5248;margin-bottom:6px;display:block;
-        }
-        .wf-input {
-            width:100%;border:1.5px solid #e4e7e2;border-radius:12px;
-            padding:12px 16px;font-size:14px;font-family:'DM Sans',sans-serif;
-            color:#1a1f18;background:#f7f8f6;outline:none;
-            transition:border-color .2s,box-shadow .2s;margin-bottom:14px;
-        }
-        .wf-input:focus { border-color:#4a6741;box-shadow:0 0 0 3px rgba(74,103,65,.12);background:#fff; }
-        .wf-btn {
-            width:100%;background:#4a6741;color:#fff;border:none;border-radius:999px;
-            padding:14px;font-size:14px;font-weight:600;cursor:pointer;
-            font-family:'DM Sans',sans-serif;transition:background .2s;letter-spacing:.02em;
-        }
-        .wf-btn:hover { background:#3a5233; }
-        .wf-btn:disabled { background:#c8d4c5;cursor:not-allowed; }
-        .wf-err {
-            background:#fdf5f3;border:1.5px solid rgba(192,80,60,.3);
-            border-radius:10px;padding:9px 14px;font-size:12.5px;color:#6b2a1e;
-            margin-bottom:14px;display:none;line-height:1.5;
-        }
+// ── CSS DEL PANEL ───────────────────────────────────────────
+const MESERO_CSS = `
+    /* ════ ROOT DARK ════ */
+    #mp-root {
+        position:fixed;inset:0;background:#0f1010;z-index:10000;
+        font-family:'DM Sans',sans-serif;color:#e8e8e2;
+        display:flex;flex-direction:column;overflow:hidden;
+    }
+    #mp-root * { box-sizing:border-box; }
 
-        /* ── Barra de mesero (visible en la carta una vez logueado) ── */
-        #wf-topbar {
-            display:none;
-            position:fixed;top:0;left:0;right:0;z-index:200;
-            background:#1a1f18;
-            padding:10px 16px;
-            align-items:center;justify-content:space-between;
-            gap:10px;
-            font-family:'DM Sans',sans-serif;
-        }
-        #wf-topbar .wf-tb-info {
-            display:flex;align-items:center;gap:8px;
-        }
-        #wf-topbar .wf-tb-avatar {
-            width:32px;height:32px;border-radius:50%;background:#4a6741;
-            display:flex;align-items:center;justify-content:center;
-            font-size:14px;font-weight:700;color:#fff;flex-shrink:0;
-        }
-        #wf-topbar .wf-tb-name {
-            font-size:13px;font-weight:600;color:#fff;
-        }
-        #wf-topbar .wf-tb-sub {
-            font-size:10.5px;color:#8a9388;
-        }
-        #wf-topbar .wf-tb-cerrar {
-            background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);
-            color:#ccc;border-radius:999px;padding:5px 14px;font-size:12px;
-            font-family:'DM Sans',sans-serif;cursor:pointer;transition:all .2s;white-space:nowrap;
-        }
-        #wf-topbar .wf-tb-cerrar:hover { background:rgba(255,255,255,.15);color:#fff; }
+    /* ── KEYFRAMES ── */
+    @keyframes mp-fadeup { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes mp-slidein { from{transform:translateY(100%);opacity:0} to{transform:translateY(0);opacity:1} }
+    @keyframes mp-slidedown { from{transform:translateY(-32px);opacity:0} to{transform:translateY(0);opacity:1} }
+    @keyframes mp-pulse-green { 0%,100%{box-shadow:0 0 0 0 rgba(32,200,96,.45)} 50%{box-shadow:0 0 0 8px rgba(32,200,96,0)} }
+    @keyframes mp-pulse-red { 0%,100%{opacity:1} 50%{opacity:0.45} }
+    @keyframes mp-spin { to{transform:rotate(360deg)} }
 
-        /* ── Modal de confirmación de pedido (mesero) ── */
-        #wf-confirm-modal {
-            display:none;position:fixed;inset:0;z-index:300;
-            align-items:flex-end;justify-content:center;
-            background:rgba(18,18,12,.65);backdrop-filter:blur(8px);
-            -webkit-backdrop-filter:blur(8px);
-            font-family:'DM Sans',sans-serif;
-        }
-        #wf-confirm-modal[style*="flex"] {
-            align-items:flex-end !important;
-        }
-        .wf-confirm-panel {
-            background:#fff;border-radius:28px 28px 0 0;
-            width:100%;max-width:520px;
-            max-height:92svh;overflow-y:auto;
-            padding:0 24px calc(24px + env(safe-area-inset-bottom,0px));
-            animation:slideUp .38s cubic-bezier(0.16,1,0.3,1) both;
-            box-shadow:0 -8px 48px rgba(0,0,0,.16);
-        }
-        .wf-confirm-handle {
-            display:flex;justify-content:center;padding:14px 0 12px;
-        }
-        .wf-confirm-handle-bar {
-            width:36px;height:4px;background:#e8e8e2;border-radius:999px;
-        }
-        .wf-confirm-title {
-            font-family:'Cormorant Garamond',serif;font-size:1.5rem;
-            font-weight:400;color:#18180f;letter-spacing:-.01em;
-            margin-bottom:4px;
-        }
-        .wf-confirm-sub {
-            font-size:12px;color:#78786e;margin-bottom:20px;
-        }
-        .wf-confirm-label {
-            font-size:10.5px;font-weight:600;text-transform:uppercase;
-            letter-spacing:.07em;color:#78786e;margin-bottom:8px;display:block;
-        }
-        .wf-confirm-input {
-            width:100%;border:1.5px solid #e8e8e2;border-radius:12px;
-            padding:12px 15px;font-size:14px;font-family:'DM Sans',sans-serif;
-            color:#18180f;background:#fafaf8;outline:none;
-            transition:border-color .2s,box-shadow .2s;
-        }
-        .wf-confirm-input:focus {
-            border-color:#4a5a28;box-shadow:0 0 0 3px rgba(74,90,40,.08);background:#fff;
-        }
-        .wf-tipo-grid {
-            display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px;
-        }
-        .wf-tipo-btn {
-            padding:12px 8px;border-radius:14px;border:1.5px solid #e8e8e2;
-            background:#fafaf8;color:#78786e;font-family:'DM Sans',sans-serif;
-            font-size:12px;font-weight:400;cursor:pointer;text-align:center;
-            transition:all .2s;-webkit-tap-highlight-color:transparent;line-height:1.4;
-        }
-        .wf-tipo-btn .wf-tipo-icon { display:block;font-size:22px;margin-bottom:4px; }
-        .wf-tipo-btn.active {
-            border-color:#4a5a28;background:#f0f3e8;color:#4a5a28;font-weight:600;
-            box-shadow:0 0 0 2px rgba(74,90,40,.10);
-        }
-        .wf-mesa-grid-mini {
-            display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin-bottom:4px;
-        }
-        .wf-mesa-chip {
-            padding:10px 4px;border-radius:10px;border:1.5px solid #e8e8e2;
-            background:#fafaf8;font-size:14px;font-weight:700;cursor:pointer;
-            font-family:'DM Sans',sans-serif;color:#18180f;text-align:center;
-            transition:all .15s;
-        }
-        .wf-mesa-chip:hover { background:#e8ede7;border-color:#c2d09c; }
-        .wf-mesa-chip.active {
-            background:#4a5a28;color:#fff;border-color:#4a5a28;
-        }
-        .wf-resumen-items {
-            background:#f7f8f5;border-radius:14px;padding:12px 14px;
-            margin-bottom:16px;
-        }
-        .wf-resumen-row {
-            display:flex;justify-content:space-between;align-items:flex-start;
-            padding:7px 0;border-bottom:1px solid #eeefea;font-size:13px;
-            gap:10px;
-        }
-        .wf-resumen-row:last-child { border-bottom:none; }
-        .wf-resumen-nombre { font-weight:500;color:#18180f;flex:1; }
-        .wf-resumen-qty { font-size:11px;color:#b4b4aa;margin-top:2px; }
-        .wf-resumen-precio {
-            font-family:'Cormorant Garamond',serif;font-size:1rem;
-            color:#4a5a28;font-weight:500;white-space:nowrap;flex-shrink:0;
-        }
-        .wf-total-row {
-            display:flex;justify-content:space-between;align-items:center;
-            padding:12px 0 16px;border-top:1px solid #e8e8e2;
-        }
-        .wf-total-label { font-size:12.5px;color:#78786e; }
-        .wf-total-value {
-            font-family:'Cormorant Garamond',serif;font-size:1.4rem;
-            font-weight:500;color:#18180f;
-        }
-    `;
+    /* ── LOGIN ── */
+    #mp-login {
+        display:flex;align-items:center;justify-content:center;
+        flex:1;padding:24px;
+    }
+    .mp-login-card {
+        background:#1a1d1a;border:1px solid #2a2d2a;border-radius:24px;
+        padding:36px 28px;width:min(400px,100%);
+        box-shadow:0 24px 80px rgba(0,0,0,.6);
+        animation:mp-fadeup .4s ease both;
+    }
+    .mp-login-logo {
+        text-align:center;margin-bottom:28px;
+    }
+    .mp-login-logo h1 {
+        font-family:'Cormorant Garamond',serif;font-size:2rem;font-weight:400;
+        color:#e8e8e2;line-height:1.1;margin-bottom:4px;
+    }
+    .mp-login-logo h1 em { color:#8aad3a;font-style:italic; }
+    .mp-login-logo p { font-size:11px;color:#78786e;letter-spacing:.1em;text-transform:uppercase; }
+    .mp-field-label {
+        font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+        color:#78786e;margin-bottom:6px;display:block;
+    }
+    .mp-input {
+        width:100%;background:#0f1010;border:1.5px solid #2a2d2a;border-radius:12px;
+        padding:12px 14px;font-size:14px;color:#e8e8e2;font-family:'DM Sans',sans-serif;
+        outline:none;transition:border-color .2s,box-shadow .2s;margin-bottom:14px;
+    }
+    .mp-input:focus { border-color:#4a5a28;box-shadow:0 0 0 3px rgba(74,90,40,.18); }
+    .mp-input::placeholder { color:#3a3d3a; }
+    .mp-input-eye { position:relative; }
+    .mp-input-eye .mp-input { padding-right:42px;margin-bottom:0; }
+    .mp-eye-btn {
+        position:absolute;right:12px;top:50%;transform:translateY(-50%);
+        background:none;border:none;cursor:pointer;color:#78786e;padding:4px;
+        font-size:16px;
+    }
+    .mp-btn-primary {
+        width:100%;background:#4a5a28;border:none;border-radius:999px;
+        padding:14px;color:#e8e8e2;font-size:14px;font-weight:600;cursor:pointer;
+        font-family:'DM Sans',sans-serif;transition:background .2s;margin-top:6px;
+    }
+    .mp-btn-primary:hover { background:#5c7032; }
+    .mp-btn-primary:disabled { background:#2a2d2a;color:#3a3d3a;cursor:not-allowed; }
+    .mp-login-err {
+        background:#2a1010;border:1px solid rgba(184,50,50,.3);border-radius:10px;
+        padding:10px 14px;font-size:12.5px;color:#e07070;margin-bottom:14px;display:none;
+    }
+
+    /* ── PANEL PRINCIPAL ── */
+    #mp-panel { display:flex;flex-direction:column;flex:1;overflow:hidden; }
+
+    /* ── TOPBAR ── */
+    .mp-topbar {
+        background:#1a1d1a;border-bottom:1px solid #2a2d2a;
+        padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0;
+    }
+    .mp-topbar-logo {
+        font-family:'Cormorant Garamond',serif;font-size:1.2rem;font-weight:400;
+        color:#e8e8e2;flex:1;
+    }
+    .mp-topbar-logo em { color:#8aad3a;font-style:italic; }
+    .mp-topbar-badge {
+        background:#2a2d2a;border:1px solid #3a3d3a;border-radius:999px;
+        padding:4px 12px;font-size:11px;color:#78786e;
+    }
+    .mp-btn-logout {
+        background:none;border:1px solid #2a2d2a;color:#78786e;border-radius:999px;
+        padding:5px 12px;font-size:11.5px;cursor:pointer;font-family:'DM Sans',sans-serif;
+        transition:all .2s;
+    }
+    .mp-btn-logout:hover { border-color:#c05030;color:#e07060; }
+
+    /* ── BARRA DE ALERTAS ── */
+    #mp-alerts-bar {
+        flex-shrink:0;background:#1a1200;border-bottom:1px solid #3a2a00;
+        overflow:hidden;transition:max-height .3s ease;max-height:0;
+    }
+    #mp-alerts-bar.visible { max-height:200px; }
+    .mp-alert-item {
+        display:flex;align-items:center;gap:10px;padding:9px 16px;
+        border-bottom:1px solid #2a1e00;animation:mp-slidedown .3s ease;
+    }
+    .mp-alert-item:last-child { border-bottom:none; }
+    .mp-alert-item span { flex:1;font-size:12.5px;color:#e8c060; }
+    .mp-alert-dismiss {
+        background:none;border:none;color:#78786e;cursor:pointer;font-size:14px;padding:2px 6px;
+    }
+
+    /* ── GRID DE MESAS ── */
+    #mp-grid-wrap {
+        flex:1;overflow-y:auto;padding:16px;
+        display:grid;
+        grid-template-columns:repeat(2,1fr);
+        gap:12px;
+        align-content:start;
+    }
+    @media(min-width:600px){ #mp-grid-wrap{grid-template-columns:repeat(3,1fr);} }
+    @media(min-width:900px){ #mp-grid-wrap{grid-template-columns:repeat(4,1fr);} }
+
+    /* ── TARJETA MESA ── */
+    .mp-mesa-card {
+        border-radius:16px;padding:16px;cursor:pointer;
+        border:1.5px solid #2a2d2a;background:#1a1d1a;
+        transition:transform .15s,box-shadow .15s;
+        animation:mp-fadeup .4s ease both;
+        -webkit-tap-highlight-color:transparent;
+        min-height:110px;display:flex;flex-direction:column;gap:6px;
+    }
+    .mp-mesa-card:active { transform:scale(0.96); }
+    .mp-mesa-card.libre   { background:#0e1f0e;border-color:#2a4a2a; }
+    .mp-mesa-card.pendiente { background:#1f1a08;border-color:#c8941a; }
+    .mp-mesa-card.preparando { background:#1f1208;border-color:#e07020; }
+    .mp-mesa-card.listo {
+        background:#0a1f18;border-color:#20c860;
+        animation:mp-pulse-green 1.8s ease-in-out infinite;
+    }
+    .mp-mesa-card.cuenta { background:#141414;border-color:#686868; }
+
+    .mp-mesa-num {
+        font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:400;
+        line-height:1;color:#e8e8e2;
+    }
+    .mp-mesa-estado {
+        font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    }
+    .libre   .mp-mesa-estado { color:#4a9a4a; }
+    .pendiente .mp-mesa-estado { color:#c8941a; }
+    .preparando .mp-mesa-estado { color:#e07020; }
+    .listo .mp-mesa-estado { color:#20c860; }
+    .cuenta .mp-mesa-estado { color:#888; }
+
+    .mp-mesa-info {
+        font-size:12px;color:#78786e;margin-top:auto;
+        display:flex;align-items:center;justify-content:space-between;gap:4px;
+    }
+    .mp-mesa-timer { font-size:11px;font-weight:600; }
+    .mp-mesa-timer.verde { color:#4a9a4a; }
+    .mp-mesa-timer.amarillo { color:#c8941a; }
+    .mp-mesa-timer.naranja { color:#e07020; }
+    .mp-mesa-timer.rojo { color:#e04040;animation:mp-pulse-red 1.4s ease-in-out infinite; }
+    .mp-mesa-items { font-size:11px;color:#78786e; }
+
+    /* ── LOADER PANEL ── */
+    #mp-loader {
+        flex:1;display:flex;align-items:center;justify-content:center;
+        flex-direction:column;gap:14px;
+    }
+    .mp-spinner {
+        width:36px;height:36px;border:2px solid #2a2d2a;border-top-color:#4a5a28;
+        border-radius:50%;animation:mp-spin .8s linear infinite;
+    }
+    .mp-loader-txt { font-size:13px;color:#78786e; }
+
+    /* ── DRAWER DE MESA ── */
+    #mp-drawer-overlay {
+        position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10100;
+        display:none;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+    }
+    #mp-drawer-overlay.open { display:block; }
+    #mp-drawer {
+        position:fixed;bottom:0;left:0;right:0;background:#1a1d1a;
+        border-radius:20px 20px 0 0;max-height:92svh;display:flex;
+        flex-direction:column;transform:translateY(100%);z-index:10101;
+        transition:transform .35s cubic-bezier(0.16,1,0.3,1);
+        border-top:1px solid #2a2d2a;
+    }
+    #mp-drawer.open { transform:translateY(0); }
+    .mp-drawer-handle { display:flex;justify-content:center;padding:12px 0 0; }
+    .mp-drawer-handle-bar { width:36px;height:4px;background:#2a2d2a;border-radius:999px; }
+    .mp-drawer-header {
+        padding:14px 20px 10px;border-bottom:1px solid #2a2d2a;flex-shrink:0;
+    }
+    .mp-drawer-title {
+        font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;color:#e8e8e2;
+        margin-bottom:3px;
+    }
+    .mp-drawer-sub { font-size:12px;color:#78786e; }
+    .mp-drawer-body { flex:1;overflow-y:auto;padding:16px 20px; }
+    .mp-drawer-actions {
+        padding:12px 20px calc(12px + env(safe-area-inset-bottom));
+        border-top:1px solid #2a2d2a;display:flex;gap:8px;flex-shrink:0;
+    }
+
+    /* ── ESTADO DEL ÍTEM ── */
+    .mp-item-row {
+        display:flex;align-items:center;gap:10px;padding:10px 0;
+        border-bottom:1px solid #222;
+    }
+    .mp-item-row:last-child { border-bottom:none; }
+    .mp-item-name { flex:1;font-size:13px;color:#e8e8e2;line-height:1.35; }
+    .mp-item-qty { font-size:11.5px;color:#78786e;flex-shrink:0; }
+    .mp-item-badge {
+        font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
+        padding:3px 9px;border-radius:999px;flex-shrink:0;
+    }
+    .mp-item-badge.pending { background:#2a2200;color:#c8941a;border:1px solid #4a3a00; }
+    .mp-item-badge.preparing { background:#2a1200;color:#e07020;border:1px solid #5a2a00; }
+    .mp-item-badge.ready { background:#0a2a18;color:#20c860;border:1px solid #0a5a2a; }
+    .mp-item-badge.delivered { background:#1a1d1a;color:#3a3d3a;border:1px solid #2a2d2a; }
+
+    /* ── BOTONES DRAWER ── */
+    .mp-btn-accion {
+        flex:1;padding:12px;border-radius:12px;border:1.5px solid #2a2d2a;
+        background:#1a1d1a;color:#e8e8e2;font-size:12.5px;font-weight:600;
+        cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .18s;
+        text-align:center;
+    }
+    .mp-btn-accion:hover { background:#2a2d2a; }
+    .mp-btn-accion.primary {
+        background:#4a5a28;border-color:#4a5a28;color:#fff;
+    }
+    .mp-btn-accion.primary:hover { background:#5c7032; }
+    .mp-btn-accion.danger { border-color:#4a1010;color:#e07060; }
+    .mp-btn-accion.danger:hover { background:#2a1010; }
+
+    /* ── PICKER DE CARTA (tomar pedido) ── */
+    #mp-carta-overlay {
+        position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:10200;
+        display:none;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+    }
+    #mp-carta-overlay.open { display:flex;flex-direction:column; }
+    #mp-carta-panel {
+        position:absolute;bottom:0;left:0;right:0;background:#1a1d1a;
+        border-radius:20px 20px 0 0;max-height:96svh;
+        display:flex;flex-direction:column;
+        border-top:1px solid #2a2d2a;
+        transform:translateY(100%);transition:transform .35s cubic-bezier(0.16,1,0.3,1);
+    }
+    #mp-carta-panel.open { transform:translateY(0); }
+    .mp-carta-header {
+        padding:14px 20px 10px;border-bottom:1px solid #2a2d2a;flex-shrink:0;
+    }
+    .mp-carta-cats {
+        display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;
+        padding:10px 16px 12px;flex-shrink:0;border-bottom:1px solid #2a2d2a;
+    }
+    .mp-carta-cats::-webkit-scrollbar { display:none; }
+    .mp-carta-cat-btn {
+        flex-shrink:0;padding:6px 14px;border-radius:999px;border:1.5px solid #2a2d2a;
+        background:#0f1010;color:#78786e;font-size:12px;font-weight:500;cursor:pointer;
+        font-family:'DM Sans',sans-serif;transition:all .18s;white-space:nowrap;
+    }
+    .mp-carta-cat-btn.active {
+        background:#4a5a28;border-color:#4a5a28;color:#fff;
+    }
+    .mp-carta-items { flex:1;overflow-y:auto;padding:12px 16px; }
+    .mp-carta-item {
+        display:flex;align-items:center;gap:12px;padding:12px 0;
+        border-bottom:1px solid #1f221f;
+    }
+    .mp-carta-item:last-child { border-bottom:none; }
+    .mp-carta-item-info { flex:1;min-width:0; }
+    .mp-carta-item-name { font-size:13.5px;color:#e8e8e2;font-weight:500;margin-bottom:2px; }
+    .mp-carta-item-precio {
+        font-family:'Cormorant Garamond',serif;font-size:1rem;color:#8aad3a;
+    }
+    .mp-carta-item-precio.incluido {
+        font-family:'DM Sans',sans-serif;font-size:11px;color:#78786e;
+    }
+    .mp-carta-qty {
+        display:flex;align-items:center;gap:6px;
+    }
+    .mp-carta-qty button {
+        width:30px;height:30px;border-radius:50%;border:1.5px solid #2a2d2a;
+        background:#0f1010;color:#e8e8e2;font-size:16px;font-weight:300;
+        cursor:pointer;display:flex;align-items:center;justify-content:center;
+        transition:all .15s;
+    }
+    .mp-carta-qty button:hover { background:#2a2d2a; }
+    .mp-carta-qty span { min-width:24px;text-align:center;font-size:13px;font-weight:600;color:#e8e8e2; }
+    .mp-carta-footer {
+        padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+        border-top:1px solid #2a2d2a;flex-shrink:0;
+    }
+    .mp-carta-resumen {
+        display:flex;align-items:center;justify-content:space-between;
+        margin-bottom:10px;font-size:12.5px;color:#78786e;
+    }
+    .mp-carta-total {
+        font-family:'Cormorant Garamond',serif;font-size:1.3rem;color:#e8e8e2;
+    }
+    .mp-carta-cliente-input {
+        width:100%;background:#0f1010;border:1.5px solid #2a2d2a;border-radius:12px;
+        padding:10px 14px;font-size:13.5px;color:#e8e8e2;font-family:'DM Sans',sans-serif;
+        outline:none;transition:border-color .2s;margin-bottom:10px;
+    }
+    .mp-carta-cliente-input:focus { border-color:#4a5a28; }
+    .mp-carta-cliente-input::placeholder { color:#3a3d3a; }
+
+    /* ── HISTORIAL ── */
+    .mp-historial-section { margin-top:16px; }
+    .mp-historial-title {
+        font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+        color:#3a3d3a;margin-bottom:8px;
+    }
+    .mp-historial-row {
+        background:#0f1010;border:1px solid #1f221f;border-radius:10px;
+        padding:10px 12px;margin-bottom:6px;
+    }
+    .mp-historial-ref { font-size:11px;color:#3a3d3a;font-family:'Courier New',monospace; }
+    .mp-historial-estado {
+        font-size:11px;font-weight:600;
+        display:inline-block;margin-left:8px;
+    }
+
+    /* ── EMPTY STATE ── */
+    .mp-empty { text-align:center;padding:32px 0;color:#3a3d3a;font-size:13px; }
+
+    /* ── TOAST MESERO ── */
+    #mp-toast-container {
+        position:fixed;top:16px;left:50%;transform:translateX(-50%);
+        z-index:10500;display:flex;flex-direction:column;gap:7px;align-items:center;
+        pointer-events:none;width:max-content;max-width:calc(100vw - 24px);
+    }
+`;
+
+// ── UTILIDADES ──────────────────────────────────────────────
+function mpFormatCOP(v) { return '$' + Math.round(v).toLocaleString('es-CO'); }
+function mpTodayISO() { return new Date().toLocaleDateString('en-CA',{timeZone:'America/Bogota'}); }
+function mpMinutos(fechaStr) {
+    if (!fechaStr) return 0;
+    return Math.floor((Date.now() - new Date(fechaStr).getTime()) / 60000);
+}
+function mpColorTimer(min) {
+    if (min < 5)  return 'verde';
+    if (min < 15) return 'amarillo';
+    if (min < 25) return 'naranja';
+    return 'rojo';
+}
+function mpToast(msg, tipo='info', ms=3800) {
+    let cont = document.getElementById('mp-toast-container');
+    if (!cont) {
+        cont = document.createElement('div');
+        cont.id = 'mp-toast-container';
+        document.body.appendChild(cont);
+    }
+    const c = { ok:{bg:'#1a2a14',border:'rgba(74,160,60,.4)',text:'#7ad060'},
+                error:{bg:'#2a1010',border:'rgba(200,60,40,.4)',text:'#e07060'},
+                info:{bg:'#1a1d1a',border:'rgba(74,90,40,.4)',text:'#c8d090'} }[tipo] || {};
+    const t = document.createElement('div');
+    Object.assign(t.style,{
+        background:c.bg,border:`1.5px solid ${c.border}`,borderRadius:'999px',
+        padding:'9px 18px',color:c.text,fontSize:'13px',fontFamily:"'DM Sans',sans-serif",
+        fontWeight:'500',opacity:'0',transform:'translateY(-6px)',
+        transition:'opacity .25s,transform .25s',pointerEvents:'auto',
+        whiteSpace:'pre-wrap',maxWidth:'calc(100vw - 24px)',boxShadow:'0 4px 20px rgba(0,0,0,.4)',
+    });
+    t.textContent = msg;
+    cont.appendChild(t);
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+        t.style.opacity='1';t.style.transform='translateY(0)';
+    }));
+    const timer = setTimeout(()=>{ t.style.opacity='0'; setTimeout(()=>t.remove(),280); }, ms);
+    t.onclick=()=>{ clearTimeout(timer);t.remove(); };
+}
+
+// ── BOOTSTRAP ───────────────────────────────────────────────
+const MeseroPanel = (function() {
 
     function _injectCSS() {
-        if (document.getElementById('wf-css')) return;
+        if (document.getElementById('mp-css')) return;
         const s = document.createElement('style');
-        s.id = 'wf-css'; s.textContent = CSS;
+        s.id = 'mp-css'; s.textContent = MESERO_CSS;
         document.head.appendChild(s);
     }
 
-    function _showErr(el, msg) {
-        if (!el) return;
-        el.textContent = msg;
-        el.style.display = 'block';
-        setTimeout(() => { el.style.display = 'none'; }, 4500);
-    }
-
-    // ── PASO 1: Login PIN ──────────────────────────────────────────────────────
-    // Overlay oscuro sobre toda la pantalla. Muestra el formulario de login.
-    function mostrarLogin() {
-        _injectCSS();
-
-        let ov = document.getElementById('wf-login-overlay');
-        if (!ov) {
-            ov = document.createElement('div');
-            ov.id = 'wf-login-overlay';
-            document.body.appendChild(ov);
+    function _mount() {
+        let root = document.getElementById('mp-root');
+        if (!root) {
+            root = document.createElement('div');
+            root.id = 'mp-root';
+            document.body.appendChild(root);
         }
-        ov.style.display = 'flex';
-        ov.innerHTML = `
-            <div class="wf-card">
-                <div class="wf-logo-wrap">
-                    <span class="wf-icon">🍽️</span>
-                    <h2>Restaurante <em>la 26</em></h2>
-                    <p>Sistema de Pedidos · Mesero</p>
-                </div>
-                <div id="wf-login-err" class="wf-err"></div>
-                <label class="wf-label">Tu nombre</label>
-                <input id="wf-nombre" class="wf-input" type="text"
-                    placeholder="Ej: Carlos" autocomplete="off">
-                <label class="wf-label">PIN de acceso</label>
-                <input id="wf-pin" class="wf-input" type="password"
-                    placeholder="••••" maxlength="4" inputmode="numeric" autocomplete="off"
-                    onkeydown="if(event.key==='Enter') WaiterFlow._loginSubmit()">
-                <button class="wf-btn" onclick="WaiterFlow._loginSubmit()">Ingresar →</button>
-            </div>`;
-        setTimeout(() => document.getElementById('wf-nombre')?.focus(), 100);
-    }
-
-    function _loginSubmit() {
-        const nombre = document.getElementById('wf-nombre')?.value.trim();
-        const pin    = document.getElementById('wf-pin')?.value.trim();
-        const err    = document.getElementById('wf-login-err');
-
-        if (!nombre) { _showErr(err, 'Ingresa tu nombre.'); return; }
-        if (!pin)    { _showErr(err, 'Ingresa el PIN.'); return; }
-
-        const cargo = PINES[pin];
-        if (!cargo)  { _showErr(err, 'PIN incorrecto. Intenta de nuevo.'); return; }
-
-        _mesero = { nombre, pin, cargo };
-
-        // Ocultar overlay de login
-        const ov = document.getElementById('wf-login-overlay');
-        if (ov) ov.style.display = 'none';
-
-        // Mostrar barra del mesero sobre la carta
-        _mostrarTopbar();
-
-        // Ajustar el header de la carta para que no quede tapado
-        _ajustarHeaderParaMesero();
-
-        // Mostrar de nuevo el cart-bar (fue ocultado antes del login)
-        const cartBar = document.getElementById('cart-bar');
-        if (cartBar) cartBar.style.display = '';
-
-        // Cambiar texto del botón del carrito para mesero
-        _adaptarCartBar();
-
-        // Cargar la carta real (si no está cargada aún)
-        if (!restaurantId) {
-            cargarMenu();
-        } else if (slots.length === 0) {
-            cargarMenu();
-        }
-        // Si ya está cargada (restaurantId y slots existen), simplemente mostrarla
-        else {
-            mostrarMenu();
-        }
-    }
-
-    // ── Barra superior del mesero ──────────────────────────────────────────────
-    function _mostrarTopbar() {
-        _injectCSS();
-        let bar = document.getElementById('wf-topbar');
-        if (!bar) {
-            bar = document.createElement('div');
-            bar.id = 'wf-topbar';
-            document.body.insertBefore(bar, document.body.firstChild);
-        }
-        const iniciales = (_mesero.nombre || 'M').charAt(0).toUpperCase();
-        bar.innerHTML = `
-            <div class="wf-tb-info">
-                <div class="wf-tb-avatar">${iniciales}</div>
-                <div>
-                    <div class="wf-tb-name">${_mesero.nombre} · <span style="color:#c2d09c;font-weight:400;">${_mesero.cargo}</span></div>
-                    <div class="wf-tb-sub">Modo Mesero · Restaurante la 26</div>
+        root.innerHTML = `
+            <!-- LOGIN -->
+            <div id="mp-login">
+                <div class="mp-login-card">
+                    <div class="mp-login-logo">
+                        <h1>Restaurante <em>la 26</em></h1>
+                        <p>Panel del Mesero</p>
+                    </div>
+                    <div id="mp-login-err" class="mp-login-err"></div>
+                    <label class="mp-field-label">Usuario</label>
+                    <input id="mp-user" class="mp-input" type="text"
+                        placeholder="usuario" autocomplete="username"
+                        onkeydown="if(event.key==='Enter')document.getElementById('mp-pass').focus()">
+                    <label class="mp-field-label" style="margin-top:4px;">Contraseña</label>
+                    <div class="mp-input-eye" style="margin-bottom:14px;">
+                        <input id="mp-pass" class="mp-input" type="password"
+                            placeholder="••••••" autocomplete="current-password"
+                            onkeydown="if(event.key==='Enter')MeseroPanel.login()">
+                        <button class="mp-eye-btn" onclick="MeseroPanel.togglePass()" id="mp-eye-btn">👁️</button>
+                    </div>
+                    <button class="mp-btn-primary" onclick="MeseroPanel.login()">Ingresar al turno</button>
                 </div>
             </div>
-            <button class="wf-tb-cerrar" onclick="WaiterFlow._cerrarSesion()">Cerrar sesión</button>`;
-        bar.style.display = 'flex';
 
-        // Actualizar el subtítulo del header de la carta
-        const subtitle = document.getElementById('header-subtitle');
-        if (subtitle) subtitle.textContent = 'Modo Mesero';
-    }
+            <!-- PANEL PRINCIPAL (oculto hasta login) -->
+            <div id="mp-panel" style="display:none;">
+                <div class="mp-topbar">
+                    <span class="mp-topbar-logo">Restaurante <em>la 26</em></span>
+                    <span class="mp-topbar-badge" id="mp-topbar-mesero">—</span>
+                    <button class="mp-btn-logout" onclick="MeseroPanel.logout()">Salir</button>
+                </div>
+                <div id="mp-alerts-bar"></div>
+                <div id="mp-loader">
+                    <div class="mp-spinner"></div>
+                    <p class="mp-loader-txt">Cargando mesas…</p>
+                </div>
+                <div id="mp-grid-wrap" style="display:none;"></div>
+            </div>
 
-    function _ajustarHeaderParaMesero() {
-        // Empuja el header sticky de la carta hacia abajo para que no lo tape la topbar
-        const appHeader = document.querySelector('.app-header');
-        if (appHeader) appHeader.style.top = '52px';
-        // También ajusta el body padding-top
-        document.body.style.paddingTop = '52px';
-    }
+            <!-- DRAWER DE MESA -->
+            <div id="mp-drawer-overlay" onclick="MeseroPanel.cerrarDrawer()"></div>
+            <div id="mp-drawer">
+                <div class="mp-drawer-handle"><div class="mp-drawer-handle-bar"></div></div>
+                <div class="mp-drawer-header">
+                    <div class="mp-drawer-title" id="mp-drawer-title">Mesa</div>
+                    <div class="mp-drawer-sub" id="mp-drawer-sub"></div>
+                </div>
+                <div class="mp-drawer-body" id="mp-drawer-body"></div>
+                <div class="mp-drawer-actions" id="mp-drawer-actions"></div>
+            </div>
 
-    function _adaptarCartBar() {
-        // En modo mesero el texto del carrito cambia: "Confirmar pedido del cliente"
-        const cartBtn = document.querySelector('.cart-bar-btn span:nth-child(2)');
-        if (cartBtn) cartBtn.textContent = 'Confirmar pedido';
-        // Redirigir el click del carrito al modal de confirmación del mesero
-        const cartBarBtn = document.querySelector('.cart-bar-btn');
-        if (cartBarBtn) {
-            cartBarBtn.onclick = (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (cart.length === 0) {
-                    Toast.error('Agrega al menos un plato al pedido.');
-                    return;
-                }
-                _abrirConfirmModal();
-            };
-        }
-    }
-
-    function _cerrarSesion() {
-        _mesero = null;
-        _tipoEntrega = 'mesa';
-        cart = [];
-        actualizarCarritoBar();
-
-        const bar = document.getElementById('wf-topbar');
-        if (bar) bar.style.display = 'none';
-
-        const appHeader = document.querySelector('.app-header');
-        if (appHeader) appHeader.style.top = '0';
-        document.body.style.paddingTop = '';
-
-        // Ocultar la carta
-        const appMenu = document.getElementById('app-menu');
-        if (appMenu) appMenu.style.display = 'none';
-
-        mostrarLogin();
-    }
-
-    // ── PASO 2: Modal de confirmación del pedido ───────────────────────────────
-    // Aparece cuando el mesero presiona el carrito flotante.
-    // Aquí se define: tipo de entrega, mesa/dirección, nombre del cliente y notas.
-    function _abrirConfirmModal() {
-        _injectCSS();
-
-        // Construir resumen de ítems
-        const itemsHTML = cart.map(item => {
-            const slot = slots.find(s => s.id === item.slotId);
-            if (!slot) return '';
-            const subtotal = slot.precio * item.cantidad;
-            return `
-                <div class="wf-resumen-row">
-                    <div>
-                        <div class="wf-resumen-nombre">${slot.nombre}</div>
-                        <div class="wf-resumen-qty">${item.cantidad} × ${slot.precio > 0 ? formatCOP(slot.precio) : 'Incluido'}</div>
+            <!-- OVERLAY DE CARTA (tomar pedido) -->
+            <div id="mp-carta-overlay" onclick="if(event.target===this)MeseroPanel.cerrarCarta()">
+                <div id="mp-carta-panel">
+                    <div class="mp-drawer-handle"><div class="mp-drawer-handle-bar"></div></div>
+                    <div class="mp-carta-header">
+                        <div style="font-family:'Cormorant Garamond',serif;font-size:1.4rem;font-weight:400;color:#e8e8e2;" id="mp-carta-title">Nuevo Pedido</div>
+                        <div style="font-size:12px;color:#78786e;" id="mp-carta-sub"></div>
                     </div>
-                    <div class="wf-resumen-precio">${slot.precio > 0 ? formatCOP(subtotal) : '—'}</div>
-                </div>`;
-        }).join('');
-
-        const total = calcularTotal();
-
-        // Chips de mesa: 1-15 + Barra
-        const mesaChips = Array.from({length:15}, (_,i) => i+1)
-            .map(n => `<button class="wf-mesa-chip" data-mesa="${n}" onclick="WaiterFlow._seleccionarMesaChip(${n})">${n}</button>`)
-            .join('');
-
-        let modal = document.getElementById('wf-confirm-modal');
-        if (!modal) {
-            modal = document.createElement('div');
-            modal.id = 'wf-confirm-modal';
-            document.body.appendChild(modal);
-        }
-
-        modal.innerHTML = `
-            <div class="wf-confirm-panel">
-                <div class="wf-confirm-handle"><div class="wf-confirm-handle-bar"></div></div>
-
-                <p class="wf-confirm-title">Confirmar pedido</p>
-                <p class="wf-confirm-sub">Mesero: ${_mesero.nombre} · Revisa y completa los datos</p>
-
-                <!-- Resumen de platos -->
-                <div class="wf-resumen-items">${itemsHTML}</div>
-                <div class="wf-total-row">
-                    <span class="wf-total-label">Total</span>
-                    <span class="wf-total-value">${formatCOP(total)}</span>
-                </div>
-
-                <!-- Tipo de entrega -->
-                <span class="wf-confirm-label">Tipo de entrega</span>
-                <div class="wf-tipo-grid" style="margin-bottom:18px;">
-                    <button id="wf-tipo-mesa"     class="wf-tipo-btn active" onclick="WaiterFlow._seleccionarTipo('mesa')">
-                        <span class="wf-tipo-icon">🍽️</span>Mesa
-                    </button>
-                    <button id="wf-tipo-llevar"   class="wf-tipo-btn" onclick="WaiterFlow._seleccionarTipo('para_llevar')">
-                        <span class="wf-tipo-icon">📦</span>Para llevar
-                    </button>
-                    <button id="wf-tipo-domicilio" class="wf-tipo-btn" onclick="WaiterFlow._seleccionarTipo('domicilio')">
-                        <span class="wf-tipo-icon">🛵</span>Domicilio
-                    </button>
-                </div>
-
-                <!-- Panel: Mesa en el restaurante -->
-                <div id="wf-panel-mesa">
-                    <span class="wf-confirm-label">Número de mesa <span style="color:#b83232">*</span></span>
-                    <div class="wf-mesa-grid-mini" style="margin-bottom:14px;">${mesaChips}
-                        <button class="wf-mesa-chip" data-mesa="barra" onclick="WaiterFlow._seleccionarMesaChip('barra')"
-                            style="font-size:11px;">Barra</button>
-                    </div>
-                    <input id="wf-mesa-manual" class="wf-confirm-input" type="text"
-                        inputmode="numeric" placeholder="O escribe el número de mesa…"
-                        style="margin-bottom:14px;"
-                        oninput="WaiterFlow._mesaManual(this.value)">
-                </div>
-
-                <!-- Panel: Para llevar / Domicilio -->
-                <div id="wf-panel-externo" style="display:none;">
-                    <div id="wf-panel-direccion" style="display:none;margin-bottom:14px;">
-                        <span class="wf-confirm-label">Dirección de entrega <span style="color:#b83232">*</span></span>
-                        <input id="wf-direccion" class="wf-confirm-input" type="text"
-                            placeholder="Ej: Cra 27 #45-12, Cabecera…" autocomplete="street-address">
+                    <div class="mp-carta-cats" id="mp-carta-cats"></div>
+                    <div class="mp-carta-items" id="mp-carta-items"></div>
+                    <div class="mp-carta-footer">
+                        <div class="mp-carta-resumen">
+                            <span id="mp-carta-count">0 platos</span>
+                            <span class="mp-carta-total" id="mp-carta-total-val">$0</span>
+                        </div>
+                        <input id="mp-carta-cliente" class="mp-carta-cliente-input"
+                            type="text" placeholder="Nombre del cliente (opcional)">
+                        <button class="mp-btn-primary" id="mp-carta-submit"
+                            onclick="MeseroPanel.enviarPedido()">Enviar a cocina</button>
                     </div>
                 </div>
-
-                <!-- Nombre del cliente -->
-                <span class="wf-confirm-label" style="margin-top:4px;">Nombre del cliente <span style="color:#b83232">*</span></span>
-                <input id="wf-cliente-nombre" class="wf-confirm-input" type="text"
-                    placeholder="Ej: Andrés García" autocomplete="off"
-                    style="margin-bottom:14px;">
-
-                <!-- Notas -->
-                <span class="wf-confirm-label">Notas especiales (opcional)</span>
-                <input id="wf-notas-confirm" class="wf-confirm-input" type="text"
-                    placeholder="Ej: Sin picante · Sin cebolla" autocomplete="off"
-                    style="margin-bottom:20px;">
-
-                <div id="wf-confirm-err" class="wf-err"></div>
-
-                <button id="wf-enviar-final"
-                    style="width:100%;background:#4a5a28;color:#fff;border:none;border-radius:999px;
-                    padding:16px;font-size:14px;font-weight:600;cursor:pointer;
-                    font-family:'DM Sans',sans-serif;transition:background .2s;letter-spacing:.02em;
-                    box-shadow:0 4px 16px rgba(74,90,40,.25);margin-bottom:10px;"
-                    onclick="WaiterFlow._enviarPedido()">
-                    🚀 Enviar a Cocina
-                </button>
-                <button onclick="WaiterFlow._cerrarConfirmModal()"
-                    style="width:100%;background:transparent;border:1.5px solid #e8e8e2;color:#78786e;
-                    border-radius:999px;padding:13px;font-size:13px;font-family:'DM Sans',sans-serif;
-                    cursor:pointer;transition:all .2s;">
-                    ← Seguir agregando platos
-                </button>
-            </div>`;
-
-        modal.style.display = 'flex';
-        document.body.style.overflow = 'hidden';
-        setTimeout(() => document.getElementById('wf-cliente-nombre')?.focus(), 350);
+            </div>
+        `;
     }
 
-    function _cerrarConfirmModal() {
-        const modal = document.getElementById('wf-confirm-modal');
-        if (modal) modal.style.display = 'none';
-        document.body.style.overflow = '';
-    }
-
-    function _seleccionarTipo(tipo) {
-        _tipoEntrega = tipo;
-        ['mesa','llevar','domicilio'].forEach(t => {
-            const btn = document.getElementById(`wf-tipo-${t}`);
-            if (btn) btn.classList.remove('active');
-        });
-        const activo = document.getElementById(`wf-tipo-${tipo === 'para_llevar' ? 'llevar' : tipo}`);
-        if (activo) activo.classList.add('active');
-
-        const panelMesa    = document.getElementById('wf-panel-mesa');
-        const panelExterno = document.getElementById('wf-panel-externo');
-        const panelDireccion = document.getElementById('wf-panel-direccion');
-
-        if (tipo === 'mesa') {
-            if (panelMesa)    panelMesa.style.display    = 'block';
-            if (panelExterno) panelExterno.style.display = 'none';
+    // ── LOGIN ───────────────────────────────────────────────
+    function login() {
+        const user = document.getElementById('mp-user')?.value.trim();
+        const pass = document.getElementById('mp-pass')?.value;
+        const err  = document.getElementById('mp-login-err');
+        if (user === MESERO_CREDS.usuario && pass === MESERO_CREDS.password) {
+            MeseroState.mesero = { nombre: MESERO_CREDS.nombre, cargo: MESERO_CREDS.cargo };
+            sessionStorage.setItem('meseroNombre', MESERO_CREDS.nombre);
+            sessionStorage.setItem('meseroCargo',  MESERO_CREDS.cargo);
+            document.getElementById('mp-login').style.display  = 'none';
+            document.getElementById('mp-panel').style.display  = 'flex';
+            document.getElementById('mp-topbar-mesero').textContent = MESERO_CREDS.cargo;
+            iniciarPanel();
         } else {
-            if (panelMesa)    panelMesa.style.display    = 'none';
-            if (panelExterno) panelExterno.style.display = 'block';
-            if (panelDireccion) {
-                panelDireccion.style.display = (tipo === 'domicilio') ? 'block' : 'none';
-            }
+            err.textContent = 'Usuario o contraseña incorrectos.';
+            err.style.display = 'block';
         }
     }
 
-    // Mesa seleccionada desde chips
-    function _seleccionarMesaChip(mesa) {
-        document.querySelectorAll('.wf-mesa-chip').forEach(el => el.classList.remove('active'));
-        const chip = document.querySelector(`.wf-mesa-chip[data-mesa="${mesa}"]`);
-        if (chip) chip.classList.add('active');
-        const manual = document.getElementById('wf-mesa-manual');
-        if (manual) manual.value = '';
-        tableNumber = isNaN(mesa) ? String(mesa).charAt(0).toUpperCase() + String(mesa).slice(1) : `Mesa ${mesa}`;
-        _mesaSeleccionada = mesa;
+    function togglePass() {
+        const inp = document.getElementById('mp-pass');
+        if (!inp) return;
+        inp.type = inp.type === 'password' ? 'text' : 'password';
     }
 
-    // Mesa escrita manualmente
-    function _mesaManual(val) {
-        document.querySelectorAll('.wf-mesa-chip').forEach(el => el.classList.remove('active'));
-        _mesaSeleccionada = val.trim();
-        tableNumber = `Mesa ${val.trim()}`;
+    function logout() {
+        sessionStorage.removeItem('meseroNombre');
+        sessionStorage.removeItem('meseroCargo');
+        if (MeseroState.cronometroInterval) clearInterval(MeseroState.cronometroInterval);
+        if (MeseroState.realtimeChannel) {
+            supabaseClient.removeChannel(MeseroState.realtimeChannel);
+            MeseroState.realtimeChannel = null;
+        }
+        document.getElementById('mp-panel').style.display = 'none';
+        document.getElementById('mp-login').style.display = 'flex';
+        document.getElementById('mp-user').value = '';
+        document.getElementById('mp-pass').value = '';
     }
 
-    // ── PASO 3: Envío a cocina ──────────────────────────────────────────────────
-    async function _enviarPedido() {
-        const btn        = document.getElementById('wf-enviar-final');
-        const err        = document.getElementById('wf-confirm-err');
-        const cliente    = document.getElementById('wf-cliente-nombre')?.value.trim();
-        const notas      = document.getElementById('wf-notas-confirm')?.value.trim();
-        const direccion  = document.getElementById('wf-direccion')?.value.trim();
+    // ── CARGA INICIAL ────────────────────────────────────────
+    async function iniciarPanel() {
+        mostrarLoader(true);
 
-        // Validaciones
-        if (!cliente) {
-            _showErr(err, 'Ingresa el nombre del cliente.');
-            document.getElementById('wf-cliente-nombre')?.focus();
+        // Resolver restaurant_id
+        if (!MeseroState.restaurantId) {
+            MeseroState.restaurantId = await resolverRestaurantId();
+        }
+        if (!MeseroState.restaurantId) {
+            mpToast('No se pudo conectar al restaurante.','error');
+            mostrarLoader(false);
             return;
         }
 
-        if (_tipoEntrega === 'mesa') {
-            const mesaVal = _mesaSeleccionada || document.getElementById('wf-mesa-manual')?.value.trim();
-            if (!mesaVal) {
-                _showErr(err, 'Selecciona o ingresa el número de mesa.');
-                return;
-            }
-            _mesaSeleccionada = mesaVal;
-            tableNumber = isNaN(mesaVal) ? String(mesaVal) : `Mesa ${mesaVal}`;
+        // Cargar mesas
+        const { data: tablasData } = await supabaseClient
+            .from('tables')
+            .select('id, number, label, capacity')
+            .eq('restaurant_id', MeseroState.restaurantId)
+            .order('number', { ascending: true });
+
+        MeseroState.mesas = (tablasData || []).filter(t =>
+            !String(t.label || '').toLowerCase().includes('para llevar') &&
+            !String(t.label || '').toLowerCase().includes('domicilio')
+        );
+
+        // Cargar pedidos activos del turno
+        await recargarPedidos();
+
+        // Cargar menú del día para picker de carta
+        await cargarMenuMesero();
+
+        // Iniciar realtime
+        iniciarRealtime();
+
+        // Cronómetro cada 30s
+        MeseroState.cronometroInterval = setInterval(renderGrid, 30000);
+
+        mostrarLoader(false);
+        renderGrid();
+    }
+
+    async function recargarPedidos() {
+        const hoy = mpTodayISO();
+        const { data: ords } = await supabaseClient
+            .from('orders')
+            .select('id, table_id, status, customer_name, order_number, created_at, total_amount, notes')
+            .eq('restaurant_id', MeseroState.restaurantId)
+            .not('status', 'in', '("delivered","cancelled")')
+            .gte('created_at', `${hoy}T00:00:00`)
+            .order('created_at', { ascending: false });
+
+        MeseroState.pedidosActivos = ords || [];
+
+        if (MeseroState.pedidosActivos.length > 0) {
+            const ids = MeseroState.pedidosActivos.map(o => o.id);
+            const { data: items } = await supabaseClient
+                .from('order_items')
+                .select('id, order_id, menu_item_id, quantity, item_status, notes, unit_price')
+                .in('order_id', ids);
+            MeseroState.orderItems = items || [];
+        } else {
+            MeseroState.orderItems = [];
+        }
+    }
+
+    async function cargarMenuMesero() {
+        const hoy = mpTodayISO();
+        const { data: dm } = await supabaseClient
+            .from('daily_menus')
+            .select('id')
+            .eq('restaurant_id', MeseroState.restaurantId)
+            .eq('menu_date', hoy)
+            .eq('is_published', true)
+            .maybeSingle();
+
+        if (dm?.id) {
+            MeseroState.dailyMenuId = dm.id;
+            const { data: rawSlots } = await supabaseClient
+                .from('daily_menu_slots_availability')
+                .select('id,menu_item_id,item_name,price,item_type,is_truly_available,portions_available,portions_sold')
+                .eq('daily_menu_id', dm.id)
+                .in('item_type',['executive_lunch','a_la_carte','drink','dessert','side'])
+                .order('category_order',{ascending:true})
+                .order('display_order',{ascending:true});
+
+            MeseroState.slots = (rawSlots||[]).map(s=>({
+                id: s.id,
+                menuItemId: s.menu_item_id,
+                nombre: s.item_name,
+                precio: Number(s.price)||0,
+                itemType: s.item_type,
+                disponible: Boolean(s.is_truly_available),
+                porciones: Math.max(0,(s.portions_available||0)-(s.portions_sold||0)),
+            }));
+        } else {
+            MeseroState.dailyMenuId = null;
+            const { data: items } = await supabaseClient
+                .from('menu_items')
+                .select('id,name,price,item_type,description')
+                .eq('restaurant_id', MeseroState.restaurantId)
+                .eq('is_active', true)
+                .in('item_type',['executive_lunch','a_la_carte','drink','dessert','side'])
+                .order('name',{ascending:true});
+
+            MeseroState.slots = (items||[]).map(i=>({
+                id: i.id, menuItemId: i.id, nombre: i.name,
+                precio: Number(i.price)||0, itemType: i.item_type,
+                disponible: true, porciones: 999,
+            }));
+        }
+    }
+
+    // ── REALTIME ─────────────────────────────────────────────
+    function iniciarRealtime() {
+        if (MeseroState.realtimeChannel) {
+            supabaseClient.removeChannel(MeseroState.realtimeChannel);
+        }
+        MeseroState.realtimeChannel = supabaseClient
+            .channel('panel-mesero-v2')
+            .on('postgres_changes',{event:'*',schema:'public',table:'orders'},
+                async (payload) => {
+                    await recargarPedidos();
+                    renderGrid();
+                    // Si el drawer de esa mesa está abierto, refrescar
+                    if (MeseroState.mesaSeleccionada) {
+                        const mesa = MeseroState.mesas.find(m=>m.id===MeseroState.mesaSeleccionada);
+                        if (mesa) renderDrawer(mesa);
+                    }
+                    // Vibrar si algún pedido de la mesa pasó a ready
+                    if (payload.new?.status === 'ready' || payload.eventType === 'UPDATE') {
+                        const estadoNuevo = calcularEstadoMesa(payload.new?.table_id);
+                        if (estadoNuevo === 'listo' && 'vibrate' in navigator) {
+                            navigator.vibrate([200,100,200]);
+                        }
+                    }
+                })
+            .on('postgres_changes',{event:'*',schema:'public',table:'order_items'},
+                async () => {
+                    await recargarPedidos();
+                    renderGrid();
+                    if (MeseroState.mesaSeleccionada) {
+                        const mesa = MeseroState.mesas.find(m=>m.id===MeseroState.mesaSeleccionada);
+                        if (mesa) renderDrawer(mesa);
+                    }
+                })
+            .on('postgres_changes',{event:'UPDATE',schema:'public',table:'menu_items'},
+                (payload) => {
+                    if (payload.new?.is_active === false) {
+                        mostrarAlertaAgotado(payload.new?.name || 'Plato');
+                    }
+                })
+            .subscribe();
+    }
+
+    // ── LÓGICA DE ESTADO DE MESA ─────────────────────────────
+    function calcularEstadoMesa(tableId) {
+        const pedidos = MeseroState.pedidosActivos.filter(o => o.table_id === tableId);
+        if (!pedidos.length) return 'libre';
+
+        // cuenta pendiente manualmente marcada
+        const tieneCuenta = pedidos.some(o => o.status === 'cuenta');
+        if (tieneCuenta) return 'cuenta';
+
+        const items = MeseroState.orderItems.filter(i =>
+            pedidos.some(o => o.id === i.order_id)
+        );
+        if (!items.length) {
+            // hay pedido pero sin ítems aún — pendiente
+            const todosPending = pedidos.every(o => o.status === 'pending');
+            if (todosPending) return 'pendiente';
+            return 'preparando';
         }
 
-        if (_tipoEntrega === 'domicilio' && !direccion) {
-            _showErr(err, 'Ingresa la dirección de entrega para el domicilio.');
-            document.getElementById('wf-direccion')?.focus();
+        const statuses = items.map(i => i.item_status || 'pending');
+        const todosReady     = statuses.every(s => s === 'ready' || s === 'delivered');
+        const algunoReady    = statuses.some(s => s === 'ready');
+        const algunoPrep     = statuses.some(s => s === 'preparing');
+        const todosPending   = statuses.every(s => s === 'pending');
+
+        if (todosReady)  return 'listo';
+        if (algunoPrep || algunoReady) return 'preparando';
+        if (todosPending) return 'pendiente';
+        return 'pendiente';
+    }
+
+    function labelEstado(e) {
+        return {libre:'Libre',pendiente:'Esperando cocina',preparando:'En preparación',
+                listo:'Listo para servir',cuenta:'Esperando cuenta'}[e] || e;
+    }
+
+    function ultimoPedido(tableId) {
+        const pedidos = MeseroState.pedidosActivos.filter(o => o.table_id === tableId);
+        if (!pedidos.length) return null;
+        return pedidos.sort((a,b) => new Date(b.created_at)-new Date(a.created_at))[0];
+    }
+
+    function itemsActivosDeMesa(tableId) {
+        const pedidos = MeseroState.pedidosActivos.filter(o => o.table_id === tableId);
+        return MeseroState.orderItems.filter(i => pedidos.some(o => o.id === i.order_id));
+    }
+
+    // ── RENDER GRID ──────────────────────────────────────────
+    function renderGrid() {
+        const grid = document.getElementById('mp-grid-wrap');
+        if (!grid) return;
+        grid.innerHTML = '';
+
+        if (!MeseroState.mesas.length) {
+            grid.innerHTML = '<div class="mp-empty" style="grid-column:1/-1">Sin mesas registradas.</div>';
             return;
         }
 
-        if (cart.length === 0) {
-            _showErr(err, 'El pedido está vacío.');
-            return;
+        MeseroState.mesas.forEach((mesa, idx) => {
+            const estado = calcularEstadoMesa(mesa.id);
+            const ultimo = ultimoPedido(mesa.id);
+            const minTrans = ultimo ? mpMinutos(ultimo.created_at) : 0;
+            const colorTimer = mpColorTimer(minTrans);
+            const timerTxt = ultimo ? (minTrans < 1 ? 'ahora' : `hace ${minTrans} min`) : '';
+            const numItems = itemsActivosDeMesa(mesa.id).length;
+            const clienteNombre = ultimo?.customer_name || '';
+            const label = mesa.label || `Mesa ${mesa.number}`;
+
+            const card = document.createElement('div');
+            card.className = `mp-mesa-card ${estado}`;
+            card.style.animationDelay = `${idx * 0.04}s`;
+            card.onclick = () => abrirDrawer(mesa.id);
+            card.innerHTML = `
+                <div class="mp-mesa-num">${label}</div>
+                <div class="mp-mesa-estado">${labelEstado(estado)}</div>
+                <div class="mp-mesa-info">
+                    <span class="mp-mesa-timer ${timerTxt ? colorTimer : ''}">
+                        ${timerTxt || '—'}
+                    </span>
+                    ${numItems ? `<span class="mp-mesa-items">${numItems} ítem${numItems!==1?'s':''}</span>` : ''}
+                </div>
+                ${clienteNombre ? `<div style="font-size:11px;color:#78786e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${clienteNombre}</div>` : ''}
+            `;
+            grid.appendChild(card);
+        });
+    }
+
+    function mostrarLoader(visible) {
+        const loader = document.getElementById('mp-loader');
+        const grid   = document.getElementById('mp-grid-wrap');
+        if (loader) loader.style.display = visible ? 'flex' : 'none';
+        if (grid)   grid.style.display   = visible ? 'none' : 'grid';
+    }
+
+    // ── DRAWER ───────────────────────────────────────────────
+    function abrirDrawer(tableId) {
+        MeseroState.mesaSeleccionada = tableId;
+        const mesa = MeseroState.mesas.find(m => m.id === tableId);
+        if (!mesa) return;
+        renderDrawer(mesa);
+        document.getElementById('mp-drawer-overlay').classList.add('open');
+        setTimeout(() => document.getElementById('mp-drawer').classList.add('open'), 10);
+    }
+
+    function cerrarDrawer() {
+        document.getElementById('mp-drawer').classList.remove('open');
+        document.getElementById('mp-drawer-overlay').classList.remove('open');
+        setTimeout(() => { MeseroState.mesaSeleccionada = null; }, 360);
+    }
+
+    function renderDrawer(mesa) {
+        const label = mesa.label || `Mesa ${mesa.number}`;
+        const estado = calcularEstadoMesa(mesa.id);
+        const pedidos = MeseroState.pedidosActivos.filter(o => o.table_id === mesa.id);
+        const items   = itemsActivosDeMesa(mesa.id);
+
+        document.getElementById('mp-drawer-title').textContent = label;
+        document.getElementById('mp-drawer-sub').textContent =
+            `${labelEstado(estado)} · ${pedidos.length} pedido${pedidos.length!==1?'s':''} activos`;
+
+        // ── BODY: ítems activos ──
+        const body = document.getElementById('mp-drawer-body');
+        body.innerHTML = '';
+
+        if (items.length) {
+            const secTitle = document.createElement('div');
+            secTitle.className = 'mp-historial-title';
+            secTitle.textContent = 'PEDIDO ACTUAL';
+            body.appendChild(secTitle);
+
+            items.forEach(item => {
+                const nombreItem = (item.notes || '').replace('[nombre]','') ||
+                                   `Ítem #${item.menu_item_id?.slice(-4)||'?'}`;
+                const row = document.createElement('div');
+                row.className = 'mp-item-row';
+                const status = item.item_status || 'pending';
+                const badgeTxt = {pending:'Pendiente',preparing:'Preparando',
+                                  ready:'Listo ✓',delivered:'Entregado'}[status]||status;
+                row.innerHTML = `
+                    <div class="mp-item-name">${nombreItem}</div>
+                    <div class="mp-item-qty">×${item.quantity}</div>
+                    <span class="mp-item-badge ${status}">${badgeTxt}</span>
+                `;
+                body.appendChild(row);
+            });
+        } else if (pedidos.length === 0) {
+            body.innerHTML = '<div class="mp-empty">Mesa libre — sin pedidos activos.</div>';
+        } else {
+            body.innerHTML = '<div class="mp-empty">Pedido registrado — sin ítems aún.</div>';
         }
 
-        if (btn) { btn.disabled = true; btn.textContent = 'Enviando a cocina…'; }
+        // ── Historial del turno ──
+        if (pedidos.length) {
+            const hist = document.createElement('div');
+            hist.className = 'mp-historial-section';
+            hist.innerHTML = '<div class="mp-historial-title">HISTORIAL DEL TURNO</div>';
+            pedidos.forEach(ped => {
+                const row = document.createElement('div');
+                row.className = 'mp-historial-row';
+                const estadoColor = {pending:'#c8941a',preparing:'#e07020',ready:'#20c860',
+                                      delivered:'#3a3d3a',cancelled:'#e04040',cuenta:'#888'}[ped.status]||'#78786e';
+                row.innerHTML = `
+                    <span class="mp-historial-ref">${ped.order_number}</span>
+                    <span class="mp-historial-estado" style="color:${estadoColor}">
+                        ${labelEstado(ped.status)||ped.status}
+                    </span>
+                    <div style="font-size:11px;color:#3a3d3a;margin-top:3px;">
+                        ${ped.customer_name||'—'} · ${mpFormatCOP(ped.total_amount||0)}
+                    </div>
+                `;
+                hist.appendChild(row);
+            });
+            body.appendChild(hist);
+        }
+
+        // ── ACCIONES ──
+        const actions = document.getElementById('mp-drawer-actions');
+        actions.innerHTML = '';
+
+        const btnNuevo = document.createElement('button');
+        btnNuevo.className = 'mp-btn-accion primary';
+        btnNuevo.innerHTML = '➕ Nuevo pedido';
+        btnNuevo.onclick = () => {
+            cerrarDrawer();
+            setTimeout(() => abrirCarta(mesa.id), 360);
+        };
+        actions.appendChild(btnNuevo);
+
+        if (estado !== 'libre') {
+            const btnLiberar = document.createElement('button');
+            btnLiberar.className = 'mp-btn-accion danger';
+            btnLiberar.innerHTML = '🔓 Liberar';
+            btnLiberar.onclick = () => liberarMesa(mesa.id);
+            actions.appendChild(btnLiberar);
+        }
+    }
+
+    async function liberarMesa(tableId) {
+        // Marcar todos los pedidos activos de la mesa como delivered
+        const pedidos = MeseroState.pedidosActivos.filter(o => o.table_id === tableId);
+        if (!pedidos.length) { cerrarDrawer(); return; }
+        const ids = pedidos.map(o => o.id);
+        await supabaseClient.from('orders').update({status:'delivered'}).in('id', ids);
+        cerrarDrawer();
+        mpToast('Mesa liberada.','ok');
+        await recargarPedidos();
+        renderGrid();
+    }
+
+    // ── CARTA PARA TOMAR PEDIDO ──────────────────────────────
+    let _cartaMesaId = null;
+    let _cartaFiltro = 'todos';
+
+    function abrirCarta(tableId) {
+        _cartaMesaId = tableId;
+        _cartaFiltro = 'todos';
+        MeseroState.carritoMesero = [];
+        const mesa = MeseroState.mesas.find(m => m.id === tableId);
+        const label = mesa?.label || (mesa ? `Mesa ${mesa.number}` : 'Mesa');
+        document.getElementById('mp-carta-title').textContent = `Nuevo Pedido`;
+        document.getElementById('mp-carta-sub').textContent   = label;
+        document.getElementById('mp-carta-cliente').value     = '';
+        renderCartaCats();
+        renderCartaItems();
+        document.getElementById('mp-carta-overlay').classList.add('open');
+        setTimeout(()=>document.getElementById('mp-carta-panel').classList.add('open'),10);
+    }
+
+    function cerrarCarta() {
+        document.getElementById('mp-carta-panel').classList.remove('open');
+        setTimeout(()=>document.getElementById('mp-carta-overlay').classList.remove('open'),360);
+        _cartaMesaId = null;
+        MeseroState.carritoMesero = [];
+    }
+
+    function renderCartaCats() {
+        const cont = document.getElementById('mp-carta-cats');
+        if (!cont) return;
+        cont.innerHTML = '';
+
+        const cats = [
+            {id:'todos',label:'Todos'},
+            {id:'executive_lunch',label:'🥩 Proteína'},
+            {id:'side',label:'🍲 Principio'},
+            {id:'drink',label:'🥤 Bebida'},
+            {id:'a_la_carte',label:'✨ A la Carta'},
+            {id:'dessert',label:'🍮 Postre'},
+        ];
+        const tiposPresentes = new Set(MeseroState.slots.map(s=>s.itemType));
+        cats.filter(c=>c.id==='todos'||tiposPresentes.has(c.id)).forEach(cat=>{
+            const btn = document.createElement('button');
+            btn.className = `mp-carta-cat-btn${_cartaFiltro===cat.id?' active':''}`;
+            btn.textContent = cat.label;
+            btn.onclick = ()=>{ _cartaFiltro=cat.id; renderCartaCats(); renderCartaItems(); };
+            cont.appendChild(btn);
+        });
+    }
+
+    function renderCartaItems() {
+        const cont = document.getElementById('mp-carta-items');
+        if (!cont) return;
+        const lista = _cartaFiltro==='todos'
+            ? MeseroState.slots
+            : MeseroState.slots.filter(s=>s.itemType===_cartaFiltro);
+
+        cont.innerHTML = '';
+        if (!lista.length) {
+            cont.innerHTML = '<div class="mp-empty">Sin platos en esta categoría.</div>';
+            return;
+        }
+        lista.forEach(slot=>{
+            const enCarrito = MeseroState.carritoMesero.find(c=>c.slotId===slot.id);
+            const qty = enCarrito?.cantidad || 0;
+            const disponible = slot.disponible;
+            const div = document.createElement('div');
+            div.className = 'mp-carta-item';
+            div.id = `mp-ci-${slot.id}`;
+            div.innerHTML = `
+                <div class="mp-carta-item-info">
+                    <div class="mp-carta-item-name" style="${!disponible?'opacity:.4;text-decoration:line-through':''}">${slot.nombre}</div>
+                    <div class="${slot.precio>0?'mp-carta-item-precio':'mp-carta-item-precio incluido'}">
+                        ${slot.precio>0?mpFormatCOP(slot.precio):'Incluido'}
+                        ${!disponible?'<span style="font-size:10px;color:#e04040;font-family:DM Sans"> · Agotado</span>':''}
+                    </div>
+                </div>
+                ${disponible?`<div class="mp-carta-qty">
+                    <button onclick="MeseroPanel.cartaQty('${slot.id}',-1)" ${qty===0?'style="opacity:.35"':''}>−</button>
+                    <span>${qty}</span>
+                    <button onclick="MeseroPanel.cartaQty('${slot.id}',+1)">+</button>
+                </div>`:''}
+            `;
+            cont.appendChild(div);
+        });
+        actualizarCartaTotal();
+    }
+
+    function cartaQty(slotId, delta) {
+        const slot = MeseroState.slots.find(s=>s.id===slotId);
+        if (!slot||!slot.disponible) return;
+        const idx = MeseroState.carritoMesero.findIndex(c=>c.slotId===slotId);
+        if (idx===-1 && delta>0) {
+            MeseroState.carritoMesero.push({slotId, cantidad:1});
+        } else if (idx!==-1) {
+            const nueva = MeseroState.carritoMesero[idx].cantidad + delta;
+            if (nueva<=0) MeseroState.carritoMesero.splice(idx,1);
+            else MeseroState.carritoMesero[idx].cantidad = nueva;
+        }
+        // Refrescar sólo la tarjeta tocada
+        const enC = MeseroState.carritoMesero.find(c=>c.slotId===slotId);
+        const qty = enC?.cantidad||0;
+        const cell = document.getElementById(`mp-ci-${slotId}`);
+        if (cell) {
+            const qtyEl = cell.querySelector('.mp-carta-qty span');
+            if (qtyEl) qtyEl.textContent = qty;
+            const minusBtn = cell.querySelector('.mp-carta-qty button:first-child');
+            if (minusBtn) minusBtn.style.opacity = qty===0?'.35':'1';
+        }
+        actualizarCartaTotal();
+    }
+
+    function actualizarCartaTotal() {
+        const total = MeseroState.carritoMesero.reduce((acc,c)=>{
+            const s = MeseroState.slots.find(sl=>sl.id===c.slotId);
+            return acc + (s?s.precio*c.cantidad:0);
+        },0);
+        const count = MeseroState.carritoMesero.reduce((acc,c)=>acc+c.cantidad,0);
+        document.getElementById('mp-carta-count').textContent = `${count} plato${count!==1?'s':''}`;
+        document.getElementById('mp-carta-total-val').textContent = mpFormatCOP(total);
+        const btn = document.getElementById('mp-carta-submit');
+        if (btn) btn.disabled = count===0;
+    }
+
+    async function enviarPedido() {
+        const carrito = MeseroState.carritoMesero;
+        if (!carrito.length) return;
+
+        const btn = document.getElementById('mp-carta-submit');
+        if (btn) { btn.disabled=true; btn.textContent='Enviando…'; }
+
+        const cliente = document.getElementById('mp-carta-cliente')?.value.trim() || '';
+        const mesa = MeseroState.mesas.find(m => m.id === _cartaMesaId);
+        const mesaLabel = mesa?.label || (mesa?`Mesa ${mesa.number}`:'Mesa');
+
+        const orderNumber = `MES-LA26-${Date.now()}`;
+        const total = carrito.reduce((a,c)=>{
+            const s=MeseroState.slots.find(sl=>sl.id===c.slotId);
+            return a+(s?s.precio*c.cantidad:0);
+        },0);
 
         try {
-            // Resolver restaurant_id si aún no está disponible
-            if (!restaurantId) {
-                restaurantId = await resolverRestaurantId();
-            }
-
-            // Resolver table_id según tipo de entrega
-            let tId = tableId; // puede ya estar resuelto si cargarMenu() corrió
-
-            if (_tipoEntrega === 'mesa' && _mesaSeleccionada) {
-                const mesaNum = parseInt(_mesaSeleccionada);
-                if (!isNaN(mesaNum)) {
-                    const { data: md } = await supabaseClient
-                        .from('tables')
-                        .select('id')
-                        .eq('restaurant_id', restaurantId)
-                        .eq('number', mesaNum)
-                        .maybeSingle();
-                    if (md?.id) tId = md.id;
-                }
-            }
-
-            // Si no se resolvió, buscar/crear mesa genérica
-            if (!tId) {
-                const { data: mg } = await supabaseClient
-                    .from('tables')
-                    .select('id')
-                    .eq('restaurant_id', restaurantId)
-                    .ilike('label', '%para llevar%')
-                    .maybeSingle();
-
-                if (mg?.id) {
-                    tId = mg.id;
-                } else {
-                    const { data: mn } = await supabaseClient
-                        .from('tables')
-                        .upsert([{
-                            restaurant_id: restaurantId,
-                            number: 0,
-                            label: 'Para Llevar / Domicilio',
-                            qr_code: `VIRTUAL-TAKEAWAY-${restaurantId}`,
-                            capacity: 99,
-                            status: 'available',
-                        }], { onConflict: 'restaurant_id,number' })
-                        .select('id')
-                        .single();
-                    tId = mn?.id || null;
-                }
-            }
-
-            if (!tId) {
-                _showErr(err, 'No se pudo identificar la mesa. Recarga e intenta de nuevo.');
-                if (btn) { btn.disabled = false; btn.textContent = '🚀 Enviar a Cocina'; }
-                return;
-            }
-
-            // Construir etiqueta de mesa / modalidad
-            let mesaLabel;
-            if (_tipoEntrega === 'mesa') {
-                mesaLabel = tableNumber || `Mesa ${_mesaSeleccionada}`;
-            } else if (_tipoEntrega === 'para_llevar') {
-                mesaLabel = 'Para Llevar';
-            } else {
-                mesaLabel = 'Domicilio';
-            }
-
-            // Nota completa para cocina
-            const notasFinal = [
-                `[${mesaLabel.toUpperCase()}]`,
-                `[Mesero: ${_mesero.nombre}]`,
-                _tipoEntrega === 'domicilio' && direccion ? `Dirección: ${direccion}` : null,
-                notas || null,
-            ].filter(Boolean).join(' | ');
-
-            // Resolver IDs reales de los menu_items del carrito
-            const itemsResueltos = await resolverMenuItemIds();
-
-            const total       = calcularTotal();
-            const orderNumber = `MES-${generarNumeroOrden().split('-').slice(-2).join('-')}`;
-
-            // Insertar orden
             const { data: orden, error: errOrd } = await supabaseClient
                 .from('orders')
                 .insert([{
-                    restaurant_id: restaurantId,
-                    table_id:      tId,
+                    restaurant_id: MeseroState.restaurantId,
+                    table_id:      _cartaMesaId,
                     order_number:  orderNumber,
                     status:        'pending',
-                    customer_name: cliente,
-                    notes:         notasFinal,
+                    customer_name: cliente||null,
+                    notes:         `[${mesaLabel}] [Mesero: ${MeseroState.mesero?.nombre||'Mesero'}]`,
                     total_amount:  total,
-                    daily_menu_id: dailyMenuId || null,
+                    daily_menu_id: MeseroState.dailyMenuId||null,
                 }])
                 .select('id')
                 .single();
 
             if (errOrd) throw errOrd;
 
-            // Insertar order_items
-            if (itemsResueltos.length > 0) {
-                await supabaseClient.from('order_items').insert(
-                    itemsResueltos.map(item => ({
-                        order_id:           orden.id,
-                        menu_item_id:       item.menuItemId,
-                        daily_menu_slot_id: item.slotId,
-                        quantity:           item.cantidad,
-                        unit_price:         item.precio,
-                        item_status:        'pending',
-                        notes:              `[nombre]${item.nombre}`,
-                    }))
-                );
-            }
-
-            // Limpiar carrito y mostrar éxito
-            _cerrarConfirmModal();
-            cart = [];
-            actualizarCarritoBar();
-            renderizarMenu();
-
-            _mostrarExitoMesero(orderNumber, cliente, mesaLabel, itemsResueltos.length);
-
-        } catch (e) {
-            console.error('[La 26] WaiterFlow._enviarPedido error:', e);
-            _showErr(err, `Error al enviar: ${e?.message || 'Intenta de nuevo.'}`);
-            if (btn) { btn.disabled = false; btn.textContent = '🚀 Enviar a Cocina'; }
-        }
-    }
-
-    function _mostrarExitoMesero(orderNumber, cliente, mesa, numPlatos) {
-        // Reutilizar el modal de éxito ya existente en el HTML
-        const elSuccessModal  = document.getElementById('success-modal');
-        const elSuccessOrder  = document.getElementById('success-order-no');
-
-        if (elSuccessModal && elSuccessOrder) {
-            elSuccessOrder.textContent = `${orderNumber} · ${mesa} · ${cliente}`;
-            elSuccessModal.style.display = 'flex';
-
-            // Sobrescribir el botón "Hacer otro pedido" para el modo mesero
-            const btnOtro = elSuccessModal.querySelector('button[onclick="Order.newOrder()"]');
-            if (btnOtro) {
-                btnOtro.textContent = 'Nuevo pedido';
-                btnOtro.onclick = () => {
-                    elSuccessModal.style.display = 'none';
-                    _mesaSeleccionada = null;
-                    tableNumber       = null;
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
+            const orderItems = carrito.map(c=>{
+                const s = MeseroState.slots.find(sl=>sl.id===c.slotId);
+                return {
+                    order_id:           orden.id,
+                    menu_item_id:       s?.menuItemId||s?.id,
+                    daily_menu_slot_id: MeseroState.dailyMenuId ? c.slotId : null,
+                    quantity:           c.cantidad,
+                    unit_price:         s?.precio||0,
+                    item_status:        'pending',
+                    notes:              `[nombre]${s?.nombre||''}`,
                 };
-            }
-        } else {
-            Toast.ok(`✅ Pedido ${orderNumber} enviado a cocina — ${numPlatos} plato(s)`);
+            });
+
+            const { error: errItems } = await supabaseClient.from('order_items').insert(orderItems);
+            if (errItems) console.warn('[MeseroPanel] order_items error:', errItems);
+
+            cerrarCarta();
+            mpToast(`✅ Pedido enviado a cocina — ${orderNumber}`,'ok',4000);
+            await recargarPedidos();
+            renderGrid();
+
+        } catch(e) {
+            console.error('[MeseroPanel] enviarPedido error:', e);
+            mpToast(`Error: ${e?.message||'Inténtalo de nuevo.'}`,'error',5000);
+            if (btn) { btn.disabled=false; btn.textContent='Enviar a cocina'; }
         }
     }
 
-    // Variable interna de mesa seleccionada en el confirm modal
-    let _mesaSeleccionada = null;
+    // ── ALERTAS DE AGOTADOS ──────────────────────────────────
+    function mostrarAlertaAgotado(nombre) {
+        const bar = document.getElementById('mp-alerts-bar');
+        if (!bar) return;
+        bar.classList.add('visible');
+        const item = document.createElement('div');
+        item.className = 'mp-alert-item';
+        item.innerHTML = `
+            <span>⚠️ <strong>${nombre}</strong> se agotó — ya no está disponible</span>
+            <button class="mp-alert-dismiss" onclick="this.parentElement.remove();
+                if(!document.getElementById('mp-alerts-bar').children.length)
+                    document.getElementById('mp-alerts-bar').classList.remove('visible')">✕</button>
+        `;
+        bar.appendChild(item);
+        setTimeout(()=>{
+            item.remove();
+            if (!bar.children.length) bar.classList.remove('visible');
+        }, 8000);
+    }
 
-    // API pública
+    // ── API PÚBLICA ──────────────────────────────────────────
     return {
-        init:                  mostrarLogin,
-        mostrarLogin,
-        _loginSubmit,
-        _cerrarSesion,
-        _seleccionarTipo,
-        _seleccionarMesaChip,
-        _mesaManual,
-        _abrirConfirmModal,
-        _cerrarConfirmModal,
-        _enviarPedido,
+        init() {
+            _injectCSS();
+            _mount();
+            // Recuperar sesión si ya estaba logueado
+            const n = sessionStorage.getItem('meseroNombre');
+            const c = sessionStorage.getItem('meseroCargo');
+            if (n && c) {
+                MeseroState.mesero = { nombre: n, cargo: c };
+                document.getElementById('mp-login').style.display  = 'none';
+                document.getElementById('mp-panel').style.display  = 'flex';
+                document.getElementById('mp-topbar-mesero').textContent = c;
+                iniciarPanel();
+            }
+        },
+        login, logout, togglePass,
+        cerrarDrawer, cerrarCarta,
+        cartaQty, enviarPedido,
     };
 })();
 
-// ============================================================
-// MODO MESERO — Activación automática si ?modo=mesero en URL
-// ============================================================
-// En modo mesero:
-//   - NO se muestra el modal de mesa/bienvenida del cliente.
-//   - La carta sí se carga (el mesero la ve y selecciona platos).
-//   - El carrito flotante abre el modal de confirmación del mesero.
-//   - Aparece la barra topbar del mesero encima del header.
-// ============================================================
+
+// ── MODO MESERO: activar si ?modo=mesero ────────────────────
 const _MODO_MESERO = new URLSearchParams(window.location.search).get('modo') === 'mesero';
 
 (function() {
     if (!_MODO_MESERO) return;
-
-    function _iniciarModoMesero() {
-        // Ocultar el loader, el menú y la barra del carrito hasta que el mesero haga login
-        const loader    = document.getElementById('app-loader');
-        const appMenu   = document.getElementById('app-menu');
-        const cartBar   = document.getElementById('cart-bar');
-        const mesaModal = document.getElementById('mesa-welcome-modal');
-        if (loader)    loader.style.display    = 'none';
-        if (appMenu)   appMenu.style.display   = 'none';
-        if (cartBar)   cartBar.style.display   = 'none';
-        if (mesaModal) mesaModal.style.display = 'none';
-
-        // Arrancar el login del mesero
-        WaiterFlow.init();
+    function _activar() {
+        ['app-loader','app-menu','cart-bar','mesa-welcome-modal'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+        MeseroPanel.init();
     }
-
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', _iniciarModoMesero, { once: true });
+        document.addEventListener('DOMContentLoaded', _activar, { once: true });
     } else {
-        _iniciarModoMesero();
+        _activar();
     }
 })();
 
@@ -2096,17 +2458,10 @@ async function cargarMenu() {
         console.warn('[La 26] Guard system_settings no disponible:', _guardErr?.message);
     }
 
-    // ── 1. Capturar contexto de mesa/modalidad ──
-    //    En modo mesero se omite el modal de bienvenida del cliente.
-    let sesion;
-    if (_MODO_MESERO) {
-        // El mesero no necesita mesa_id del cliente aquí.
-        // WaiterFlow maneja mesa/nombre en el modal de confirmación.
-        sesion = { mesa: 'mesero', nombre: '', modalidad: 'mesa' };
-    } else {
-        sesion = capturarContexto();
-        if (!sesion) return; // modal de bienvenida visible — esperando elección del cliente
-    }
+    // ── 1. Capturar contexto de mesa/modalidad (sessionStorage > URL params) ──
+    //    ACCESO PÚBLICO: nunca pide contraseña, solo valida ubicación del cliente.
+    const sesion = capturarContexto();
+    if (!sesion) return; // modal de bienvenida visible — esperando elección del cliente
 
     const mesaParam   = sesion.mesa;
     const nombreParam = sesion.nombre;
@@ -2230,8 +2585,7 @@ async function cargarMenu() {
 // ============================================================
 // INICIO
 // ============================================================
-// En modo mesero cargarMenu() es llamado por WaiterFlow._loginSubmit() tras el login.
-// En modo cliente se llama automaticamente al cargar la pagina.
+// No cargar la carta del cliente si estamos en modo mesero
 if (!_MODO_MESERO) { cargarMenu(); }
 
 // ─── CONSTANTE: ID de la mesa virtual para pedidos sin mesa física ────────────
