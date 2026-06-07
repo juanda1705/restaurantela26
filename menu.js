@@ -1,129 +1,18 @@
 // ============================================================
-// RESTAURANTE LA 26 — LÓGICA DE CARTA DIGITAL
-// menu.js · Versión 4.1
+// RESTAURANTE LA 26 — PANEL DE ADMINISTRACIÓN
+// admin.js · Versión 3.1
+// FIXES v3.1:
+//  [FIX-1] SELECT orders: eliminado 'payment_method' (columna inexistente → error 400).
+//          El método de pago se gestiona ahora en sessionStorage / notes.
+//  [FIX-2] UPDATE orders: cambiado status 'completed' → 'paid'
+//          ('completed' no existe en order_status_enum; los valores válidos son:
+//           pending, confirmed, in_kitchen, ready, delivered, paid, cancelled).
+//  [FIX-3] cargarDashboardReal: totales por método de pago calculados desde
+//          sessionStorage en vez de la columna inexistente payment_method.
+//  [FIX-4] registrarMetodoPago: guarda el método en sessionStorage y actualiza
+//          status a 'paid' (valor válido del enum) en vez de 'completed'.
 // Bucaramanga, Santander — Colombia
-//
-// ACCESO PÚBLICO — SIN LOGIN, SIN CONTRASEÑA
-// ─────────────────────────────────────────────────────────
-//  menu.html + menu.js son 100% públicos para el cliente.
-//  index.html es EXCLUSIVAMENTE la pantalla interna de cocina.
-//  admin.html es EXCLUSIVAMENTE el panel del administrador.
-//
-//  Si no hay mesa_id en URL ni sessionStorage, se muestra
-//  el modal de bienvenida (MesaModal) dentro de menu.html.
-//  NUNCA se redirige a index.html ni se pide contraseña.
 // ============================================================
-
-// ── GUARD DE ACCESO PÚBLICO ──────────────────────────────
-// Elimina cualquier dato de sesión de cocina/admin que pudiera
-// haber quedado de una visita anterior, evitando colisiones.
-// El cliente del menú NUNCA necesita user_role ni auth_token.
-(function limpiarSesionInterna() {
-    const clavesInternas = ['user_role', 'auth_token', 'admin_session', 'cocina_session', 'staff_token'];
-    clavesInternas.forEach(function(k) { sessionStorage.removeItem(k); });
-})();
-
-// ============================================================
-// TOAST NOTIFICATIONS — reemplaza todos los alert() nativos
-// Estética "La 26": crema, Verde Oliva para éxito, arcilla para error
-// ============================================================
-const Toast = (function() {
-    let container = null;
-
-    function _ensureContainer() {
-        if (container) return;
-        container = document.createElement('div');
-        container.id = 'toast-container';
-        Object.assign(container.style, {
-            position:      'fixed',
-            top:           '20px',
-            left:          '50%',
-            transform:     'translateX(-50%)',
-            zIndex:        '9999',
-            display:       'flex',
-            flexDirection: 'column',
-            gap:           '8px',
-            alignItems:    'center',
-            pointerEvents: 'none',
-            width:         'max-content',
-            maxWidth:      'calc(100vw - 32px)',
-        });
-        document.body.appendChild(container);
-    }
-
-    function show(msg, tipo = 'info', duracion = 3800) {
-        _ensureContainer();
-
-        const colores = {
-            ok:    { bg: '#f5f7f0', border: 'rgba(74,103,65,0.35)', text: '#2e4028', dot: '#4a6741' },
-            error: { bg: '#fdf5f3', border: 'rgba(192,80,60,0.30)', text: '#6b2a1e', dot: '#c0503c' },
-            info:  { bg: '#f5f7f0', border: 'rgba(74,103,65,0.25)', text: '#3a4a38', dot: '#4a6741' },
-        };
-        const c = colores[tipo] || colores.info;
-
-        const toast = document.createElement('div');
-        Object.assign(toast.style, {
-            display:       'flex',
-            alignItems:    'center',
-            gap:           '9px',
-            background:    c.bg,
-            border:        `1.5px solid ${c.border}`,
-            borderRadius:  '999px',
-            padding:       '10px 20px 10px 14px',
-            boxShadow:     '0 4px 20px rgba(0,0,0,0.10)',
-            fontSize:      '13.5px',
-            fontFamily:    "'DM Sans', sans-serif",
-            fontWeight:    '500',
-            color:         c.text,
-            pointerEvents: 'auto',
-            opacity:       '0',
-            transform:     'translateY(-8px)',
-            transition:    'opacity .28s ease, transform .28s ease',
-            whiteSpace:    'pre-wrap',
-            maxWidth:      'calc(100vw - 32px)',
-        });
-
-        const dot = document.createElement('span');
-        Object.assign(dot.style, {
-            width: '7px', height: '7px',
-            borderRadius: '50%',
-            background: c.dot,
-            flexShrink: '0',
-            display: 'block',
-        });
-
-        const txt = document.createElement('span');
-        txt.textContent = msg;
-
-        toast.appendChild(dot);
-        toast.appendChild(txt);
-        container.appendChild(toast);
-
-        // Entrada
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                toast.style.opacity   = '1';
-                toast.style.transform = 'translateY(0)';
-            });
-        });
-
-        // Salida
-        const timer = setTimeout(() => {
-            toast.style.opacity   = '0';
-            toast.style.transform = 'translateY(-8px)';
-            setTimeout(() => toast.remove(), 300);
-        }, duracion);
-
-        toast.onclick = () => { clearTimeout(timer); toast.remove(); };
-    }
-
-    return {
-        ok:    (msg, ms) => show(msg, 'ok',    ms),
-        error: (msg, ms) => show(msg, 'error', ms),
-        info:  (msg, ms) => show(msg, 'info',  ms),
-    };
-})();
-
 
 // ============================================================
 // CREDENCIALES SUPABASE
@@ -131,1791 +20,2002 @@ const Toast = (function() {
 const SUPABASE_URL      = "https://hxmodeduckuhvvspnkxd.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_ESxhljLgqWkGvrnKhvbeEg_iBqaGciv";
 
-const _supabase      = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const supabaseClient = _supabase;
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ============================================================
-// SLUG CANÓNICO — usado para resolver el restaurant_id
+// CONSTANTES TRIBUTARIAS — ESTATUTO TRIBUTARIO COLOMBIA
+// Rete-ICA Bucaramanga: Actividad 5611 — expendio comidas
+// Tasa: 6.9 x 1000 (Acuerdo Municipal Bucaramanga)
+// Impoconsumo: Art. 512-1 E.T. — restaurantes 8%
 // ============================================================
-const RESTAURANT_SLUG = "restaurante-la-26";
+const TASA_RETE_ICA    = 0.0069;  // 6.9 por mil
+const TASA_IMPOCONSUMO = 0.08;    // 8% impoconsumo restaurantes
 
 // ============================================================
-// CATEGORÍAS REALES DE LA COCINA
-// Tipos válidos: protein | side | drink | a_la_carte
-// El tipo 'sauce' NO existe como componente independiente.
-// Las salsas siempre van integradas en la proteína.
+// ESTADO GLOBAL CONTABLE
 // ============================================================
-const CATEGORIAS = {
-    protein:    { label: 'Proteína con Salsa', icono: '🥩', orden: 1 },
-    side:       { label: 'Principio',          icono: '🍲', orden: 2 },
-    drink:      { label: 'Bebida',             icono: '🥤', orden: 3 },
-    a_la_carte: { label: 'A la Carta',         icono: '✨', orden: 4 },
-};
+let globalIngresos = 0;
+let globalEgresos  = 0;
+
+// Totales por método de pago (calculados al cargar el dashboard)
+let totalEfectivo     = 0;
+let totalTransferencia = 0;
+let totalFiado        = 0;
+let baseInicial       = 0; // apertura de caja
 
 // ============================================================
-// ESTADO GLOBAL
+// TOAST NOTIFICATIONS — reemplaza alert() nativos
 // ============================================================
-let restaurantId    = null;
-let tableId         = null;
-let tableNumber     = null;
-let tableNombre     = null;   // Nombre del cliente capturado via QR / sessionStorage
-let modalidad       = null;   // 'mesa' | 'para_llevar' | 'domicilio' (sessionStorage)
-let tipoEntrega     = 'retiro'; // 'retiro' | 'domicilio' — selección del cliente en el form
-let dailyMenuId     = null;
-let slots           = [];     // platos disponibles cargados de Supabase
-let cart            = [];     // [{ slotId, cantidad }]
-let isSubmitting    = false;
-let filtroActual    = 'todos';
+const Toast = (function() {
+    let _c = null;
+    function _init() {
+        if (_c) return;
+        _c = document.createElement('div');
+        Object.assign(_c.style, {
+            position:'fixed', top:'20px', left:'50%', transform:'translateX(-50%)',
+            zIndex:'9999', display:'flex', flexDirection:'column', gap:'8px',
+            alignItems:'center', pointerEvents:'none',
+            width:'max-content', maxWidth:'calc(100vw - 32px)',
+        });
+        document.body.appendChild(_c);
+    }
+    function show(msg, tipo, ms = 3800) {
+        _init();
+        const pal = {
+            ok:    { bg:'#f5f7f0', bd:'rgba(74,103,65,.35)',  tx:'#2e4028', dot:'#4a6741' },
+            error: { bg:'#fdf5f3', bd:'rgba(192,80,60,.30)',  tx:'#6b2a1e', dot:'#c0503c' },
+            info:  { bg:'#f5f7f0', bd:'rgba(74,103,65,.25)',  tx:'#3a4a38', dot:'#4a6741' },
+        };
+        const c = pal[tipo] || pal.info;
+        const t = document.createElement('div');
+        Object.assign(t.style, {
+            display:'flex', alignItems:'center', gap:'9px',
+            background:c.bg, border:`1.5px solid ${c.bd}`, borderRadius:'999px',
+            padding:'10px 20px 10px 14px', boxShadow:'0 4px 20px rgba(0,0,0,.10)',
+            fontSize:'13.5px', fontFamily:"'DM Sans',sans-serif", fontWeight:'500',
+            color:c.tx, pointerEvents:'auto',
+            opacity:'0', transform:'translateY(-8px)',
+            transition:'opacity .28s ease, transform .28s ease',
+        });
+        const dot = document.createElement('span');
+        Object.assign(dot.style, { width:'7px', height:'7px', borderRadius:'50%', background:c.dot, flexShrink:'0', display:'block' });
+        const txt = document.createElement('span');
+        txt.textContent = msg;
+        t.appendChild(dot); t.appendChild(txt); _c.appendChild(t);
+        requestAnimationFrame(() => requestAnimationFrame(() => { t.style.opacity='1'; t.style.transform='translateY(0)'; }));
+        const timer = setTimeout(() => { t.style.opacity='0'; t.style.transform='translateY(-8px)'; setTimeout(() => t.remove(), 300); }, ms);
+        t.onclick = () => { clearTimeout(timer); t.remove(); };
+    }
+    return { ok:(m,ms)=>show(m,'ok',ms), error:(m,ms)=>show(m,'error',ms), info:(m,ms)=>show(m,'info',ms) };
+})();
 
 // ============================================================
-// REFERENCIAS AL DOM
-// ============================================================
-const elLoader              = document.getElementById('app-loader');
-const elError               = document.getElementById('app-error');
-const elErrorMsg            = document.getElementById('error-message');
-const elMenu                = document.getElementById('app-menu');
-const elMenuSections        = document.getElementById('menu-sections');
-const elBadgeMesa           = document.getElementById('badge-mesa');
-const elConnDot             = document.getElementById('conn-dot');
-const elWelcomeBanner       = document.getElementById('welcome-banner');
-const elWelcomeText         = document.getElementById('welcome-text');
-const elCartBar             = document.getElementById('cart-bar');
-const elCartCount           = document.getElementById('cart-count');
-const elCartTotal           = document.getElementById('cart-total');
-const elOrderModal          = document.getElementById('order-modal');
-const elOrderForm           = document.getElementById('order-form');
-const elSummaryItems        = document.getElementById('summary-items');
-const elSummaryTotal        = document.getElementById('summary-total');
-const elSuccessModal        = document.getElementById('success-modal');
-const elSuccessOrder        = document.getElementById('success-order-no');
-const elCustomerName        = document.getElementById('customer-name');
-const elNombreWrapper       = document.getElementById('nombre-field-wrapper');
-const elCatsBar             = document.getElementById('cats-bar');
-const elDeliveryWrapper     = document.getElementById('delivery-fields-wrapper');
-const elDireccionWrapper    = document.getElementById('direccion-wrapper');
-const elDeliveryAddress     = document.getElementById('delivery-address');
-const elBtnRetiro           = document.getElementById('btn-retiro');
-const elBtnDomicilio        = document.getElementById('btn-domicilio');
-
-// ============================================================
-// HELPERS
+// FORMATO MONEDA COP
 // ============================================================
 function formatCOP(valor) {
-    return '$' + Math.round(valor).toLocaleString('es-CO');
-}
-
-function todayISO() {
-    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
-}
-
-function generarNumeroOrden() {
-    const year = new Date().getFullYear();
-    const rand = Math.floor(1000 + Math.random() * 9000);
-    return `ORD-LA26-${year}-${rand}`;
-}
-
-function calcularTotal() {
-    return cart.reduce((acc, item) => {
-        const slot = slots.find(s => s.id === item.slotId);
-        return acc + (slot ? slot.precio * item.cantidad : 0);
-    }, 0);
-}
-
-function calcularCantidadTotal() {
-    return cart.reduce((acc, item) => acc + item.cantidad, 0);
-}
-
-function slotsFiltrados() {
-    if (filtroActual === 'todos') return slots;
-    return slots.filter(s => s.itemType === filtroActual);
+    return new Intl.NumberFormat('es-CO', {
+        style: 'currency',
+        currency: 'COP',
+        maximumFractionDigits: 0
+    }).format(valor);
 }
 
 // ============================================================
-// CAPTURA Y PERSISTENCIA DE MESA / MODALIDAD
-//
-// ACCESO TOTALMENTE PÚBLICO — nunca pide contraseña ni redirige
-// al login de cocina (index.html).
-//
-// Flujo:
-//  1. Lee mesa/nombre/modalidad desde URL params (QR) o sessionStorage.
-//  2. Si no hay datos de ubicación, muestra el modal de bienvenida
-//     para que el cliente elija mesa o modalidad desde el propio menu.html.
-//  3. Devuelve el contexto o null si se delegó al modal.
+// MAPA DE TIPOS DE PLATO
+// Soporta tanto 'protein' (legado) como 'executive_lunch' (nuevo)
 // ============================================================
-function capturarContexto() {
-    const params = new URLSearchParams(window.location.search);
-
-    // 1. URL tiene prioridad absoluta (viene del QR de la mesa)
-    const mesaUrl      = params.get('mesa');
-    const nombreUrl    = params.get('nombre');
-    const modalidadUrl = params.get('modalidad'); // 'para_llevar' | 'domicilio' | null
-
-    // 2. Fallback desde sessionStorage (persiste entre recargas)
-    const mesaSession      = sessionStorage.getItem('mesa_id');
-    const nombreSession    = sessionStorage.getItem('mesa_nombre');
-    const modalidadSession = sessionStorage.getItem('mesa_modalidad');
-
-    // Combinar — URL tiene prioridad
-    const mesaFinal      = mesaUrl      || mesaSession      || null;
-    const nombreFinal    = nombreUrl    || nombreSession    || '';
-    const modalidadFinal = modalidadUrl || modalidadSession || 'mesa';
-
-    // Sin mesa → mostrar el modal de bienvenida DENTRO de menu.html
-    // NUNCA redirigir a index.html (esa es la pantalla de cocina/admin)
-    if (!mesaFinal) {
-        MesaModal.mostrar();
-        return null;
-    }
-
-    // Persistir en sessionStorage para que sobreviva a recargas
-    sessionStorage.setItem('mesa_id',        mesaFinal);
-    sessionStorage.setItem('mesa_modalidad', modalidadFinal);
-    if (nombreFinal) sessionStorage.setItem('mesa_nombre', nombreFinal);
-
-    return {
-        mesa:      mesaFinal,
-        nombre:    nombreFinal,
-        modalidad: modalidadFinal,
-    };
-}
-
-// ============================================================
-// MODAL DE BIENVENIDA — Selección de mesa o modalidad
-//
-// Se muestra cuando el cliente entra a menu.html directamente
-// sin QR (sin mesa_id en URL ni sessionStorage).
-// NO redirige a index.html. Todo ocurre dentro de menu.html.
-// ============================================================
-const MesaModal = {
-
-    mostrar() {
-        // Ocultar loader y error mientras el cliente elige su mesa
-        if (elLoader) { elLoader.style.display = 'none'; }
-        if (elError)  { elError.style.display  = 'none'; }
-        if (elMenu)   { elMenu.style.display   = 'none'; }
-
-        const modal = document.getElementById('mesa-welcome-modal');
-        if (modal) {
-            modal.style.display     = 'flex';
-            modal.style.alignItems  = 'flex-end';
-            modal.style.justifyContent = 'center';
-            // Focus en el primer campo tras la animación de entrada
-            setTimeout(() => {
-                const inp = document.getElementById('wm-mesa-numero');
-                if (inp) inp.focus();
-            }, 300);
-        }
-    },
-
-    ocultar() {
-        const modal = document.getElementById('mesa-welcome-modal');
-        if (modal) modal.style.display = 'none';
-    },
-
-    // Cambia entre pestaña "Mesa" y "Para llevar / Domicilio"
-    cambiarTab(tab) {
-        const tabMesa   = document.getElementById('wm-tab-mesa');
-        const tabLlevar = document.getElementById('wm-tab-llevar');
-        const panelMesa = document.getElementById('wm-panel-mesa');
-        const panelLlevar = document.getElementById('wm-panel-llevar');
-        if (!tabMesa || !tabLlevar || !panelMesa || !panelLlevar) return;
-
-        if (tab === 'mesa') {
-            tabMesa.classList.add('wm-tab-active');
-            tabLlevar.classList.remove('wm-tab-active');
-            panelMesa.style.display   = 'flex';
-            panelLlevar.style.display = 'none';
-        } else {
-            tabLlevar.classList.add('wm-tab-active');
-            tabMesa.classList.remove('wm-tab-active');
-            panelLlevar.style.display = 'flex';
-            panelMesa.style.display   = 'none';
-        }
-    },
-
-    // Confirmar selección de mesa en el restaurante
-    confirmarMesa() {
-        const numEl   = document.getElementById('wm-mesa-numero');
-        const nombreEl = document.getElementById('wm-nombre-mesa');
-        const numVal  = numEl ? numEl.value.trim() : '';
-        const nombre  = nombreEl ? nombreEl.value.trim() : '';
-
-        if (!numVal) {
-            if (numEl) { numEl.focus(); numEl.classList.add('wm-field-error'); }
-            return;
-        }
-        if (numEl) numEl.classList.remove('wm-field-error');
-
-        sessionStorage.setItem('mesa_id',        numVal);
-        sessionStorage.setItem('mesa_modalidad', 'mesa');
-        if (nombre) sessionStorage.setItem('mesa_nombre', nombre);
-
-        this.ocultar();
-        cargarMenu();
-    },
-
-    // Confirmar selección de para llevar / domicilio
-    confirmarLlevar() {
-        const nombreEl   = document.getElementById('wm-nombre-llevar');
-        const tipoEl     = document.getElementById('wm-tipo-llevar'); // 'retiro' | 'domicilio'
-        const direccEl   = document.getElementById('wm-direccion');
-        const nombre     = nombreEl   ? nombreEl.value.trim()   : '';
-        const tipoVal    = tipoEl     ? tipoEl.value            : 'retiro';
-        const direccion  = direccEl   ? direccEl.value.trim()   : '';
-
-        if (!nombre) {
-            if (nombreEl) { nombreEl.focus(); nombreEl.classList.add('wm-field-error'); }
-            return;
-        }
-        if (nombreEl) nombreEl.classList.remove('wm-field-error');
-
-        if (tipoVal === 'domicilio' && !direccion) {
-            if (direccEl) { direccEl.focus(); direccEl.classList.add('wm-field-error'); }
-            return;
-        }
-        if (direccEl) direccEl.classList.remove('wm-field-error');
-
-        // Persistir contexto de para llevar
-        sessionStorage.setItem('mesa_id',        tipoVal === 'domicilio' ? 'domicilio' : 'para_llevar');
-        sessionStorage.setItem('mesa_modalidad', tipoVal === 'domicilio' ? 'domicilio' : 'para_llevar');
-        sessionStorage.setItem('mesa_nombre',    nombre);
-        if (tipoVal === 'domicilio' && direccion) {
-            sessionStorage.setItem('mesa_direccion', direccion);
-        }
-
-        this.ocultar();
-        cargarMenu();
-    },
-
-    // Muestra/oculta el campo de dirección según el tipo elegido
-    toggleDireccion() {
-        const tipoEl   = document.getElementById('wm-tipo-llevar');
-        const wrapEl   = document.getElementById('wm-direccion-wrap');
-        if (!tipoEl || !wrapEl) return;
-        wrapEl.style.display = tipoEl.value === 'domicilio' ? 'block' : 'none';
-    },
+const MAPA_TIPO = {
+    executive_lunch: { label: 'Proteína con Salsa', icono: '🥩', porciones: 35, badgeClass: 'badge-protein' },
+    protein:         { label: 'Proteína con Salsa', icono: '🥩', porciones: 35, badgeClass: 'badge-protein' },
+    side:            { label: 'Principio',           icono: '🍲', porciones: 50, badgeClass: 'badge-side'    },
+    drink:           { label: 'Bebida',              icono: '🍹', porciones: 20, badgeClass: 'badge-drink'   },
+    a_la_carte:      { label: 'A la Carta',          icono: '✨', porciones: 15, badgeClass: 'badge-carte'   },
+    dessert:         { label: 'Postre',              icono: '🍮', porciones: 10, badgeClass: 'badge-dessert' },
 };
 
-// ============================================================
-// CONTROL DE INTERFAZ
-// ============================================================
-function mostrarLoader() {
-    elLoader.style.display = 'flex';
-    elError.style.display  = 'none';
-    elMenu.style.display   = 'none';
-    setConexion('cargando');
-}
-
-function mostrarError(msg) {
-    elLoader.style.display = 'none';
-    elError.style.display  = 'flex';
-    elMenu.style.display   = 'none';
-    elErrorMsg.textContent = msg;
-    setConexion('error');
-}
-
-function mostrarMenu() {
-    elLoader.style.display = 'none';
-    elError.style.display  = 'none';
-    elMenu.style.display   = 'block';
-    setConexion('ok');
-}
-
-function setConexion(estado) {
-    const colores = {
-        ok:       '#4a5a28',
-        error:    '#b83232',
-        cargando: '#d4a853',
-    };
-    elConnDot.style.background = colores[estado] || colores.cargando;
-    if (estado === 'ok') {
-        elConnDot.style.animation = 'none';
-    } else {
-        elConnDot.style.animation = 'pulse 2s ease-in-out infinite';
-    }
-}
-
-// ── Muestra el badge de mesa y el banner de bienvenida ──────
-function mostrarInfoMesa(numero, nombre) {
-    // Badge compacto en el header
-    if (elBadgeMesa) {
-        elBadgeMesa.textContent   = numero;
-        elBadgeMesa.style.display = 'inline-flex';
-    }
-
-    // Banner de bienvenida elegante
-    if (elWelcomeBanner && elWelcomeText) {
-        const textoNombre = nombre ? ` · Bienvenido, ${nombre}` : '';
-        elWelcomeText.textContent = `${numero}${textoNombre}`;
-        elWelcomeBanner.classList.add('visible');
-    }
-
-    // Si viene el nombre via QR/sessionStorage, pre-llenar el campo del modal
-    if (nombre && elCustomerName) {
-        elCustomerName.value = nombre;
-        // Solo ocultamos el campo de nombre si no es para llevar/domicilio
-        // (en esos casos, queremos que el cliente confirme su nombre)
-        if (modalidad === 'mesa' && elNombreWrapper) {
-            elNombreWrapper.style.display = 'none';
-        }
-    }
-
-    // ── Configurar campos de Para Llevar / Domicilio ──────────
-    configurarCamposModalidad();
-}
-
-// ── Muestra u oculta el bloque de campos de entrega según modalidad ──
-function configurarCamposModalidad() {
-    if (!elDeliveryWrapper) return;
-
-    const esPararLlevar = (modalidad === 'para_llevar' || modalidad === 'domicilio');
-
-    if (esPararLlevar) {
-        // Mostrar campos de entrega
-        elDeliveryWrapper.classList.remove('hidden-field');
-        elDeliveryWrapper.style.display = 'flex';
-
-        // Si la modalidad ya viene como "domicilio", pre-seleccionar ese botón
-        if (modalidad === 'domicilio') {
-            Order.seleccionarEntrega('domicilio');
-        } else {
-            Order.seleccionarEntrega('retiro');
-        }
-
-        // Aseguramos que el campo de nombre siempre sea visible para para llevar
-        if (elNombreWrapper) {
-            elNombreWrapper.style.display = 'block';
-        }
-    } else {
-        // Mesa normal → ocultar campos de entrega
-        elDeliveryWrapper.classList.add('hidden-field');
-        elDeliveryWrapper.style.display = 'none';
-    }
-}
-
-function actualizarCarritoBar() {
-    const cantidad = calcularCantidadTotal();
-    const total    = calcularTotal();
-
-    elCartCount.textContent = cantidad;
-    elCartTotal.textContent = formatCOP(total);
-
-    if (cantidad > 0) {
-        elCartBar.style.transform     = 'translateY(0)';
-        elCartBar.style.opacity       = '1';
-        elCartBar.style.pointerEvents = 'auto';
-    } else {
-        elCartBar.style.transform     = 'translateY(115%)';
-        elCartBar.style.opacity       = '0';
-        elCartBar.style.pointerEvents = 'none';
-    }
+// Obtiene etiqueta de rango de código
+function getRangoByCodigo(codigo) {
+    const n = parseInt(codigo) || 0;
+    if (n >= 1  && n <= 10)  return { label: 'Vegetal/Salsa/Base', color: 'var(--olive)' };
+    if (n >= 11 && n <= 30)  return { label: 'Carne/Proteína',     color: '#b43c3c'       };
+    if (n >= 31 && n <= 50)  return { label: 'Acompañamiento',     color: 'var(--amber)'  };
+    if (n >= 51 && n <= 70)  return { label: 'Bebida/Jugo',        color: 'var(--blue)'   };
+    if (n >= 71)             return { label: 'A la Carta',          color: 'var(--purple)' };
+    return { label: '—', color: 'var(--text-3)' };
 }
 
 // ============================================================
-// BARRA DE CATEGORÍAS
-// Solo muestra las categorías con al menos un plato disponible.
-// Nunca genera botón para 'sauce'.
+// 1. DASHBOARD — CONTABILIDAD Y COMANDAS
 // ============================================================
-function renderizarCatsBar() {
-    if (!elCatsBar) return;
-    elCatsBar.innerHTML = '';
-
-    // Botón "Todos"
-    const btnTodos       = document.createElement('button');
-    btnTodos.className   = `cat-btn${filtroActual === 'todos' ? ' active' : ''}`;
-    btnTodos.textContent = 'Todos';
-    btnTodos.onclick     = () => cambiarFiltro('todos');
-    elCatsBar.appendChild(btnTodos);
-
-    // Un botón por cada categoría presente (excluye 'sauce' al filtrar con CATEGORIAS)
-    const tiposPresentes = [...new Set(slots.map(s => s.itemType))].filter(t => CATEGORIAS[t]);
-    tiposPresentes
-        .sort((a, b) => (CATEGORIAS[a]?.orden || 99) - (CATEGORIAS[b]?.orden || 99))
-        .forEach(tipo => {
-            const cfg = CATEGORIAS[tipo];
-            const btn = document.createElement('button');
-            btn.className   = `cat-btn${filtroActual === tipo ? ' active' : ''}`;
-            btn.textContent = `${cfg.icono} ${cfg.label}`;
-            btn.onclick     = () => cambiarFiltro(tipo);
-            elCatsBar.appendChild(btn);
-        });
-}
-
-function cambiarFiltro(tipo) {
-    filtroActual = tipo;
-    renderizarCatsBar();
-    renderizarMenu();
-}
-
-// ============================================================
-// RENDERIZADO DEL MENÚ
-// Agrupa los slots por CATEGORIAS (protein/side/drink/a_la_carte).
-// Nunca muestra sección para el tipo 'sauce'.
-// ============================================================
-function renderizarMenu() {
-    elMenuSections.innerHTML = '';
-
-    const lista = slotsFiltrados();
-
-    if (!lista || lista.length === 0) {
-        elMenuSections.innerHTML = `
-            <div class="empty-state">
-                <div class="icon">🍽️</div>
-                <p>No hay platos disponibles<br>en esta categoría por el momento.</p>
-            </div>`;
-        return;
-    }
-
-    // Agrupar por itemType
-    const grupos = {};
-    lista.forEach(slot => {
-        const tipo = CATEGORIAS[slot.itemType] ? slot.itemType : 'a_la_carte';
-        if (!grupos[tipo]) grupos[tipo] = [];
-        grupos[tipo].push(slot);
-    });
-
-    // Renderizar en el orden definido en CATEGORIAS
-    const tiposOrdenados = Object.keys(grupos).sort(
-        (a, b) => (CATEGORIAS[a]?.orden || 99) - (CATEGORIAS[b]?.orden || 99)
-    );
-
-    tiposOrdenados.forEach((tipo, secIdx) => {
-        const cfg    = CATEGORIAS[tipo];
-        const platos = grupos[tipo];
-        if (!platos || platos.length === 0) return;
-
-        const seccion = document.createElement('div');
-
-        // Encabezado de sección
-        const header = document.createElement('div');
-        header.className = 'section-label';
-        header.innerHTML = `<h2>${cfg.icono} ${cfg.label}</h2>`;
-        seccion.appendChild(header);
-
-        // Tarjetas con delay de animación escalonado
-        platos.forEach((slot, i) => {
-            const tarjeta = crearTarjeta(slot);
-            tarjeta.style.animationDelay = `${secIdx * 0.06 + i * 0.05}s`;
-            seccion.appendChild(tarjeta);
-        });
-
-        elMenuSections.appendChild(seccion);
-    });
-}
-
-// ============================================================
-// CREAR TARJETA DE PLATO
-// ============================================================
-function crearTarjeta(slot) {
-    const disponible        = slot.disponible && slot.porciones > 0;
-    const pocasLeft         = disponible && slot.porciones > 0 && slot.porciones <= 5;
-    const enCarrito         = cart.find(c => c.slotId === slot.id);
-    const cantidadEnCarrito = enCarrito ? enCarrito.cantidad : 0;
-
-    // Badge de disponibilidad
-    let badgeHTML = '';
-    if (!disponible) {
-        badgeHTML = `<span class="badge-agotado">Agotado</span>`;
-    } else if (pocasLeft) {
-        badgeHTML = `<span class="badge-pocas">¡Solo quedan ${slot.porciones}!</span>`;
-    }
-
-    // Precio o "Incluido"
-    const precioHTML = slot.precio > 0
-        ? `<span class="plate-price">${formatCOP(slot.precio)}</span>`
-        : `<span class="plate-price incluido">Incluido</span>`;
-
-    // Control de cantidad
-    let controlHTML = '';
-    if (disponible) {
-        if (cantidadEnCarrito === 0) {
-            controlHTML = `
-                <button
-                    class="btn-add"
-                    onclick="Cart.agregar('${slot.id}')"
-                    aria-label="Agregar ${slot.nombre}">+</button>`;
-        } else {
-            controlHTML = `
-                <div class="qty-chip">
-                    <button onclick="Cart.cambiarCantidad('${slot.id}', -1)" aria-label="Quitar uno">−</button>
-                    <span>${cantidadEnCarrito}</span>
-                    <button onclick="Cart.cambiarCantidad('${slot.id}', +1)" aria-label="Agregar uno">+</button>
-                </div>`;
-        }
-    }
-
-    const tarjeta     = document.createElement('div');
-    tarjeta.id        = `tarjeta-${slot.id}`;
-    tarjeta.className = `plate-card${!disponible ? ' agotado' : ''}`;
-    tarjeta.innerHTML = `
-        <div class="plate-info">
-            <p class="plate-name">${slot.nombre}</p>
-            ${slot.descripcion ? `<p class="plate-desc">${slot.descripcion}</p>` : ''}
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px;">
-                ${precioHTML}
-                ${badgeHTML}
-            </div>
-        </div>
-        <div style="flex-shrink:0;">${controlHTML}</div>`;
-
-    return tarjeta;
-}
-
-function refrescarTarjeta(slotId) {
-    const slot = slots.find(s => s.id === slotId);
-    if (!slot) return;
-    const vieja = document.getElementById(`tarjeta-${slotId}`);
-    if (vieja) vieja.replaceWith(crearTarjeta(slot));
-}
-
-// ============================================================
-// CARRITO
-// ============================================================
-const Cart = {
-
-    agregar(slotId) {
-        const slot = slots.find(s => s.id === slotId);
-        if (!slot || !slot.disponible) return;
-
-        const existente = cart.find(c => c.slotId === slotId);
-        if (existente) {
-            if (slot.porciones > 0 && existente.cantidad >= slot.porciones) {
-                Toast.error(`Solo quedan ${slot.porciones} porciones de "${slot.nombre}".`);
-                return;
-            }
-            existente.cantidad++;
-        } else {
-            cart.push({ slotId, cantidad: 1 });
-        }
-
-        refrescarTarjeta(slotId);
-        actualizarCarritoBar();
-    },
-
-    cambiarCantidad(slotId, delta) {
-        const slot = slots.find(s => s.id === slotId);
-        if (!slot) return;
-
-        const idx = cart.findIndex(c => c.slotId === slotId);
-        if (idx === -1) return;
-
-        const nueva = cart[idx].cantidad + delta;
-
-        if (delta > 0 && slot.porciones > 0 && nueva > slot.porciones) {
-            Toast.error(`Solo quedan ${slot.porciones} porciones de "${slot.nombre}".`);
-            return;
-        }
-
-        if (nueva <= 0) {
-            cart.splice(idx, 1);
-        } else {
-            cart[idx].cantidad = nueva;
-        }
-
-        refrescarTarjeta(slotId);
-        actualizarCarritoBar();
-
-        // Si el modal está abierto, actualizarlo en tiempo real
-        if (elOrderModal.style.display !== 'none') {
-            this.renderSummary();
-        }
-    },
-
-    openSummary() {
-        this.renderSummary();
-        elOrderModal.style.display = 'block';
-        document.body.style.overflow = 'hidden';
-    },
-
-    closeSummary() {
-        elOrderModal.style.display   = 'none';
-        document.body.style.overflow = '';
-    },
-
-    renderSummary() {
-        elSummaryItems.innerHTML = '';
-
-        if (cart.length === 0) {
-            elSummaryItems.innerHTML = `
-                <div style="text-align:center;padding:36px 0;">
-                    <p style="font-size:13px;color:var(--ink-ghost);">Tu pedido está vacío.</p>
-                </div>`;
-            elSummaryTotal.textContent = '$0';
-            return;
-        }
-
-        cart.forEach(item => {
-            const slot = slots.find(s => s.id === item.slotId);
-            if (!slot) return;
-
-            const subtotal = slot.precio * item.cantidad;
-            const fila     = document.createElement('div');
-            fila.className = 'summary-row';
-            fila.innerHTML = `
-                <div style="flex:1;min-width:0;">
-                    <p class="summary-name">${slot.nombre}</p>
-                    <p class="summary-qty">${item.cantidad} × ${slot.precio > 0 ? formatCOP(slot.precio) : 'Incluido'}</p>
-                </div>
-                <span class="summary-price">
-                    ${slot.precio > 0 ? formatCOP(subtotal) : '—'}
-                </span>`;
-            elSummaryItems.appendChild(fila);
-        });
-
-        elSummaryTotal.textContent = formatCOP(calcularTotal());
-    },
-};
-
-// ============================================================
-// RESOLVER MENU_ITEM_IDs
-// Resuelve el problema cuando los slots tienen menuItemId: null.
-// 1. Trae todos los menu_items activos del restaurante.
-// 2. Para cada ítem del carrito busca el ID real por nombre.
-// 3. Excluye explícitamente cualquier item_type 'sauce'.
-// ============================================================
-async function resolverMenuItemIds() {
-    const { data: itemsReales, error } = await supabaseClient
-        .from('menu_items')
-        .select('id, name, price, item_type')
-        .eq('is_active', true)
-        .eq('restaurant_id', restaurantId)
-        // [FIX] Solo tipos validos del enum (protein/sauce NO existen)
-        .in('item_type', ['executive_lunch', 'a_la_carte', 'drink', 'dessert', 'side']);
-
-    if (error) {
-        console.warn('[La 26] No se pudieron cargar menu_items:', error);
-    }
-
-    const lista      = itemsReales || [];
-    const fallbackId = lista[0]?.id || null;
-    const resultado  = [];
-
-    for (const item of cart) {
-        const slot = slots.find(s => s.id === item.slotId);
-        if (!slot) continue;
-
-        let menuItemId = slot.menuItemId;
-
-        if (!menuItemId && lista.length > 0) {
-            const nombreBuscar = (slot.nombre || '').toLowerCase().trim();
-
-            // 1. Coincidencia exacta por nombre
-            const exacto = lista.find(m =>
-                m.name.toLowerCase().trim() === nombreBuscar
-            );
-            // 2. Coincidencia parcial (primera palabra)
-            const parcial = !exacto && lista.find(m =>
-                m.name.toLowerCase().includes(nombreBuscar.split(' ')[0]) ||
-                nombreBuscar.includes(m.name.toLowerCase().split(' ')[0])
-            );
-            // 3. Mismo item_type como último criterio antes del fallback
-            const mismoCat = !exacto && !parcial && lista.find(m =>
-                m.item_type === slot.itemType
-            );
-
-            menuItemId = exacto?.id || parcial?.id || mismoCat?.id || fallbackId;
-
-            if (exacto)       console.log(`[La 26] ✅ Match exacto para "${slot.nombre}"`);
-            else if (parcial)  console.log(`[La 26] ⚡ Match parcial para "${slot.nombre}"`);
-            else if (mismoCat) console.log(`[La 26] 🔁 Match por categoría para "${slot.nombre}"`);
-            else if (fallbackId) console.log(`[La 26] ⚠️ Fallback para "${slot.nombre}"`);
-        }
-
-        if (!menuItemId) {
-            console.warn(`[La 26] ⛔ Sin menu_item_id para "${slot.nombre}". Ítem omitido.`);
-            continue;
-        }
-
-        resultado.push({
-            menuItemId,
-            // daily_menu_slot_id solo aplica cuando hay menu del dia activo y el slot es real
-            // Si cargamos del catalogo directo (sin daily_menu), slot.id === menu_item_id,
-            // NO debe pasarse como daily_menu_slot_id o el join falla en Supabase.
-            slotId:   (item.slotId && item.slotId.startsWith("mock-") || !dailyMenuId) ? null : item.slotId,
-            cantidad: item.cantidad,
-            precio:   slot.precio,
-            nombre:   slot.nombre,
-        });
-    }
-
-    return resultado;
-}
-
-// ============================================================
-// PEDIDOS — LÓGICA DE TIPO DE ENTREGA
-// ============================================================
-const Order = {
-
-    // Cambia visualmente el selector de entrega (retiro vs domicilio)
-    seleccionarEntrega(tipo) {
-        tipoEntrega = tipo;
-
-        if (elBtnRetiro) {
-            elBtnRetiro.classList.toggle('selected', tipo === 'retiro');
-        }
-        if (elBtnDomicilio) {
-            elBtnDomicilio.classList.toggle('selected', tipo === 'domicilio');
-        }
-
-        // Mostrar u ocultar campo de dirección
-        if (elDireccionWrapper) {
-            if (tipo === 'domicilio') {
-                elDireccionWrapper.classList.remove('hidden-field');
-                elDireccionWrapper.style.display = 'block';
-                if (elDeliveryAddress) elDeliveryAddress.required = true;
-            } else {
-                elDireccionWrapper.classList.add('hidden-field');
-                elDireccionWrapper.style.display = 'none';
-                if (elDeliveryAddress) {
-                    elDeliveryAddress.required = false;
-                    elDeliveryAddress.value    = '';
-                }
-            }
-        }
-    },
-
-    // ── Submit del pedido ─────────────────────────────────────
-    async submit(event) {
-        event.preventDefault();
-        if (isSubmitting) return;
-
-        // Nombre del cliente: viene del campo visible O del capturado via QR/sessionStorage
-        const nombreCampo = elCustomerName ? elCustomerName.value.trim() : '';
-        const nombreFinal = nombreCampo || tableNombre || '';
-
-        if (!nombreFinal) {
-            if (elCustomerName) elCustomerName.focus();
-            Toast.error('Por favor ingresa tu nombre para que podamos avisarte cuando tu pedido esté listo.');
-            return;
-        }
-
-        if (cart.length === 0) return;
-
-        // Validar dirección si eligió domicilio
-        const esPararLlevar = (modalidad === 'para_llevar' || modalidad === 'domicilio');
-        let direccionEntrega = '';
-        let tipoDespacho    = 'mesa'; // 'mesa' | 'retiro' | 'domicilio'
-
-        if (esPararLlevar) {
-            tipoDespacho = tipoEntrega; // 'retiro' | 'domicilio'
-            if (tipoEntrega === 'domicilio') {
-                direccionEntrega = elDeliveryAddress ? elDeliveryAddress.value.trim() : '';
-                if (!direccionEntrega) {
-                    if (elDeliveryAddress) elDeliveryAddress.focus();
-                    Toast.error('Por favor ingresa la dirección de entrega para el domicilio.');
-                    return;
-                }
-            }
-        }
-
-        // ── GUARD: orders.table_id es NOT NULL — nunca puede ser null ────────────
-        // Si el cliente llegó por Para Llevar / Domicilio y tableId no se resolvió
-        // durante la carga inicial (falla silenciosa del INSERT automático por
-        // qr_code faltante), lo buscamos aquí antes de continuar.
-        if (!tableId) {
-            const { data: mesaVirtual } = await supabaseClient
-                .from('tables')
-                .select('id')
-                .eq('restaurant_id', restaurantId)
-                .ilike('label', '%para llevar%')
-                .maybeSingle();
-
-            if (mesaVirtual?.id) {
-                tableId = mesaVirtual.id;
-                console.log('[La 26] ✅ tableId resuelto en submit desde mesa virtual existente');
-            } else {
-                // Crear la mesa virtual como último recurso con todos los campos requeridos
-                const { data: mesaNueva } = await supabaseClient
-                    .from('tables')
-                    .upsert([{
-                        restaurant_id: restaurantId,
-                        number:        0,
-                        label:         'Para Llevar / Domicilio',
-                        qr_code:       `VIRTUAL-TAKEAWAY-${restaurantId}`,
-                        capacity:      99,
-                        status:        'available',
-                    }], { onConflict: 'restaurant_id,number' })
-                    .select('id')
-                    .single();
-
-                tableId = mesaNueva?.id || null;
-
-                if (!tableId) {
-                    Toast.error('No se pudo identificar la mesa. Por favor recarga la página e intenta de nuevo.');
-                    return;
-                }
-                console.log('[La 26] ✅ Mesa virtual "Para Llevar" creada automáticamente en submit.');
-            }
-        }
-
-        isSubmitting = true;
-        const btnSubmit = elOrderForm.querySelector('button[type="submit"]');
-        if (btnSubmit) {
-            btnSubmit.disabled    = true;
-            btnSubmit.textContent = 'Enviando a cocina…';
-        }
-
-        const numeroOrden = generarNumeroOrden();
-        const totalMonto  = calcularTotal();
-
-        // Construir notas de despacho para la cocina
-        // La dirección y modalidad van SIEMPRE en el campo notes (evita error 42703
-        // por columnas delivery_type / delivery_address que pueden no existir aún)
-        let notasCocina = '';
-        if (tipoDespacho === 'retiro') {
-            notasCocina = `[PARA LLEVAR] Cliente: ${nombreFinal} — Retira en el restaurante`;
-        } else if (tipoDespacho === 'domicilio') {
-            notasCocina = `[DOMICILIO] Cliente: ${nombreFinal} — Dirección: ${direccionEntrega}`;
-        } else {
-            notasCocina = tableNumber ? `[MESA] ${tableNumber}` : '';
-        }
-
-        try {
-            // ── Paso 1: resolver IDs reales ──────────────────────
-            const itemsResueltos = await resolverMenuItemIds();
-
-            // ── Paso 2: insertar la orden maestra en 'orders' ────
-            // IMPORTANTE: Solo se usan columnas que siempre existen en el esquema.
-            // delivery_type y delivery_address NO se incluyen aquí porque generan
-            // error 42703 si la migración no se ha ejecutado en Supabase.
-            // Toda la info de modalidad/dirección queda guardada en 'notes'.
-            const ordenPayload = {
-                restaurant_id: restaurantId,
-                table_id:      tableId,        // ← siempre tiene valor aquí gracias al guard
-                order_number:  numeroOrden,
-                status:        'pending',
-                customer_name: nombreFinal,
-                total_amount:  totalMonto,
-                daily_menu_id: dailyMenuId  || null,
-                notes:         notasCocina  || null,
-            };
-
-            const { data: orden, error: errorOrden } = await supabaseClient
-                .from('orders')
-                .insert([ordenPayload])
-                .select('id')
-                .single();
-
-            if (errorOrden) throw errorOrden;
-
-            // ── Paso 3: insertar order_items ─────────────────────
-            if (itemsResueltos.length > 0) {
-                const { error: errorItems } = await supabaseClient
-                    .from('order_items')
-                    .insert(itemsResueltos.map(item => ({
-                        order_id:           orden.id,
-                        menu_item_id:       item.menuItemId,
-                        daily_menu_slot_id: item.slotId,
-                        quantity:           item.cantidad,
-                        unit_price:         item.precio,
-                        item_status:        'pending',
-                        // El nombre real del plato se guarda en notes con prefijo [nombre]
-                        // para que la pantalla de cocina lo muestre aunque el join falle
-                        notes:              `[nombre]${item.nombre}`,
-                    })));
-
-                if (errorItems) {
-                    console.error('[La 26] ❌ Error en order_items:', errorItems);
-                    // La orden maestra ya existe — no bloqueamos al cliente
-                }
-            }
-
-            this.mostrarExito(numeroOrden);
-
-        } catch (err) {
-            console.error('[La 26] Error al insertar pedido:', err);
-            // Mostrar detalle del error de Supabase si está disponible
-            const detalle = err?.message || err?.details || '';
-            Toast.error('No se pudo enviar el pedido. Por favor llama a un mesero o intenta de nuevo.' + (detalle ? `\n(${detalle})` : ''), 5000);
-        } finally {
-            isSubmitting = false;
-            if (btnSubmit) {
-                btnSubmit.disabled    = false;
-                btnSubmit.textContent = 'Enviar pedido a cocina';
-            }
-        }
-    },
-
-    mostrarExito(numeroOrden) {
-        Cart.closeSummary();
-        elSuccessOrder.textContent       = numeroOrden;
-        elSuccessModal.style.display     = 'flex';
-        // Limpiar carrito local tras envío exitoso
-        cart = [];
-        actualizarCarritoBar();
-    },
-
-    newOrder() {
-        // Si el nombre vino via QR y es pedido en mesa, no limpiamos el campo
-        const limpiarNombre = !(tableNombre && modalidad === 'mesa');
-        if (limpiarNombre && elCustomerName) {
-            elCustomerName.value = '';
-        }
-        // Limpiar dirección de domicilio
-        if (elDeliveryAddress) {
-            elDeliveryAddress.value = '';
-        }
-        elSuccessModal.style.display = 'none';
-        renderizarMenu();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    },
-};
-
-// ============================================================
-// RESOLVER RESTAURANT_ID
-// ============================================================
-async function resolverRestaurantId() {
+async function cargarDashboardReal() {
     try {
-        // Buscar por slug canónico
-        const { data: porSlug } = await supabaseClient
-            .from('restaurants')
-            .select('id')
-            .eq('slug', RESTAURANT_SLUG)
-            .maybeSingle();
+        // ── Rango del día actual en zona horaria Colombia (UTC-5) ──────────
+        const _ahora     = new Date();
+        const _offsetMs  = 5 * 60 * 60 * 1000; // UTC-5 Bogotá
+        const _hoyLocal  = new Date(_ahora.getTime() - _offsetMs);
+        const _yyyy      = _hoyLocal.getUTCFullYear();
+        const _mm        = String(_hoyLocal.getUTCMonth() + 1).padStart(2, '0');
+        const _dd        = String(_hoyLocal.getUTCDate()).padStart(2, '0');
+        const _inicioDia = `${_yyyy}-${_mm}-${_dd}T00:00:00-05:00`; // medianoche Bogotá
+        const _finDia    = `${_yyyy}-${_mm}-${_dd}T23:59:59-05:00`; // fin del día Bogotá
 
-        if (porSlug?.id) return porSlug.id;
-
-        // Fallback: cualquier restaurante en la tabla
-        const { data: cualquiera } = await supabaseClient
-            .from('restaurants')
-            .select('id')
-            .limit(1)
-            .maybeSingle();
-
-        if (cualquiera?.id) {
-            console.warn('[La 26] Restaurante encontrado sin slug. Actualiza el slug a "restaurante-la-26".');
-            return cualquiera.id;
-        }
-
-        // Tabla vacía → insertar automáticamente
-        const { data: nuevo, error } = await supabaseClient
-            .from('restaurants')
-            .insert([{ name: 'Restaurante la 26', slug: RESTAURANT_SLUG }])
-            .select('id')
-            .single();
+        // payment_method ahora existe en BD (columna VARCHAR(20)) — se incluye en el SELECT
+        // FILTRO DE FECHA: solo órdenes del día actual (reset a $0 cada mañana)
+        const { data: orders, error } = await supabaseClient
+            .from('orders')
+            .select(`id, order_number, customer_name, total_amount, status, notes, payment_method,
+                     table_id, order_items ( quantity, notes, unit_price )`)
+            .gte('created_at', _inicioDia)
+            .lte('created_at', _finDia);
 
         if (error) throw error;
-        console.log('[La 26] ✅ Restaurante creado automáticamente.');
-        return nuevo.id;
 
-    } catch (err) {
-        console.error('[La 26] Error resolviendo restaurant_id:', err);
-        return null;
-    }
-}
+        const ordenesValidas = (orders || []).filter(o =>
+            o.status !== 'canceled' && o.status !== 'cancelled'
+        );
 
-// ============================================================
-// CARGAR SLOTS DESDE VISTA daily_menu_slots_availability
-// ============================================================
-async function cargarSlotsDesdeMenuDia() {
-    const { data: rawSlots, error } = await supabaseClient
-        .from('daily_menu_slots_availability')
-        .select(`
-            id,
-            menu_item_id,
-            item_name,
-            price,
-            category_name,
-            category_order,
-            display_order,
-            portions_available,
-            portions_sold,
-            is_truly_available,
-            item_type
-        `)
-        .eq('daily_menu_id', dailyMenuId)
-        // [FIX] Solo tipos validos del enum (protein/sauce NO existen)
-        .in('item_type', ['executive_lunch', 'a_la_carte', 'drink', 'dessert', 'side'])
-        .order('category_order', { ascending: true })
-        .order('display_order',  { ascending: true });
+        globalIngresos = ordenesValidas.reduce(
+            (acc, o) => acc + (parseFloat(o.total_amount) || 0), 0
+        );
 
-    if (error || !rawSlots || rawSlots.length === 0) {
-        console.log('[La 26] Sin slots en daily_menu → cargando catálogo directo. Error:', error);
-        await cargarSlotsDesdeCatalogo();
-        return;
-    }
+        // Totales se recalculan desde notes en el bloque de renderizado de la tabla
+        // (ver forEach de ordenesValidas más abajo)
+        const baseICA      = Math.max(0, globalIngresos - globalEgresos);
+        const provisionICA = baseICA * TASA_RETE_ICA;
 
-    slots = rawSlots.map(s => ({
-        id:          s.id,
-        menuItemId:  s.menu_item_id,
-        nombre:      s.item_name,
-        precio:      Number(s.price) || 0,
-        descripcion: '',
-        itemType:    CATEGORIAS[s.item_type] ? s.item_type : 'a_la_carte',
-        porciones:   s.is_truly_available
-                        ? Math.max(0, (s.portions_available || 0) - (s.portions_sold || 0))
-                        : 0,
-        disponible:  Boolean(s.is_truly_available),
-    }));
+        const elPedidos2 = document.getElementById('total-pedidos');
+        if (elPedidos2) elPedidos2.textContent = `${ordenesValidas.length} pedidos`;
+        // renderizarTotales() se llama más abajo una vez se calculan los totales por método
 
-    renderizarCatsBar();
-    renderizarMenu();
-    mostrarMenu();
-    suscribirTiempoReal();
-}
+        // Historial de facturación
+        const tbodyFacturas = document.getElementById('tabla-facturas');
+        if (tbodyFacturas) {
+            tbodyFacturas.innerHTML = '';
+            if (ordenesValidas.length === 0) {
+                tbodyFacturas.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                            Sin comandas registradas hoy.
+                        </td>
+                    </tr>`;
+            } else {
+                // Reconstruir totales por método desde payment_method (BD) con fallback a notes
+                let _ef = 0, _tr = 0, _fi = 0;
+                ordenesValidas.forEach(ord => {
+                    // Prioridad: columna payment_method → luego notes legacy
+                    const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
+                    const monto  = parseFloat(ord.total_amount) || 0;
+                    if (metodo === 'efectivo')      _ef += monto;
+                    if (metodo === 'transferencia') _tr += monto;
+                    if (metodo === 'fiado')         _fi += monto;
+                });
+                // Sincronizar sessionStorage con los datos reales de la BD
+                sessionStorage.setItem('pm_efectivo',      String(_ef));
+                sessionStorage.setItem('pm_transferencia', String(_tr));
+                sessionStorage.setItem('pm_fiado',         String(_fi));
+                totalEfectivo      = _ef;
+                totalTransferencia = _tr;
+                totalFiado         = _fi;
+                renderizarTotales();
 
-// ============================================================
-// CARGAR SLOTS DIRECTAMENTE DEL CATÁLOGO menu_items
-// Excluye por completo el item_type 'sauce'.
-// ============================================================
-async function cargarSlotsDesdeCatalogo() {
-    const { data: items, error } = await supabaseClient
-        .from('menu_items')
-        .select('id, name, price, item_type, is_active, description')
-        .eq('restaurant_id', restaurantId)
-        .eq('is_active', true)
-        // [FIX] Solo tipos validos del enum (protein/sauce NO existen)
-        .in('item_type', ['executive_lunch', 'a_la_carte', 'drink', 'dessert', 'side'])
-        .order('item_type', { ascending: true })
-        .order('name',      { ascending: true });
+                ordenesValidas.forEach(ord => {
+                    const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
+                    const badgeMetodo = metodo
+                        ? _badgeMetodo(metodo)
+                        : `<select onchange="registrarMetodoPago('${ord.id}', this.value)"
+                               style="font-size:10.5px;padding:3px 10px;border-radius:999px;height:28px;width:auto;cursor:pointer;background:var(--amber-lt);border-color:rgba(154,108,26,.28);color:var(--amber);">
+                               <option value="">💳 Registrar pago…</option>
+                               <option value="efectivo">💵 Efectivo</option>
+                               <option value="transferencia">📲 Transferencia</option>
+                               <option value="fiado">🤝 Fiado</option>
+                           </select>`;
 
-    if (error) {
-        console.error('[La 26] Error cargando catálogo:', error);
-        activarModoDemo();
-        return;
-    }
+                    // Obtener número de mesa desde notes (formato [MESA N] o [PARA LLEVAR])
+                    const mesaMatch = (ord.notes || '').match(/\[MESA\s*([^\]]+)\]|\[(PARA LLEVAR|DOMICILIO)\]/i);
+                    const mesaLabel = mesaMatch
+                        ? (mesaMatch[1] || mesaMatch[2] || '—')
+                        : (ord.table_id ? `—` : 'P.L.');
 
-    if (!items || items.length === 0) {
-        console.log('[La 26] Catálogo vacío → modo Demo');
-        activarModoDemo();
-        return;
-    }
-
-    slots = items.map(item => ({
-        id:          item.id,
-        menuItemId:  item.id,
-        nombre:      item.name,
-        precio:      Number(item.price) || 0,
-        descripcion: item.description || '',
-        itemType:    CATEGORIAS[item.item_type] ? item.item_type : 'a_la_carte',
-        porciones:   999,
-        disponible:  true,
-    }));
-
-    renderizarCatsBar();
-    renderizarMenu();
-    mostrarMenu();
-}
-
-// ============================================================
-// MODO DEMO — datos de ejemplo cuando Supabase no tiene nada.
-// Refleja los tipos reales de la cocina de La 26.
-// No contiene ningún ítem de tipo 'sauce'.
-// ============================================================
-function activarModoDemo() {
-    console.log('[La 26] 🎭 Modo Demo activo');
-    slots = [
-        { id:'mock-p1', menuItemId:null, nombre:'Pechuga a la Plancha con Salsa Criolla',    precio:16000, descripcion:'Pechuga jugosa a la plancha bañada en salsa criolla de tomate y cebolla caramelizada.',         itemType:'protein',    porciones:12, disponible:true  },
-        { id:'mock-p2', menuItemId:null, nombre:'Tilapia Frita con Salsa de Ajo',             precio:18000, descripcion:'Tilapia del día frita en aceite de maíz con salsa de ajo y limón.',                            itemType:'protein',    porciones:8,  disponible:true  },
-        { id:'mock-p3', menuItemId:null, nombre:'Cerdo al Horno con Salsa BBQ',               precio:17000, descripcion:'Lomo de cerdo jugoso horneado lentamente, servido con salsa BBQ artesanal.',                   itemType:'protein',    porciones:0,  disponible:false },
-        { id:'mock-p4', menuItemId:null, nombre:'Camarones al Ajillo',                        precio:22000, descripcion:'Camarones frescos salteados en mantequilla de ajo y limón, servidos sobre arroz.',              itemType:'a_la_carte', porciones:4,  disponible:true  },
-        { id:'mock-s1', menuItemId:null, nombre:'Arroz Blanco con Coco',                      precio:0,     descripcion:'Arroz cocinado con leche de coco, acompañamiento clásico de la cocina colombiana.',             itemType:'side',       porciones:30, disponible:true  },
-        { id:'mock-s2', menuItemId:null, nombre:'Fríjoles Rojos con Hogao',                   precio:0,     descripcion:'Fríjoles rojos cocinados a fuego lento con hogao de tomate y cebolla.',                         itemType:'side',       porciones:25, disponible:true  },
-        { id:'mock-s3', menuItemId:null, nombre:'Patacón Tostado con Guacamole',              precio:0,     descripcion:'Plátano verde aplastado y frito dos veces, servido con guacamole fresco.',                       itemType:'side',       porciones:20, disponible:true  },
-        { id:'mock-d1', menuItemId:null, nombre:'Jugo Natural del Día',                       precio:3000,  descripcion:'Fruta fresca de temporada preparada al momento — pregunta al mesero qué hay hoy.',              itemType:'drink',      porciones:30, disponible:true  },
-        { id:'mock-d2', menuItemId:null, nombre:'Limonada de Panela',                         precio:3500,  descripcion:'Limón recién exprimido endulzado con panela orgánica y una pizca de sal.',                      itemType:'drink',      porciones:25, disponible:true  },
-        { id:'mock-d3', menuItemId:null, nombre:'Agua Aromática de Hierbas',                  precio:2000,  descripcion:'Infusión de menta, hierba buena y canela servida fría o caliente.',                             itemType:'drink',      porciones:20, disponible:true  },
-    ];
-
-    renderizarCatsBar();
-    renderizarMenu();
-    mostrarMenu();
-}
-
-// ============================================================
-// TIEMPO REAL — suscripción a cambios en el menú del día
-// ============================================================
-function suscribirTiempoReal() {
-    if (!dailyMenuId) return;
-
-    supabaseClient
-        .channel('la26-menu-cliente-rt')
-        .on('postgres_changes', {
-            event:  '*',
-            schema: 'public',
-            table:  'daily_menu_slots',
-            filter: `daily_menu_id=eq.${dailyMenuId}`,
-        }, () => {
-            console.log('[La 26] 🔄 Cambio en daily_menu_slots — recargando');
-            cargarSlotsDesdeMenuDia();
-        })
-        .on('postgres_changes', {
-            event:  'UPDATE',
-            schema: 'public',
-            table:  'menu_items',
-            filter: `restaurant_id=eq.${restaurantId}`,
-        }, () => {
-            console.log('[La 26] 🔄 Cambio en menu_items — recargando');
-            if (dailyMenuId) cargarSlotsDesdeMenuDia();
-            else             cargarSlotsDesdeCatalogo();
-        })
-        .subscribe(status => console.log('[La 26] Canal RT:', status));
-}
-
-// ============================================================
-// EVENT LISTENERS
-// ============================================================
-elOrderForm.addEventListener('submit', Order.submit.bind(Order));
-
-// ============================================================
-// MÓDULO MESERO — WaiterFlow v1.0
-// ============================================================
-// Flujo: Login PIN → Selección Mesa → Registro Pedido por nombre
-// → Envío directo a cocina (orders + order_items en Supabase)
-//
-// Activación: abre menu.html?modo=mesero o llama WaiterFlow.init()
-// El flujo comparte la misma BD que el cliente pero agrega:
-//  - PIN de mesero (table: waiter_sessions o hardcoded por ahora)
-//  - Selección de mesa numérica
-//  - Campo de nombre del cliente
-// ============================================================
-const WaiterFlow = (function() {
-
-    // Estado interno
-    let _mesero  = null;  // { nombre, pin }
-    let _mesa    = null;  // número de mesa seleccionado
-    let _restaurantId = null;
-    let _tableId      = null;
-
-    // PIN hardcoded hasta que exista tabla waiter_sessions
-    const PINES = {
-        '1111': 'Mesero 1',
-        '2222': 'Mesero 2',
-        '3333': 'Mesero 3',
-        '0000': 'Supervisor',
-    };
-
-    const CSS = `
-        #wf-overlay {
-            position:fixed;inset:0;background:#1a1f18;z-index:10000;
-            display:flex;align-items:center;justify-content:center;
-            font-family:'DM Sans',sans-serif;
-        }
-        .wf-card {
-            background:#fff;border-radius:24px;padding:32px;
-            width:min(420px,calc(100vw - 32px));
-            box-shadow:0 24px 80px rgba(0,0,0,.4);
-        }
-        .wf-title {
-            font-size:17px;font-weight:800;color:#1a1f18;
-            margin-bottom:6px;letter-spacing:-.3px;
-        }
-        .wf-sub {
-            font-size:12.5px;color:#8a9388;margin-bottom:22px;line-height:1.5;
-        }
-        .wf-label {
-            font-size:11px;font-weight:700;text-transform:uppercase;
-            letter-spacing:.7px;color:#4a5248;margin-bottom:6px;display:block;
-        }
-        .wf-input {
-            width:100%;border:1.5px solid #e4e7e2;border-radius:999px;
-            padding:11px 18px;font-size:14px;font-family:'DM Sans',sans-serif;
-            color:#1a1f18;background:#f7f8f6;outline:none;
-            transition:border-color .2s,box-shadow .2s;margin-bottom:14px;
-        }
-        .wf-input:focus { border-color:#4a6741;box-shadow:0 0 0 3px rgba(74,103,65,.12); }
-        .wf-btn {
-            width:100%;background:#4a6741;color:#fff;border:none;border-radius:999px;
-            padding:13px;font-size:14px;font-weight:700;cursor:pointer;
-            font-family:'DM Sans',sans-serif;transition:background .2s;
-        }
-        .wf-btn:hover { background:#3a5233; }
-        .wf-btn:disabled { background:#c8d4c5;cursor:not-allowed; }
-        .wf-err {
-            background:#fdf5f3;border:1.5px solid rgba(192,80,60,.3);
-            border-radius:12px;padding:9px 14px;font-size:12.5px;color:#6b2a1e;
-            margin-bottom:14px;display:none;
-        }
-        .wf-mesa-grid {
-            display:grid;grid-template-columns:repeat(4,1fr);gap:10px;
-            margin-bottom:16px;
-        }
-        .wf-mesa-btn {
-            background:#f0f2ef;border:1.5px solid #e4e7e2;border-radius:14px;
-            padding:16px 8px;font-size:16px;font-weight:700;cursor:pointer;
-            font-family:'DM Mono',monospace;color:#1a1f18;transition:all .15s;
-            text-align:center;
-        }
-        .wf-mesa-btn:hover { background:#e8ede7;border-color:#c2d09c; }
-        .wf-mesa-btn.selected {
-            background:#4a6741;color:#fff;border-color:#4a6741;
-        }
-        .wf-back {
-            background:none;border:1.5px solid #e4e7e2;color:#4a5248;
-            border-radius:999px;padding:10px 20px;font-size:13px;
-            font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;
-            transition:all .2s;margin-top:10px;width:100%;
-        }
-        .wf-back:hover { background:#f0f2ef; }
-        .wf-badge {
-            display:inline-block;background:#e8ede7;color:#4a6741;
-            border-radius:999px;padding:3px 12px;font-size:11.5px;font-weight:700;
-            margin-bottom:18px;
-        }
-    `;
-
-    function _injectCSS() {
-        if (document.getElementById('wf-css')) return;
-        const s = document.createElement('style');
-        s.id = 'wf-css'; s.textContent = CSS;
-        document.head.appendChild(s);
-    }
-
-    function _mount(html) {
-        let ov = document.getElementById('wf-overlay');
-        if (!ov) {
-            ov = document.createElement('div');
-            ov.id = 'wf-overlay';
-            document.body.appendChild(ov);
-        }
-        ov.innerHTML = html;
-        ov.style.display = 'flex';
-    }
-
-    function _hide() {
-        const ov = document.getElementById('wf-overlay');
-        if (ov) ov.style.display = 'none';
-    }
-
-    // ── PASO 1: Login PIN ─────────────────────────────────────
-    function mostrarLogin() {
-        _injectCSS();
-        _mount(`
-            <div class="wf-card">
-                <div style="text-align:center;margin-bottom:22px;">
-                    <span style="font-size:40px;">🍽️</span>
-                </div>
-                <h2 class="wf-title" style="text-align:center;">Acceso Mesero</h2>
-                <p class="wf-sub" style="text-align:center;">Restaurante la 26 · Sistema de Pedidos</p>
-                <div id="wf-login-err" class="wf-err"></div>
-                <label class="wf-label">Tu nombre</label>
-                <input id="wf-nombre" class="wf-input" type="text"
-                    placeholder="Ej: Carlos" autocomplete="off">
-                <label class="wf-label">PIN de acceso</label>
-                <input id="wf-pin" class="wf-input" type="password"
-                    placeholder="••••" maxlength="4" autocomplete="off"
-                    onkeydown="if(event.key==='Enter')WaiterFlow._loginSubmit()">
-                <button class="wf-btn" onclick="WaiterFlow._loginSubmit()">Ingresar al Sistema</button>
-            </div>`);
-        setTimeout(() => document.getElementById('wf-nombre')?.focus(), 100);
-    }
-
-    function _loginSubmit() {
-        const nombre = document.getElementById('wf-nombre')?.value.trim();
-        const pin    = document.getElementById('wf-pin')?.value.trim();
-        const err    = document.getElementById('wf-login-err');
-
-        if (!nombre) { _showErr(err, 'Ingresa tu nombre.'); return; }
-        if (!pin)    { _showErr(err, 'Ingresa el PIN.'); return; }
-
-        const nombrePIN = PINES[pin];
-        if (!nombrePIN) { _showErr(err, 'PIN incorrecto. Intenta de nuevo.'); return; }
-
-        _mesero = { nombre, pin, cargo: nombrePIN };
-        mostrarSeleccionMesa();
-    }
-
-    // ── PASO 2: Selección de Mesa ─────────────────────────────
-    function mostrarSeleccionMesa() {
-        _injectCSS();
-        const mesas = Array.from({length: 12}, (_,i) => i+1)
-            .map(n => `<button class="wf-mesa-btn" onclick="WaiterFlow._seleccionarMesa(${n})">${n}</button>`)
-            .join('');
-
-        _mount(`
-            <div class="wf-card">
-                <span class="wf-badge">👤 ${_mesero.nombre}</span>
-                <h2 class="wf-title">Seleccionar Mesa</h2>
-                <p class="wf-sub">¿En qué mesa están los clientes?</p>
-                <div class="wf-mesa-grid">${mesas}
-                    <button class="wf-mesa-btn" onclick="WaiterFlow._seleccionarMesa('barra')"
-                        style="font-size:12px;font-family:'DM Sans',sans-serif;">🪑<br>Barra</button>
-                    <button class="wf-mesa-btn" onclick="WaiterFlow._seleccionarMesa('para_llevar')"
-                        style="font-size:11px;font-family:'DM Sans',sans-serif;">📦<br>Para Llevar</button>
-                    <button class="wf-mesa-btn" onclick="WaiterFlow._seleccionarMesa('domicilio')"
-                        style="font-size:11px;font-family:'DM Sans',sans-serif;">🛵<br>Domicilio</button>
-                </div>
-                <button class="wf-back" onclick="WaiterFlow.mostrarLogin()">← Regresar</button>
-            </div>`);
-    }
-
-    function _seleccionarMesa(mesa) {
-        _mesa = mesa;
-        mostrarFormPedido();
-    }
-
-    // ── PASO 3: Formulario de Pedido ──────────────────────────
-    function mostrarFormPedido() {
-        _injectCSS();
-        const mesaLabel = isNaN(_mesa) ? _mesa : `Mesa ${_mesa}`;
-
-        _mount(`
-            <div class="wf-card" style="max-height:95vh;overflow-y:auto;">
-                <span class="wf-badge">🍽️ ${mesaLabel} · ${_mesero.nombre}</span>
-                <h2 class="wf-title">Registrar Pedido</h2>
-                <p class="wf-sub">Ingresa los datos del cliente y los platos del pedido.</p>
-                <div id="wf-pedido-err" class="wf-err"></div>
-                <label class="wf-label">Nombre del cliente</label>
-                <input id="wf-cliente" class="wf-input" type="text"
-                    placeholder="Ej: Andrés García" autocomplete="off">
-                <label class="wf-label">Platos del pedido</label>
-                <div id="wf-items-list" style="margin-bottom:10px;"></div>
-                <button onclick="WaiterFlow._agregarLinea()"
-                    style="background:#f0f2ef;border:1.5px solid #e4e7e2;color:#4a5248;
-                    border-radius:999px;padding:7px 18px;font-size:12.5px;font-weight:600;
-                    cursor:pointer;font-family:'DM Sans',sans-serif;margin-bottom:16px;
-                    transition:all .2s;">+ Agregar plato</button>
-                <label class="wf-label" style="margin-top:4px;">Notas especiales (opcional)</label>
-                <input id="wf-notas" class="wf-input" type="text"
-                    placeholder="Ej: Sin picante · Sin cebolla">
-                <button id="wf-enviar-btn" class="wf-btn" onclick="WaiterFlow._enviarPedido()">
-                    🚀 Enviar a Cocina
-                </button>
-                <button class="wf-back" onclick="WaiterFlow.mostrarSeleccionMesa()">← Cambiar mesa</button>
-            </div>`);
-
-        // Agregar primera línea de plato
-        _agregarLinea();
-    }
-
-    function _agregarLinea() {
-        const lista = document.getElementById('wf-items-list');
-        if (!lista) return;
-        const idx = lista.children.length;
-        const div = document.createElement('div');
-        div.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px;';
-        div.innerHTML = `
-            <input class="wf-input wf-item-nombre" type="text"
-                placeholder="Nombre del plato" autocomplete="off"
-                style="flex:2;margin-bottom:0;font-size:13px;"
-                list="wf-platos-datalist">
-            <input class="wf-input wf-item-qty" type="number" min="1" max="20" value="1"
-                style="flex:0 0 60px;margin-bottom:0;text-align:center;padding:11px 8px;font-size:13px;">
-            <button onclick="this.parentElement.remove()"
-                style="background:#fdf5f3;border:1.5px solid rgba(192,80,60,.25);color:#c0503c;
-                border-radius:999px;width:34px;height:34px;flex-shrink:0;cursor:pointer;
-                font-size:16px;font-family:'DM Sans',sans-serif;display:flex;
-                align-items:center;justify-content:center;">×</button>`;
-        lista.appendChild(div);
-
-        // Datalist con platos del menú cargado
-        if (!document.getElementById('wf-platos-datalist') && slots?.length) {
-            const dl = document.createElement('datalist');
-            dl.id = 'wf-platos-datalist';
-            slots.forEach(s => {
-                const opt = document.createElement('option');
-                opt.value = s.nombre;
-                dl.appendChild(opt);
-            });
-            document.body.appendChild(dl);
-        }
-
-        const inp = div.querySelector('.wf-item-nombre');
-        if (inp) setTimeout(() => inp.focus(), 80);
-    }
-
-    async function _enviarPedido() {
-        const btn     = document.getElementById('wf-enviar-btn');
-        const err     = document.getElementById('wf-pedido-err');
-        const cliente = document.getElementById('wf-cliente')?.value.trim();
-        const notas   = document.getElementById('wf-notas')?.value.trim();
-
-        if (!cliente) { _showErr(err, 'Ingresa el nombre del cliente.'); return; }
-
-        // Recopilar líneas de platos
-        const filas   = document.querySelectorAll('#wf-items-list > div');
-        const items   = [];
-        filas.forEach(f => {
-            const nombre = f.querySelector('.wf-item-nombre')?.value.trim();
-            const qty    = parseInt(f.querySelector('.wf-item-qty')?.value) || 1;
-            if (nombre) {
-                const slot = slots?.find(s => s.nombre.toLowerCase() === nombre.toLowerCase());
-                items.push({
-                    nombre,
-                    qty,
-                    menuItemId: slot?.menuItemId || slot?.id || null,
-                    precio: slot?.precio || 0,
+                    tbodyFacturas.insertAdjacentHTML('beforeend', `
+                        <tr class="tbody-row">
+                            <td>
+                                <span class="mono" style="font-size:11.5px;font-weight:700;color:var(--olive);">${ord.order_number}</span>
+                            </td>
+                            <td style="font-size:12px;color:var(--text-3);font-weight:500;white-space:nowrap;">${mesaLabel}</td>
+                            <td style="font-size:13px;color:var(--text-1);font-weight:500;">${ord.customer_name || 'Consumidor Final'}</td>
+                            <td>
+                                <span class="mono" style="font-size:13px;font-weight:700;color:var(--olive);">${formatCOP(ord.total_amount)}</span>
+                            </td>
+                            <td style="text-align:center;">${badgeMetodo}</td>
+                            <td style="text-align:center;">
+                                <div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;">
+                                    <button onclick="exportarReciboPDF('${ord.id}')"
+                                        style="background:var(--surface-2);border:1.5px solid var(--border);color:var(--text-2);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
+                                        onmouseover="this.style.background='var(--surface-3)'"
+                                        onmouseout="this.style.background='var(--surface-2)'">
+                                        📄 PDF
+                                    </button>
+                                    <button onclick="abrirModalFacturaElectronica('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
+                                        style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
+                                        onmouseover="this.style.background='rgba(74,103,65,.16)'"
+                                        onmouseout="this.style.background='var(--olive-lt)'">
+                                        🧾 DIAN
+                                    </button>
+                                    <button onclick="eliminarComandaReal('${ord.id}', '${ord.order_number}')" class="btn-danger">
+                                        🗑️
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>`);
                 });
             }
+        }
+
+        // Top platos
+        const ranking = {};
+        (orders || []).forEach(ord => {
+            if (!ord.order_items) return;
+            ord.order_items.forEach(item => {
+                let nombre = 'Plato Especial';
+                if (item.notes && item.notes.includes('[nombre]')) {
+                    nombre = item.notes.split('[nombre]')[1].split('|')[0].trim();
+                }
+                ranking[nombre] = (ranking[nombre] || 0) + (item.quantity || 1);
+            });
         });
 
-        if (items.length === 0) { _showErr(err, 'Agrega al menos un plato.'); return; }
-
-        btn.disabled = true;
-        btn.textContent = 'Enviando...';
-
-        try {
-            // Resolver restaurant_id si no está disponible
-            if (!restaurantId) {
-                restaurantId = await resolverRestaurantId();
-            }
-
-            // Resolver table_id
-            let tId = null;
-            if (!isNaN(_mesa)) {
-                const { data: mesaData } = await supabaseClient
-                    .from('tables')
-                    .select('id')
-                    .eq('restaurant_id', restaurantId)
-                    .eq('number', parseInt(_mesa))
-                    .maybeSingle();
-                tId = mesaData?.id || null;
-            }
-
-            if (!tId) {
-                // Mesa genérica para llevar / domicilio / barra
-                const { data: mesaGen } = await supabaseClient
-                    .from('tables')
-                    .select('id')
-                    .eq('restaurant_id', restaurantId)
-                    .ilike('label', '%para llevar%')
-                    .maybeSingle();
-                tId = mesaGen?.id || null;
-            }
-
-            const mesaLabel = isNaN(_mesa) ? _mesa.toUpperCase().replace('_', ' ') : `MESA ${_mesa}`;
-            const notasFinal = [
-                `[${mesaLabel}]`,
-                `[Mesero: ${_mesero.nombre}]`,
-                notas || null,
-            ].filter(Boolean).join(' | ');
-
-            const total = items.reduce((s, i) => s + i.precio * i.qty, 0);
-            const orderNumber = `MES-${Date.now()}`;
-
-            // Insertar orden
-            const { data: orden, error: errOrd } = await supabaseClient
-                .from('orders')
-                .insert([{
-                    restaurant_id: restaurantId,
-                    table_id:      tId,
-                    order_number:  orderNumber,
-                    status:        'pending',
-                    customer_name: cliente,
-                    notes:         notasFinal,
-                    total_amount:  total,
-                }])
-                .select('id')
-                .single();
-
-            if (errOrd) throw errOrd;
-
-            // Insertar order_items
-            const orderItems = items.map(item => ({
-                order_id:     orden.id,
-                menu_item_id: item.menuItemId,
-                quantity:     item.qty,
-                unit_price:   item.precio,
-                item_status:  'pending',
-                notes:        `[nombre]${item.nombre}`,
-            }));
-
-            await supabaseClient.from('order_items').insert(orderItems);
-
-            // Mostrar éxito
-            _mount(`
-                <div class="wf-card" style="text-align:center;">
-                    <span style="font-size:52px;display:block;margin-bottom:12px;">✅</span>
-                    <h2 class="wf-title">¡Pedido Enviado!</h2>
-                    <p class="wf-sub">
-                        Referencia: <strong>${orderNumber}</strong><br>
-                        Cliente: <strong>${cliente}</strong><br>
-                        Mesa: <strong>${mesaLabel}</strong><br>
-                        ${items.length} plato(s) enviados a cocina.
-                    </p>
-                    <button class="wf-btn" onclick="WaiterFlow.mostrarSeleccionMesa()"
-                        style="margin-bottom:10px;">📋 Nuevo Pedido</button>
-                    <button class="wf-back" onclick="WaiterFlow._hide()">Salir al Menú</button>
-                </div>`);
-
-        } catch (e) {
-            console.error('[La 26] WaiterFlow error:', e);
-            _showErr(err, `Error al enviar: ${e?.message || 'Intenta de nuevo.'}`);
-            btn.disabled = false;
-            btn.textContent = '🚀 Enviar a Cocina';
-        }
-    }
-
-    function _showErr(el, msg) {
-        if (!el) return;
-        el.textContent = msg;
-        el.style.display = 'block';
-        setTimeout(() => { el.style.display = 'none'; }, 4000);
-    }
-
-    // API pública
-    return {
-        init:                  mostrarLogin,
-        mostrarLogin,
-        mostrarSeleccionMesa,
-        _loginSubmit,
-        _seleccionarMesa,
-        mostrarFormPedido,
-        _agregarLinea,
-        _enviarPedido,
-        _hide,
-    };
-})();
-
-// ── Auto-activar modo mesero si viene con ?modo=mesero en la URL ──
-(function() {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('modo') === 'mesero') {
-        // Esperar a que el DOM esté listo
-        document.addEventListener('DOMContentLoaded', () => WaiterFlow.init(), { once: true });
-        // Si ya está cargado
-        if (document.readyState !== 'loading') WaiterFlow.init();
-    }
-})();
-
-
-// ============================================================
-// CARGA DE DATOS — FLUJO PRINCIPAL
-// ============================================================
-async function cargarMenu() {
-    mostrarLoader();
-
-    // ── 0. GUARD: Verificar si el sistema está habilitado por el admin ─────
-    // Lee la tabla system_settings en Supabase. Si orders_enabled === 'false',
-    // muestra pantalla de "fuera de servicio" y bloquea el flujo.
-    try {
-        const _supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        const { data: _ss } = await _supa
-            .from('system_settings')
-            .select('value')
-            .eq('key', 'orders_enabled')
-            .maybeSingle();
-
-        if (_ss && _ss.value === 'false') {
-            elLoader.style.display = 'none';
-            elError.style.display  = 'none';
-            elMenu.style.display   = 'none';
-            // Mostrar panel de fuera de servicio
-            let panelFS = document.getElementById('panel-fuera-servicio');
-            if (!panelFS) {
-                panelFS = document.createElement('div');
-                panelFS.id = 'panel-fuera-servicio';
-                Object.assign(panelFS.style, {
-                    display:'flex', position:'fixed', inset:'0',
-                    background:'var(--cream, #f8f5ee)',
-                    flexDirection:'column', alignItems:'center',
-                    justifyContent:'center', gap:'16px', zIndex:'9999',
-                    fontFamily:"'DM Sans', sans-serif",
-                });
-                panelFS.innerHTML = `
-                    <span style="font-size:64px;">🔒</span>
-                    <h2 style="font-size:22px;font-weight:800;color:#2e4028;margin:0;">Sistema Fuera de Servicio</h2>
-                    <p style="font-size:14px;color:#5a6b58;text-align:center;max-width:320px;line-height:1.6;margin:0;">
-                        El administrador ha cerrado temporalmente el sistema de pedidos.<br>
-                        Por favor vuelve más tarde o llama a un mesero.
-                    </p>`;
-                document.body.appendChild(panelFS);
+        const tbodyTop = document.getElementById('tabla-top-platos');
+        if (tbodyTop) {
+            tbodyTop.innerHTML = '';
+            const listaPlatos = Object.keys(ranking);
+            if (listaPlatos.length === 0) {
+                tbodyTop.innerHTML = `
+                    <tr>
+                        <td colspan="2" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                            Sin datos de platos aún.
+                        </td>
+                    </tr>`;
             } else {
-                panelFS.style.display = 'flex';
+                listaPlatos
+                    .sort((a, b) => ranking[b] - ranking[a])
+                    .forEach(plato => {
+                        tbodyTop.insertAdjacentHTML('beforeend', `
+                            <tr class="tbody-row">
+                                <td style="color:var(--text-1);font-size:13px;">${plato}</td>
+                                <td style="text-align:center;">
+                                    <span class="mono" style="font-size:13px;font-weight:600;color:var(--olive);">${ranking[plato]}</span>
+                                </td>
+                            </tr>`);
+                    });
             }
-            return; // Detener toda inicialización
         }
-    } catch (_guardErr) {
-        // Si la tabla no existe o hay error de red, permitir acceso (fail-open)
-        console.warn('[La 26] Guard system_settings no disponible:', _guardErr?.message);
-    }
 
-    // ── 1. Capturar contexto de mesa/modalidad (sessionStorage > URL params) ──
-    //    ACCESO PÚBLICO: nunca pide contraseña, solo valida ubicación del cliente.
-    const sesion = capturarContexto();
-    if (!sesion) return; // modal de bienvenida visible — esperando elección del cliente
+        // Cargar egresos para KPI — solo del día actual
+        const { data: gastos } = await supabaseClient
+            .from('operating_expenses')
+            .select('amount')
+            .gte('created_at', _inicioDia)
+            .lte('created_at', _finDia);
+        globalEgresos = (gastos || []).reduce(
+            (acc, g) => acc + (parseFloat(g.amount) || 0), 0
+        );
+        const elTotalGastos = document.getElementById('total-gastos');
+        if (elTotalGastos) elTotalGastos.textContent = formatCOP(globalEgresos);
 
-    const mesaParam   = sesion.mesa;
-    const nombreParam = sesion.nombre;
-    modalidad         = sesion.modalidad || 'mesa'; // 'mesa' | 'para_llevar' | 'domicilio'
-    tableNombre       = nombreParam || '';
-
-    // Pre-cargar dirección de domicilio si la capturó el MesaModal
-    const direccPreCargada = sessionStorage.getItem('mesa_direccion') || '';
-    if (direccPreCargada && elDeliveryAddress) {
-        elDeliveryAddress.value = direccPreCargada;
-    }
-
-    // ── 2. Resolver restaurant_id por slug ──────────────────────
-    restaurantId = await resolverRestaurantId();
-    if (!restaurantId) {
-        mostrarError('No se pudo identificar el restaurante. Contacta al administrador.');
-        return;
-    }
-
-    // ── 3. Resolver table_id ─────────────────────────────────────
-    const esUUID = /^[0-9a-f-]{36}$/i.test(mesaParam);
-    let mesa     = null;
-
-    if (esUUID) {
-        const { data } = await supabaseClient
-            .from('tables')
-            .select('id, number, label, restaurant_id')
-            .eq('id', mesaParam)
-            .eq('restaurant_id', restaurantId)
-            .maybeSingle();
-        mesa = data;
-    } else {
-        const { data } = await supabaseClient
-            .from('tables')
-            .select('id, number, label, restaurant_id')
-            .eq('restaurant_id', restaurantId)
-            .or(`number.eq.${isNaN(mesaParam) ? 0 : mesaParam},label.ilike.${mesaParam}`)
-            .maybeSingle();
-        mesa = data;
-    }
-
-    if (!mesa) {
-        // ── Para Llevar / Domicilio: buscar o crear mesa genérica ──
-        // Supabase requiere table_id NOT NULL. Usamos una fila especial
-        // con label='Para Llevar' que representa todos los pedidos externos.
-        if (modalidad === 'para_llevar' || modalidad === 'domicilio' ||
-            mesaParam === 'domicilio' || mesaParam === 'para_llevar') {
-
-            tableNumber = modalidad === 'domicilio' || mesaParam === 'domicilio'
-                ? 'Domicilio'
-                : 'Para Llevar';
-
-            // Buscar la mesa genérica de para llevar
-            const { data: mesaGenerica } = await supabaseClient
-                .from('tables')
-                .select('id')
-                .eq('restaurant_id', restaurantId)
-                .ilike('label', '%para llevar%')
-                .maybeSingle();
-
-            if (mesaGenerica?.id) {
-                tableId = mesaGenerica.id;
-            } else {
-                // Crearla automáticamente la primera vez
-                const { data: mesaNueva } = await supabaseClient
-                    .from('tables')
-                    .upsert([{
-                        restaurant_id: restaurantId,
-                        number:        0,
-                        label:         'Para Llevar / Domicilio',
-                        qr_code:       `VIRTUAL-TAKEAWAY-${restaurantId}`,
-                        capacity:      99,
-                        status:        'available',
-                    }], { onConflict: 'restaurant_id,number' })
-                    .select('id')
-                    .single();
-                tableId = mesaNueva?.id || null;
-                if (tableId) console.log('[La 26] ✅ Mesa genérica "Para Llevar" creada automáticamente.');
-            }
-
-        } else {
-            // Mesa física no encontrada — operar sin table_id si el esquema lo permite
-            console.warn('[La 26] Mesa no encontrada en BD — operando sin table_id');
-            tableId = null;
-
-            if (mesaParam === 'barra')   tableNumber = 'Barra';
-            else if (mesaParam === 'terraza') tableNumber = 'Terraza';
-            else                         tableNumber = `Mesa ${mesaParam}`;
-        }
-    } else {
-        tableId     = mesa.id;
-        tableNumber = mesa.label || `Mesa ${mesa.number}`;
-    }
-
-    // ── 4. Mostrar badge de mesa y banner de bienvenida ──────────
-    mostrarInfoMesa(tableNumber, tableNombre);
-
-    // ── 5. Cargar menú del día o catálogo directo ─────────────────
-    const hoy = todayISO();
-    const { data: menuDia, error: errorMenuDia } = await supabaseClient
-        .from('daily_menus')
-        .select('id, day_type')
-        .eq('restaurant_id', restaurantId)
-        .eq('menu_date', hoy)
-        .eq('is_published', true)
-        .maybeSingle();
-
-    if (errorMenuDia) {
-        console.warn('[La 26] Error consultando daily_menus:', errorMenuDia);
-    }
-
-    if (menuDia && menuDia.id) {
-        dailyMenuId = menuDia.id;
-        await cargarSlotsDesdeMenuDia();
-    } else {
-        console.log('[La 26] Sin menú del día publicado → cargando catálogo directo');
-        await cargarSlotsDesdeCatalogo();
+    } catch (err) {
+        console.error('Error cargando dashboard:', err);
     }
 }
 
 // ============================================================
-// INICIO
+// ELIMINAR COMANDA
 // ============================================================
-cargarMenu();
+async function eliminarComandaReal(idComanda, nroOrden) {
+    if (!confirm(`⚠️ ¿Eliminar la orden ${nroOrden}?\nEsto restará el monto de los reportes.`)) return;
+    try {
+        await supabaseClient.from('order_items').delete().eq('order_id', idComanda);
+        const { error } = await supabaseClient.from('orders').delete().eq('id', idComanda);
+        if (error) throw error;
+        Toast.ok(`Orden ${nroOrden} eliminada correctamente.`);
+        cargarDashboardReal();
+    } catch (err) {
+        console.error('Error eliminando comanda:', err);
+        Toast.error('Error al eliminar el registro.');
+    }
+}
 
-// ─── CONSTANTE: ID de la mesa virtual para pedidos sin mesa física ────────────
-// Reemplaza este valor con el UUID real que generó Supabase en el paso 1
-const VIRTUAL_TABLE_ID = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx';
+// ============================================================
+// REGISTRAR MÉTODO DE PAGO EN UNA ORDEN
+// ============================================================
+async function registrarMetodoPago(orderId, metodo) {
+    if (!metodo) return;
+    try {
+        // 1. Leer la orden para obtener total_amount y notes actuales
+        const { data: ordData, error: errRead } = await supabaseClient
+            .from('orders')
+            .select('total_amount, notes, payment_method')
+            .eq('id', orderId)
+            .single();
+        if (errRead) throw errRead;
 
-// ─── FUNCIÓN: Enviar pedido a cocina ─────────────────────────────────────────
-async function enviarPedidoACocina({ modalidad, mesaId, clienteNombre, direccion, notas, items }) {
-  /**
-   * @param {string} modalidad     - 'mesa' | 'para_llevar' | 'domicilio'
-   * @param {string|null} mesaId   - UUID de la mesa física (null si no aplica)
-   * @param {string} clienteNombre - Nombre del cliente
-   * @param {string} direccion     - Dirección de entrega (vacía si es mesa o para llevar)
-   * @param {string} notas         - Instrucciones generales del pedido
-   * @param {Array}  items         - [{ menu_item_id, quantity, unit_price, notes }]
-   */
+        const monto = parseFloat(ordData.total_amount) || 0;
 
-  // Determinar el table_id correcto según la modalidad
-  const tableId = (modalidad === 'mesa' && mesaId) ? mesaId : VIRTUAL_TABLE_ID;
+        // 2. Persistir en notas (legacy) Y en la columna payment_method (nuevo)
+        const notesBase  = (ordData.notes || '').replace(/\|\[pago\][^|]*/g, '').trimEnd();
+        const notesNuevo = `${notesBase}|[pago]${metodo}`;
 
-  // Construir nota combinada: modalidad + dirección + notas del cliente
-  const notaFinal = [
-    `[${modalidad.toUpperCase().replace('_', ' ')}]`,
-    modalidad === 'domicilio' && direccion ? `Dirección: ${direccion}` : null,
-    notas || null,
-  ].filter(Boolean).join(' | ');
+        // 3. Actualizar status + notes + payment_method en BD (una sola query)
+        const { error } = await supabaseClient
+            .from('orders')
+            .update({ status: 'paid', notes: notesNuevo, payment_method: metodo })
+            .eq('id', orderId);
+        if (error) throw error;
 
-  // Generar número de orden único
-  const orderNumber = `ORD-${Date.now()}`;
+        // 4. Acumular en sessionStorage (para totales rápidos sin re-query)
+        const metodoAnterior = ordData.payment_method || _extraerMetodoDeNotes(ordData.notes || '');
+        if (metodoAnterior && metodoAnterior !== metodo) {
+            const keyViejo = `pm_${metodoAnterior}`;
+            const acumViejo = parseFloat(sessionStorage.getItem(keyViejo) || '0');
+            sessionStorage.setItem(keyViejo, String(Math.max(0, acumViejo - monto)));
+        }
+        const keyPm = `pm_${metodo}`;
+        // Solo acumular si no estaba ya en este método
+        if (metodoAnterior !== metodo) {
+            const acum = parseFloat(sessionStorage.getItem(keyPm) || '0');
+            sessionStorage.setItem(keyPm, String(acum + monto));
+        }
 
-  // 1. Insertar la orden principal
-  const { data: orden, error: errorOrden } = await supabase
-    .from('orders')
-    .insert({
-      restaurant_id: RESTAURANT_ID,   // tu constante global con el UUID del restaurante
-      table_id:      tableId,          // ← nunca será null
-      order_number:  orderNumber,
-      status:        'pending',
-      customer_name: clienteNombre || null,
-      notes:         notaFinal,
-      total_amount:  items.reduce((sum, i) => sum + i.unit_price * i.quantity, 0),
-    })
-    .select('id')
-    .single();
+        // 5. Sincronizar globales y refrescar UI
+        totalEfectivo      = parseFloat(sessionStorage.getItem('pm_efectivo')      || '0');
+        totalTransferencia = parseFloat(sessionStorage.getItem('pm_transferencia') || '0');
+        totalFiado         = parseFloat(sessionStorage.getItem('pm_fiado')         || '0');
+        renderizarTotales();
 
-  if (errorOrden) {
-    console.error('Error al crear la orden:', errorOrden.message);
-    throw new Error(`No se pudo enviar el pedido... ${errorOrden.message}`);
-  }
+        const label = { efectivo: 'Efectivo 💵', transferencia: 'Transferencia 📲', fiado: 'Fiado 🤝' };
+        Toast.ok(`Pago registrado: ${label[metodo] || metodo}`);
 
-  // 2. Insertar los ítems de la orden
-  const orderItems = items.map(item => ({
-    order_id:     orden.id,
-    menu_item_id: item.menu_item_id,
-    quantity:     item.quantity,
-    unit_price:   item.unit_price,
-    notes:        item.notes || null,
-    item_status:  'pending',
-  }));
+        // 6. Actualizar solo el select de esa fila sin recargar toda la tabla
+        _actualizarBadgePago(orderId, metodo, monto);
 
-  const { error: errorItems } = await supabase
-    .from('order_items')
-    .insert(orderItems);
+        // 7. Descuento automático de inventario según recetario
+        descontarInsumosPorOrden(orderId).catch(err =>
+            console.warn('[La 26] Auto-descuento inventario falló silenciosamente:', err.message)
+        );
 
-  if (errorItems) {
-    console.error('Error al guardar los ítems:', errorItems.message);
-    throw new Error(`Orden creada pero falló al guardar los ítems: ${errorItems.message}`);
-  }
+    } catch (err) {
+        console.error('Error registrando método de pago:', err);
+        Toast.error('No se pudo registrar el método de pago.');
+    }
+}
 
-  console.log(`✅ Pedido ${orderNumber} enviado a cocina — modalidad: ${modalidad}`);
-  return orden.id;
+// Extrae el método de pago guardado en la columna notes
+function _extraerMetodoDeNotes(notes) {
+    const match = (notes || '').match(/\|\[pago\](efectivo|transferencia|fiado)/);
+    return match ? match[1] : null;
+}
+
+// Reemplaza el select de una fila por el badge de método — sin recargar
+function _actualizarBadgePago(orderId, metodo, monto) {
+    // El select tiene onchange con el orderId — buscarlo por ese atributo
+    const selects = document.querySelectorAll('#tabla-facturas select');
+    selects.forEach(sel => {
+        if (sel.getAttribute('onchange')?.includes(orderId)) {
+            sel.outerHTML = _badgeMetodo(metodo);
+        }
+    });
+}
+
+function _badgeMetodo(metodo) {
+    const cfg = {
+        efectivo:      { bg: 'var(--olive-lt)',  color: 'var(--olive)', bd: 'var(--olive-bd)',              label: '💵 Efectivo'       },
+        transferencia: { bg: 'var(--blue-lt)',   color: 'var(--blue)',  bd: 'rgba(37,99,168,.28)',           label: '📲 Transferencia'  },
+        fiado:         { bg: 'var(--amber-lt)',  color: 'var(--amber)', bd: 'rgba(154,108,26,.28)',          label: '🤝 Fiado'          },
+    };
+    const c = cfg[metodo] || cfg.efectivo;
+    return `<span style="font-size:10px;font-weight:600;padding:3px 11px;border-radius:999px;
+        background:${c.bg};color:${c.color};border:1.5px solid ${c.bd};display:inline-block;">
+        ${c.label}</span>`;
+}
+
+// ============================================================
+// APERTURA DE CAJA — base inicial en efectivo
+// ============================================================
+function registrarAperturaCaja() {
+    const inp = document.getElementById('input-base-caja');
+    const val = parseFloat(inp?.value?.replace(/[^0-9.]/g,'')) || 0;
+    if (val <= 0) { Toast.error('Ingresa un monto válido para la base de caja.'); return; }
+    baseInicial = val;
+    sessionStorage.setItem('base_caja_hoy', String(val));
+    Toast.ok(`Base de caja registrada: ${formatCOP(val)}`);
+    document.getElementById('kpi-saldo-caja')?.textContent && (
+        document.getElementById('kpi-saldo-caja').textContent = formatCOP(baseInicial + totalEfectivo + totalTransferencia)
+    );
+    const panel = document.getElementById('panel-apertura-caja');
+    if (panel) panel.style.display = 'none';
+}
+
+
+async function exportarReciboPDF(orderId) {
+    try {
+        // [FIX-5] 'payment_method' eliminado del segundo SELECT también
+        const { data: ord, error } = await supabaseClient
+            .from('orders')
+            .select(`order_number, customer_name, total_amount, created_at,
+                     order_items ( quantity, notes, unit_price )`)
+            .eq('id', orderId)
+            .single();
+
+        if (error || !ord) throw error || new Error('Orden no encontrada');
+
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ unit: 'mm', format: [80, 160] });
+
+        pdf.setFont('monospace', 'bold');
+        pdf.setFontSize(11);
+        pdf.text('RESTAURANTE LA 26', 40, 10, { align: 'center' });
+        pdf.setFontSize(8);
+        pdf.setFont('monospace', 'normal');
+        pdf.text('Bucaramanga, Santander', 40, 15, { align: 'center' });
+        pdf.text('Nit: 900.123.456-7', 40, 19, { align: 'center' });
+        pdf.text('----------------------------------------', 40, 23, { align: 'center' });
+        pdf.text(`Ref: ${ord.order_number}`, 5, 29);
+        pdf.text(`Cliente: ${ord.customer_name || 'Consumidor Final'}`, 5, 34);
+        pdf.text(`Fecha: ${new Date(ord.created_at).toLocaleString('es-CO')}`, 5, 39);
+        pdf.text('----------------------------------------', 40, 44, { align: 'center' });
+        pdf.setFont('monospace', 'bold');
+        pdf.text('Cant  Detalle                  Subtotal', 5, 49);
+        pdf.setFont('monospace', 'normal');
+
+        let y = 55;
+        if (ord.order_items && ord.order_items.length > 0) {
+            ord.order_items.forEach(item => {
+                let nombre = 'Plato Especial';
+                if (item.notes && item.notes.includes('[nombre]')) {
+                    nombre = item.notes.split('[nombre]')[1].split('|')[0].trim();
+                }
+                if (nombre.length > 20) nombre = nombre.substring(0, 18) + '..';
+                const sub = (item.quantity || 1) * (item.unit_price || 0);
+                pdf.text(`${item.quantity}x    ${nombre.padEnd(22, ' ')} $${sub.toLocaleString()}`, 5, y);
+                y += 6;
+            });
+        }
+
+        pdf.text('----------------------------------------', 40, y, { align: 'center' });
+        y += 6;
+        pdf.setFont('monospace', 'bold');
+        pdf.setFontSize(9);
+        pdf.text(`TOTAL: $${parseInt(ord.total_amount).toLocaleString()} COP`, 5, y);
+        y += 8;
+        const base = ord.total_amount / (1 + TASA_IMPOCONSUMO);
+        const impo = ord.total_amount - base;
+        pdf.setFontSize(7.5);
+        pdf.setFont('monospace', 'normal');
+        pdf.text(`Base gravable: $${Math.round(base).toLocaleString()}`, 5, y);
+        y += 5;
+        pdf.text(`Impoconsumo 8%: $${Math.round(impo).toLocaleString()}`, 5, y);
+        y += 8;
+        pdf.setFont('monospace', 'italic');
+        pdf.text('¡Gracias por visitarnos!', 40, y, { align: 'center' });
+        pdf.save(`Recibo_La26_${ord.order_number}.pdf`);
+
+    } catch (err) {
+        console.error('Error generando PDF:', err);
+        Toast.error('Error al generar la tirilla PDF.');
+    }
+}
+
+// ============================================================
+// RENDERIZAR TOTALES POR MÉTODO DE PAGO EN KPIs
+// ============================================================
+function renderizarTotales() {
+    const fmtCOP = formatCOP;
+
+    // KPIs de métodos de pago (IDs configurados en admin.html)
+    const elEf = document.getElementById('kpi-efectivo');
+    const elTr = document.getElementById('kpi-transferencia');
+    const elFi = document.getElementById('kpi-fiado');
+    const elSd = document.getElementById('kpi-saldo-caja');
+    const elGv = document.getElementById('gros-ventas');
+
+    if (elEf)  elEf.textContent  = fmtCOP(totalEfectivo);
+    if (elTr)  elTr.textContent  = fmtCOP(totalTransferencia);
+    if (elFi)  elFi.textContent  = fmtCOP(totalFiado);
+    if (elGv)  elGv.textContent  = fmtCOP(globalIngresos);
+
+    // Saldo en caja = base + efectivo + transferencia (fiado no está en caja)
+    const saldoCaja = baseInicial + totalEfectivo + totalTransferencia;
+    if (elSd) elSd.textContent = fmtCOP(saldoCaja);
+
+    // ICA y utilidad
+    const baseICA      = Math.max(0, globalIngresos - globalEgresos);
+    const provisionICA = baseICA * TASA_RETE_ICA;
+    const elICA = document.getElementById('val-reteica');
+    if (elICA) elICA.textContent = fmtCOP(provisionICA);
+}
+
+
+// Cuando se registra un método de pago, busca recetas que
+// coincidan con los platos del pedido y descuenta insumos.
+// ============================================================
+async function descontarInsumosPorOrden(orderId) {
+    // Obtener items de la orden con nombre del plato
+    const { data: items, error: errItems } = await supabaseClient
+        .from('order_items')
+        .select('menu_item_id, quantity, notes')
+        .eq('order_id', orderId);
+
+    if (errItems || !items || items.length === 0) return;
+
+    // Cargar todas las recetas con sus ingredientes
+    const { data: recetas } = await supabaseClient
+        .from('production_recipes')
+        .select(`name, recipe_ingredients ( supply_id, supply_name, quantity_per_dish, unit )`);
+
+    if (!recetas || recetas.length === 0) return;
+
+    // Cargar nombres de menu_items para buscar recetas equivalentes
+    const menuItemIds = [...new Set(items.map(i => i.menu_item_id).filter(Boolean))];
+    const { data: menuItems } = await supabaseClient
+        .from('menu_items')
+        .select('id, name')
+        .in('id', menuItemIds);
+
+    const menuMap = {};
+    (menuItems || []).forEach(m => { menuMap[m.id] = m.name; });
+
+    // Para cada item del pedido buscar receta por nombre
+    const descuentos = {}; // supply_id → total a descontar
+
+    items.forEach(item => {
+        // Nombre del plato: de notes [nombre] o de menuMap
+        let nombrePlato = menuMap[item.menu_item_id] || '';
+        if (!nombrePlato && item.notes?.includes('[nombre]')) {
+            nombrePlato = item.notes.split('[nombre]')[1].split('|')[0].trim();
+        }
+        if (!nombrePlato) return;
+
+        // Buscar receta cuyo nombre coincida (case-insensitive)
+        const receta = recetas.find(r =>
+            r.name.toLowerCase().trim() === nombrePlato.toLowerCase().trim() ||
+            nombrePlato.toLowerCase().includes(r.name.toLowerCase().split(' ')[0])
+        );
+        if (!receta?.recipe_ingredients?.length) return;
+
+        const qty = item.quantity || 1;
+        receta.recipe_ingredients.forEach(ing => {
+            if (!ing.supply_id) return;
+            descuentos[ing.supply_id] = (descuentos[ing.supply_id] || 0) + ing.quantity_per_dish * qty;
+        });
+    });
+
+    if (Object.keys(descuentos).length === 0) return;
+
+    // Actualizar stocks en batch
+    const supplyIds = Object.keys(descuentos);
+    const { data: stocks } = await supabaseClient
+        .from('inventory_supplies')
+        .select('id, current_stock')
+        .in('id', supplyIds);
+
+    const updates = (stocks || []).map(s => ({
+        id: s.id,
+        current_stock: Math.max(0, (parseFloat(s.current_stock) || 0) - (descuentos[s.id] || 0)),
+        updated_at: new Date().toISOString(),
+    }));
+
+    for (const upd of updates) {
+        await supabaseClient
+            .from('inventory_supplies')
+            .update({ current_stock: upd.current_stock, updated_at: upd.updated_at })
+            .eq('id', upd.id);
+    }
+
+    console.log(`[La 26] 📦 Inventario descontado automáticamente para orden ${orderId}`);
+}
+
+
+// ============================================================
+let _feOrdenId   = null;
+let _feOrdenNo   = null;
+let _feBaseTotal = 0;
+
+function abrirModalFacturaElectronica(orderId, ordenNo, totalBruto) {
+    _feOrdenId   = orderId;
+    _feOrdenNo   = ordenNo;
+    _feBaseTotal = parseFloat(totalBruto) || 0;
+
+    const baseGravable = _feBaseTotal / (1 + TASA_IMPOCONSUMO);
+    const impoconsumo  = _feBaseTotal - baseGravable;
+
+    const elOrdenNo  = document.getElementById('fe-orden-no');
+    const elSubtotal = document.getElementById('fe-subtotal');
+    const elIva      = document.getElementById('fe-iva');
+    const elTotal    = document.getElementById('fe-total');
+    if (elOrdenNo)  elOrdenNo.textContent  = ordenNo;
+    if (elSubtotal) elSubtotal.textContent = formatCOP(baseGravable);
+    if (elIva)      elIva.textContent      = formatCOP(impoconsumo);
+    if (elTotal)    elTotal.textContent    = formatCOP(_feBaseTotal);
+
+    const modal = document.getElementById('modal-factura-dian');
+    const elNombre = document.getElementById('fe-nombre');
+    const elNit    = document.getElementById('fe-nit');
+    const elEmail  = document.getElementById('fe-email');
+    const elResult = document.getElementById('fe-resultado');
+    if (elNombre) elNombre.value = '';
+    if (elNit)    elNit.value    = '';
+    if (elEmail)  elEmail.value  = '';
+    if (elResult) elResult.style.display = 'none';
+    if (modal)    modal.style.display    = 'flex';
+}
+
+function cerrarModalFactura() {
+    const modal = document.getElementById('modal-factura-dian');
+    if (modal) modal.style.display = 'none';
+    _feOrdenId   = null;
+    _feOrdenNo   = null;
+    _feBaseTotal = 0;
+}
+
+function _generarHashCUFE(semilla) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const uuid  = crypto.randomUUID().replace(/-/g, '').toUpperCase();
+    const base  = btoa(semilla + uuid).replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    return base.substring(0, 96).padEnd(96, chars[Math.floor(Math.random() * chars.length)]);
+}
+
+async function generarFacturaElectronica() {
+    const nombre = document.getElementById('fe-nombre')?.value.trim() || '';
+    const nit    = document.getElementById('fe-nit')?.value.trim()    || '';
+    const email  = document.getElementById('fe-email')?.value.trim()  || '';
+
+    if (!nombre || !nit || !email) {
+        Toast.error('Completa todos los campos del receptor antes de continuar.');
+        return;
+    }
+
+    const baseGravable = _feBaseTotal / (1 + TASA_IMPOCONSUMO);
+    const impoconsumo  = _feBaseTotal - baseGravable;
+    const fechaStr     = new Date().toISOString();
+    const cufe         = _generarHashCUFE(`${_feOrdenNo}${nit}${fechaStr}`);
+
+    const payload = {
+        tipo_documento:  '01',
+        descripcion:     'Factura Electrónica de Venta',
+        numero_factura:  _feOrdenNo,
+        fecha_emision:   fechaStr,
+        cufe,
+        estado_dian:     'Enviado — CUFE Generado',
+        emisor: {
+            nit:          '900.123.456-7',
+            razon_social: 'Restaurante la 26 SAS',
+            municipio:    'Bucaramanga',
+            departamento: 'Santander',
+            actividad_ciiu: '5611',
+        },
+        receptor: {
+            tipo_doc:   nit.includes('-') ? 'NIT' : 'CC',
+            numero_doc: nit,
+            nombre,
+            email,
+        },
+        tributos: {
+            base_gravable_cop:    Math.round(baseGravable),
+            impoconsumo_8pct_cop: Math.round(impoconsumo),
+            rete_ica_bga_6_9_mil: Math.round(baseGravable * TASA_RETE_ICA),
+            total_factura_cop:    Math.round(_feBaseTotal),
+        },
+        referencia_interna: { order_id: _feOrdenId, order_number: _feOrdenNo },
+        proveedor_tecnologico: 'SIIGO S.A. — Habilitado DIAN Res. 000042 / 2020',
+    };
+
+    try {
+        await supabaseClient.from('invoice_records').insert([{
+            order_id:        _feOrdenId,
+            order_number:    _feOrdenNo,
+            receptor_nombre: nombre,
+            receptor_nit:    nit,
+            receptor_email:  email,
+            subtotal:        Math.round(baseGravable),
+            iva:             Math.round(impoconsumo),
+            total:           Math.round(_feBaseTotal),
+            cufe,
+            payload:         JSON.stringify(payload),
+            created_at:      fechaStr,
+        }]);
+    } catch (_) { /* tabla opcional */ }
+
+    const elResult = document.getElementById('fe-resultado');
+    if (elResult) {
+        elResult.style.display = 'block';
+        elResult.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <span style="font-size:18px;">✅</span>
+                <span style="font-size:13px;font-weight:700;color:var(--olive);">CUFE Generado — Enviado a DIAN</span>
+            </div>
+            <p style="font-size:11.5px;color:var(--text-2);line-height:1.7;">
+                <strong>CUFE:</strong> <span class="mono" style="word-break:break-all;font-size:10px;">${cufe}</span><br>
+                <strong>Receptor:</strong> ${nombre} — ${nit}<br>
+                <strong>Correo:</strong> ${email}<br>
+                <strong>Base Gravable:</strong> ${formatCOP(baseGravable)}<br>
+                <strong>Impoconsumo (8%):</strong> ${formatCOP(impoconsumo)}<br>
+                <strong>Total Factura:</strong> ${formatCOP(_feBaseTotal)}
+            </p>`;
+    }
+    console.log('✅ Payload DIAN generado:', payload);
+}
+
+// ============================================================
+// 3. MENÚ — EDITOR MODULAR CON CÓDIGO DE PRODUCTO
+// ============================================================
+let componenteFiltradoActual = 'todos';
+
+async function cargarSlotsMenuReal() {
+    const contenedor = document.getElementById('contenedor-slots-menu');
+    if (!contenedor) return;
+
+    contenedor.innerHTML = `
+        <p style="color:var(--text-3);font-size:12.5px;grid-column:span 3;text-align:center;padding:28px;">
+            Sincronizando catálogo...
+        </p>`;
+
+    try {
+        let query = supabaseClient
+            .from('menu_items')
+            .select('id, name, description, price, item_type, is_active, portions_today, restaurant_id, category_id, created_at')
+            .order('name', { ascending: true });
+
+        if (componenteFiltradoActual !== 'todos') {
+            query = query.eq('item_type', componenteFiltradoActual);
+        }
+        // [FIX-4] ELIMINADO: query.neq('item_type','sauce')
+        // 'sauce' NO existe en item_type_enum → causaba error 400 en TODOS los loads del menú.
+        // Los valores válidos del enum son: executive_lunch, a_la_carte, drink, dessert, side.
+
+        const { data: items, error } = await query;
+        if (error) throw error;
+
+        contenedor.innerHTML = '';
+
+        if (!items || items.length === 0) {
+            contenedor.innerHTML = `
+                <p style="color:var(--text-3);font-size:12.5px;grid-column:span 3;text-align:center;padding:28px;">
+                    Sin platos en esta categoría.
+                </p>`;
+            return;
+        }
+
+        // Ordenar por tipo y luego por nombre (sin depender de product_code)
+        const itemsOrdenados = [...items].sort((a, b) => {
+            const orden = { protein: 1, executive_lunch: 1, side: 2, drink: 3, a_la_carte: 4, dessert: 5 };
+            const oA = orden[a.item_type] || 9;
+            const oB = orden[b.item_type] || 9;
+            if (oA !== oB) return oA - oB;
+            return (a.name || '').localeCompare(b.name || '', 'es');
+        });
+
+        itemsOrdenados.forEach((item, animIdx) => {
+            const cfg           = MAPA_TIPO[item.item_type] || { label: item.item_type, icono: '🍽️', porciones: 20, badgeClass: '' };
+            const nombreEscapado = (item.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const codigo        = '—';
+            const rango         = { color: 'var(--text-3)' };
+
+            contenedor.insertAdjacentHTML('beforeend', `
+                <div class="card menu-card" style="display:flex;flex-direction:column;gap:12px;animation-delay:${animIdx * 40}ms;">
+                    <!-- Header tarjeta -->
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                        <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                            <span style="font-size:11px;font-weight:700;color:${rango.color};background:rgba(0,0,0,.04);border:1.5px solid rgba(0,0,0,.07);border-radius:999px;padding:3px 9px;flex-shrink:0;" class="mono">#${codigo}</span>
+                            <span class="badge ${cfg.badgeClass}">${cfg.icono} ${cfg.label}</span>
+                        </div>
+                        <button onclick="eliminarComponenteCatalogo('${item.id}','${nombreEscapado}')"
+                            style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:15px;padding:0;flex-shrink:0;transition:color .2s;"
+                            onmouseover="this.style.color='var(--red)'"
+                            onmouseout="this.style.color='var(--text-3)'"
+                            title="Eliminar">🗑️</button>
+                    </div>
+
+                    <!-- Nombre -->
+                    <h4 style="font-size:13.5px;font-weight:600;color:var(--text-1);line-height:1.4;margin:0;">
+                        ${item.name}
+                    </h4>
+
+                    <!-- Inputs precio / porciones -->
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:14px;padding:12px;">
+                        <div>
+                            <p style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Precio ($)</p>
+                            <input type="number" value="${item.price}"
+                                onchange="actualizarPrecioPlatoReal('${item.id}', this.value)"
+                                class="card-input" style="color:var(--olive);">
+                        </div>
+                        <div>
+                            <p style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Porciones hoy</p>
+                            <input type="number" value="${item.portions_today ?? cfg.porciones}"
+                                onchange="actualizarPorcionesHoy('${item.id}', this.value)"
+                                class="card-input" style="color:var(--amber);">
+                        </div>
+                    </div>
+
+                    <!-- Switch disponibilidad -->
+                    <div style="display:flex;align-items:center;justify-content:space-between;border-top:1.5px solid var(--border);padding-top:10px;">
+                        <span style="font-size:11.5px;color:var(--text-3);">¿Disponible hoy?</span>
+                        <button data-switch-id="${item.id}"
+                            onclick="alternarVisibilidadPlatoReal('${item.id}', ${item.is_active})"
+                            class="${item.is_active ? 'sw-on' : 'sw-off'}">
+                            ${item.is_active ? '🟢 Activo' : '🔴 Agotado'}
+                        </button>
+                    </div>
+                </div>`);
+        });
+
+    } catch (err) {
+        console.error('Error cargando menú:', err);
+        contenedor.innerHTML = `
+            <p style="color:var(--red);font-size:12.5px;grid-column:span 3;text-align:center;padding:28px;">
+                Error de conexión con Supabase. Revisa la consola.
+            </p>`;
+    }
+}
+
+// ============================================================
+// FILTRADO POR COMPONENTE
+// ============================================================
+function filtrarMenuComponente(cat) {
+    componenteFiltradoActual = cat;
+    document.querySelectorAll('.btn-comp').forEach(btn => {
+        btn.classList.remove('filter-active');
+    });
+    const btnActivo = document.getElementById(`btn-comp-${cat}`);
+    if (btnActivo) btnActivo.classList.add('filter-active');
+    cargarSlotsMenuReal();
+}
+
+// ============================================================
+// REGISTRAR NUEVO PLATO (con product_code)
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+    const formNuevoPlato = document.getElementById('form-nuevo-plato');
+    if (formNuevoPlato) {
+        formNuevoPlato.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const product_code = parseInt(document.getElementById('menu-codigo').value) || null;
+            const name         = document.getElementById('menu-nombre').value.trim();
+            const price        = parseFloat(document.getElementById('menu-precio').value);
+            const item_type    = document.getElementById('menu-tipo').value;
+            const portions_today = parseInt(document.getElementById('menu-porciones').value) || null;
+
+            if (item_type === 'sauce') {
+                Toast.error('El tipo "sauce" no está disponible como tipo independiente.');
+                return;
+            }
+            // product_code es opcional — la columna puede no existir en la BD
+
+            try {
+                // Obtener o crear restaurante
+                let restaurantId;
+                const { data: res, error: errRes } = await supabaseClient
+                    .from('restaurants')
+                    .select('id')
+                    .limit(1)
+                    .maybeSingle();
+
+                if (errRes) throw errRes;
+
+                if (res && res.id) {
+                    restaurantId = res.id;
+                } else {
+                    const { data: nuevoRest, error: errNuevo } = await supabaseClient
+                        .from('restaurants')
+                        .insert([{ name: 'Restaurante la 26', slug: 'restaurante-la-26' }])
+                        .select('id')
+                        .single();
+                    if (errNuevo) throw errNuevo;
+                    restaurantId = nuevoRest.id;
+                    console.log('✅ Restaurante la 26 creado automáticamente.');
+                }
+
+                const mapaCategoria = {
+                    executive_lunch: 'Proteína con Salsa',
+                    protein:         'Proteína con Salsa',
+                    side:            'Principio',
+                    drink:           'Bebida',
+                    a_la_carte:      'A la Carta',
+                    dessert:         'Postre',
+                };
+                const nombreCategoria = mapaCategoria[item_type] || 'General';
+
+                // Upsert categoría
+                await supabaseClient
+                    .from('menu_categories')
+                    .upsert(
+                        [{ restaurant_id: restaurantId, name: nombreCategoria, slot_type: 'single', display_order: 0 }],
+                        { onConflict: 'restaurant_id,name', ignoreDuplicates: true }
+                    );
+
+                const { data: cat, error: errCat } = await supabaseClient
+                    .from('menu_categories')
+                    .select('id')
+                    .eq('restaurant_id', restaurantId)
+                    .eq('name', nombreCategoria)
+                    .maybeSingle();
+
+                if (errCat) throw errCat;
+                if (!cat || !cat.id) throw new Error(`No se pudo obtener la categoría "${nombreCategoria}".`);
+
+                // Payload base — sin product_code (columna opcional en el esquema)
+                const payload = {
+                    restaurant_id: restaurantId,
+                    category_id:   cat.id,
+                    name,
+                    price,
+                    item_type,
+                    is_active:     true,
+                };
+                if (portions_today !== null) payload.portions_today = portions_today;
+                // product_code: agregar solo si la columna existe en la BD
+                if (product_code) payload.product_code = product_code;
+
+                const { error: errItem } = await supabaseClient
+                    .from('menu_items')
+                    .insert([payload]);
+
+                if (errItem) {
+                    // Si falla por product_code inexistente, reintentar sin él
+                    if (errItem.code === '42703' && payload.product_code) {
+                        delete payload.product_code;
+                        const { error: errRetry } = await supabaseClient
+                            .from('menu_items').insert([payload]);
+                        if (errRetry) {
+                            if (errRetry.code === '23505') {
+                                Toast.error(`Ya existe un plato llamado "${name}" en el catálogo.`);
+                                return;
+                            }
+                            throw errRetry;
+                        }
+                    } else if (errItem.code === '23505') {
+                        Toast.error(`Ya existe un plato llamado "${name}" en el catálogo.`);
+                        return;
+                    } else {
+                        throw errItem;
+                    }
+                }
+
+                document.getElementById('menu-codigo').value   = '';
+                document.getElementById('menu-nombre').value   = '';
+                document.getElementById('menu-precio').value   = '';
+                document.getElementById('menu-porciones').value = '';
+                Toast.ok(`"${name}" registrado en el catálogo correctamente.`);
+                cargarSlotsMenuReal();
+
+            } catch (err) {
+                console.error('Error al guardar plato:', err);
+                Toast.error(`Error al guardar: ${err.message}`);
+            }
+        });
+    }
+});
+
+// ============================================================
+// ELIMINAR PLATO
+// ============================================================
+async function eliminarComponenteCatalogo(idItem, nombreItem) {
+    if (!confirm(`⚠️ ¿Eliminar permanentemente "${nombreItem}"?`)) return;
+    try {
+        await supabaseClient.from('menu_item_ingredients').delete().eq('menu_item_id', idItem);
+        const { error } = await supabaseClient.from('menu_items').delete().eq('id', idItem);
+        if (error) throw error;
+        cargarSlotsMenuReal();
+    } catch (err) {
+        console.error('Error eliminando plato:', err);
+        Toast.error('No se pudo eliminar. Revisa la consola.');
+    }
+}
+
+// ============================================================
+// ACTUALIZAR PRECIO DEL PLATO
+// ============================================================
+async function actualizarPrecioPlatoReal(idPlato, nuevoPrecio) {
+    try {
+        const { error } = await supabaseClient
+            .from('menu_items')
+            .update({ price: parseFloat(nuevoPrecio) })
+            .eq('id', idPlato);
+        if (error) throw error;
+    } catch (err) {
+        console.error('Error actualizando precio:', err);
+    }
+}
+
+// ============================================================
+// HELPER: actualizar switch de disponibilidad en DOM
+// ============================================================
+function _actualizarSwitchDOM(idPlato, activo) {
+    const btn = document.querySelector(`[data-switch-id="${idPlato}"]`);
+    if (!btn) return;
+    btn.className   = activo ? 'sw-on' : 'sw-off';
+    btn.textContent = activo ? '🟢 Activo' : '🔴 Agotado';
+    btn.setAttribute('onclick', `alternarVisibilidadPlatoReal('${idPlato}', ${activo})`);
+}
+
+// ============================================================
+// ACTUALIZAR PORCIONES
+// ============================================================
+async function actualizarPorcionesHoy(idPlato, valor) {
+    const porciones = parseInt(valor) || 0;
+    const payload   = { portions_today: porciones };
+    if (porciones === 0) {
+        payload.is_active = false;
+        _actualizarSwitchDOM(idPlato, false);
+    }
+    try {
+        const { error } = await supabaseClient
+            .from('menu_items')
+            .update(payload)
+            .eq('id', idPlato);
+
+        if (error) {
+            if (error.code === '42703' || (error.message && error.message.includes('portions_today'))) {
+                console.warn('Columna portions_today no existe. Ejecuta: ALTER TABLE menu_items ADD COLUMN portions_today INTEGER;');
+                if (porciones === 0) {
+                    await supabaseClient.from('menu_items').update({ is_active: false }).eq('id', idPlato);
+                }
+                return;
+            }
+            throw error;
+        }
+    } catch (err) {
+        console.error('Error actualizando porciones:', err.message || err);
+        if (porciones === 0) _actualizarSwitchDOM(idPlato, true);
+        Toast.error(`Error al guardar porciones: ${err.message || 'revisa la consola'}`);
+    }
+}
+
+// ============================================================
+// ALTERNAR DISPONIBILIDAD
+// ============================================================
+async function alternarVisibilidadPlatoReal(idPlato, estadoActual) {
+    const nuevoEstado = !estadoActual;
+    _actualizarSwitchDOM(idPlato, nuevoEstado);
+    try {
+        const { error } = await supabaseClient
+            .from('menu_items')
+            .update({ is_active: nuevoEstado })
+            .eq('id', idPlato);
+        if (error) throw error;
+    } catch (err) {
+        console.error('Error cambiando disponibilidad:', err);
+        _actualizarSwitchDOM(idPlato, estadoActual);
+        Toast.error('No se pudo guardar el cambio de disponibilidad.');
+    }
+}
+
+// ============================================================
+// 4. NÓMINA Y GASTOS OPERACIONALES
+// ============================================================
+async function cargarGastosReal() {
+    const tbody = document.getElementById('tabla-gastos');
+    if (!tbody) return;
+
+    tbody.innerHTML = `
+        <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+            Consultando movimientos...
+        </td></tr>`;
+
+    try {
+        // Filtro por día actual (misma lógica que el dashboard)
+        const _ahora2    = new Date();
+        const _offsetMs2 = 5 * 60 * 60 * 1000;
+        const _hoyL2     = new Date(_ahora2.getTime() - _offsetMs2);
+        const _yyyy2     = _hoyL2.getUTCFullYear();
+        const _mm2       = String(_hoyL2.getUTCMonth() + 1).padStart(2, '0');
+        const _dd2       = String(_hoyL2.getUTCDate()).padStart(2, '0');
+        const _ini2      = `${_yyyy2}-${_mm2}-${_dd2}T00:00:00-05:00`;
+        const _fin2      = `${_yyyy2}-${_mm2}-${_dd2}T23:59:59-05:00`;
+
+        const { data: egresos, error } = await supabaseClient
+            .from('operating_expenses')
+            .select('*')
+            .gte('created_at', _ini2)
+            .lte('created_at', _fin2)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        globalEgresos = (egresos || []).reduce(
+            (acc, g) => acc + (parseFloat(g.amount) || 0), 0
+        );
+
+        const elTotalGastos = document.getElementById('total-gastos');
+        if (elTotalGastos) elTotalGastos.textContent = formatCOP(globalEgresos);
+
+        tbody.innerHTML = '';
+
+        if (!egresos || egresos.length === 0) {
+            tbody.innerHTML = `
+                <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                    Sin salidas registradas.
+                </td></tr>`;
+            return;
+        }
+
+        egresos.forEach(g => {
+            const hora = new Date(g.created_at).toLocaleTimeString('es-CO', {
+                hour: '2-digit', minute: '2-digit'
+            });
+            tbody.insertAdjacentHTML('beforeend', `
+                <tr class="tbody-row">
+                    <td>
+                        <span style="background:var(--red-lt);color:var(--red);border:1.5px solid var(--red-bd);border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;">${g.expense_type}</span>
+                    </td>
+                    <td style="color:var(--text-1);font-size:13px;">${g.description}</td>
+                    <td>
+                        <span class="mono" style="font-size:13px;font-weight:600;color:var(--red);">- ${formatCOP(g.amount)}</span>
+                    </td>
+                    <td style="text-align:right;font-size:11.5px;color:var(--text-3);" class="mono">${hora}</td>
+                </tr>`);
+        });
+
+    } catch (err) {
+        console.error('Error cargando egresos:', err);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const formGasto = document.getElementById('form-gasto');
+    if (formGasto) {
+        formGasto.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const expense_type = document.getElementById('gasto-tipo').value;
+            const description  = document.getElementById('gasto-descripcion').value;
+            const amount       = parseFloat(document.getElementById('gasto-monto').value);
+            try {
+                const { error } = await supabaseClient
+                    .from('operating_expenses')
+                    .insert([{ expense_type, description, amount }]);
+                if (error) throw error;
+                formGasto.reset();
+                cargarGastosReal();
+            } catch (err) {
+                console.error('Error insertando gasto:', err);
+                Toast.error('Error al registrar el movimiento contable.');
+            }
+        });
+    }
+});
+
+// ============================================================
+// 5. INVENTARIO / KÁRDEX
+// ============================================================
+async function cargarInventarioReal() {
+    const tbody = document.getElementById('tabla-inventario');
+    if (!tbody) return;
+
+    tbody.innerHTML = `
+        <tr><td colspan="6" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+            Mapeando bodegas...
+        </td></tr>`;
+
+    try {
+        const { data: stock, error } = await supabaseClient
+            .from('inventory_supplies')
+            .select('*')
+            .order('item_name', { ascending: true });
+
+        if (error) throw error;
+
+        tbody.innerHTML = '';
+
+        if (!stock || stock.length === 0) {
+            tbody.innerHTML = `
+                <tr><td colspan="6" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                    No hay insumos registrados.
+                </td></tr>`;
+            return;
+        }
+
+        stock.forEach(inv => {
+            const cant = parseFloat(inv.current_stock);
+            const alertaCell = cant <= 5
+                ? `<span style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;">${cant} ⚠️ Stock bajo</span>`
+                : `<span class="mono" style="font-size:13px;color:var(--text-1);font-weight:600;">${cant}</span>`;
+            const nombreEscapado = (inv.item_name || '').replace(/'/g, "\\'");
+
+            tbody.insertAdjacentHTML('beforeend', `
+                <tr class="tbody-row">
+                    <td style="font-size:13px;font-weight:600;color:var(--text-1);">${inv.item_name}</td>
+                    <td style="font-size:12px;color:var(--text-3);">${inv.category}</td>
+                    <td style="text-align:center;">${alertaCell}</td>
+                    <td style="text-align:center;font-size:12px;color:var(--text-3);">${inv.unit_of_measure}</td>
+                    <td style="text-align:center;">
+                        <div style="display:flex;justify-content:center;gap:4px;">
+                            <button onclick="ajustarExistenciasFisicas('${inv.id}',${cant},-1)"
+                                style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);border-radius:999px;width:28px;height:28px;cursor:pointer;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;font-family:'DM Sans',sans-serif;transition:all .2s;"
+                                onmouseover="this.style.background='rgba(192,57,43,.16)'"
+                                onmouseout="this.style.background='var(--red-lt)'">−</button>
+                            <button onclick="ajustarExistenciasFisicas('${inv.id}',${cant},1)"
+                                style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:999px;width:28px;height:28px;cursor:pointer;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;font-family:'DM Sans',sans-serif;transition:all .2s;"
+                                onmouseover="this.style.background='rgba(74,103,65,.18)'"
+                                onmouseout="this.style.background='var(--olive-lt)'">+</button>
+                        </div>
+                    </td>
+                    <td style="text-align:right;">
+                        <button onclick="eliminarInsumoReal('${inv.id}','${nombreEscapado}')" class="btn-danger">
+                            🗑️ Dar de baja
+                        </button>
+                    </td>
+                </tr>`);
+        });
+
+    } catch (err) {
+        console.error('Error cargando kárdex:', err);
+    }
+}
+
+async function ajustarExistenciasFisicas(idInsumo, stockActual, delta) {
+    const nuevoStock = Math.max(0, stockActual + delta);
+    try {
+        const { error } = await supabaseClient
+            .from('inventory_supplies')
+            .update({ current_stock: nuevoStock, updated_at: new Date().toISOString() })
+            .eq('id', idInsumo);
+        if (error) throw error;
+        cargarInventarioReal();
+    } catch (err) {
+        console.error('Error ajustando stock:', err);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Restaurar base de caja persistida en la jornada
+    const basePersistida = parseFloat(sessionStorage.getItem('base_caja_hoy') || '0');
+    if (basePersistida > 0) {
+        baseInicial = basePersistida;
+        const panel = document.getElementById('panel-apertura-caja');
+        if (panel) panel.style.display = 'none';
+    }
+
+    const formNuevoInsumo = document.getElementById('form-nuevo-insumo');
+    if (formNuevoInsumo) {
+        formNuevoInsumo.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const item_name       = document.getElementById('inv-nombre').value.trim();
+            const category        = document.getElementById('inv-categoria').value;
+            const current_stock   = parseFloat(document.getElementById('inv-stock').value);
+            const unit_of_measure = document.getElementById('inv-unidad').value;
+            try {
+                const { error } = await supabaseClient
+                    .from('inventory_supplies')
+                    .insert([{ item_name, category, current_stock, unit_of_measure, updated_at: new Date().toISOString() }]);
+                if (error) {
+                    if (error.code === '23505') {
+                        Toast.error('Ya existe un insumo con ese nombre.');
+                        return;
+                    }
+                    throw error;
+                }
+                formNuevoInsumo.reset();
+                Toast.ok(`Insumo "${item_name}" registrado correctamente.`);
+                cargarInventarioReal();
+            } catch (err) {
+                console.error('Error insertando insumo:', err);
+                Toast.error('No se pudo agregar el insumo.');
+            }
+        });
+    }
+});
+
+async function eliminarInsumoReal(idInsumo, nombreInsumo) {
+    if (!confirm(`⚠️ ¿Dar de baja "${nombreInsumo}"?`)) return;
+    try {
+        const { error } = await supabaseClient
+            .from('inventory_supplies')
+            .delete()
+            .eq('id', idInsumo);
+        if (error) throw error;
+        Toast.ok(`"${nombreInsumo}" eliminado del kárdex.`);
+        cargarInventarioReal();
+    } catch (err) {
+        console.error('Error eliminando insumo:', err);
+        Toast.error('Error al eliminar el insumo.');
+    }
+}
+
+// ============================================================
+// 6. CIERRE DE CAJA INTELIGENTE — INFORME Z + historial_cierres
+// ============================================================
+async function ejecutarCierreCaja() {
+    const baseReteICA  = Math.max(0, globalIngresos - globalEgresos);
+    const totalICA     = baseReteICA * TASA_RETE_ICA;
+    const ivaConsumo   = globalIngresos * TASA_IMPOCONSUMO;
+    const utilidadNeta = globalIngresos - globalEgresos - totalICA;
+    const saldoCaja    = baseInicial + totalEfectivo + totalTransferencia;
+
+    // Poblar el modal de cierre con los datos actuales
+    const setEl = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = formatCOP(val);
+    };
+    setEl('cierre-ing',  globalIngresos);
+    setEl('cierre-eg',   globalEgresos);
+    setEl('cierre-ica',  totalICA);
+    setEl('cierre-impo', ivaConsumo);
+    setEl('cierre-ut',   utilidadNeta);
+    setEl('cierre-ef',   totalEfectivo);
+    setEl('cierre-tr',   totalTransferencia);
+    setEl('cierre-fi',   totalFiado);
+    setEl('cierre-saldo',saldoCaja);
+
+    const elUt = document.getElementById('cierre-ut');
+    if (elUt) elUt.style.color = utilidadNeta >= 0 ? 'var(--olive)' : 'var(--red)';
+
+    // Mostrar modal
+    const modal = document.getElementById('modal-cierre-caja');
+    if (modal) modal.style.display = 'flex';
+}
+
+function cerrarModalCierre() {
+    const modal = document.getElementById('modal-cierre-caja');
+    if (modal) modal.style.display = 'none';
+}
+
+async function realizarCierre() {
+    const baseReteICA  = Math.max(0, globalIngresos - globalEgresos);
+    const totalICA     = baseReteICA * TASA_RETE_ICA;
+    const ivaConsumo   = globalIngresos * TASA_IMPOCONSUMO;
+    const utilidadNeta = globalIngresos - globalEgresos - totalICA;
+    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    const cierrePayload = {
+        fecha:          hoy,
+        ingresos:       Math.round(globalIngresos),
+        egresos:        Math.round(globalEgresos),
+        utilidad_neta:  Math.round(utilidadNeta),
+        provision_ica:  Math.round(totalICA),
+        impoconsumo:    Math.round(ivaConsumo),
+        efectivo:       Math.round(totalEfectivo),
+        transferencia:  Math.round(totalTransferencia),
+        fiado:          Math.round(totalFiado),
+        base_caja:      Math.round(baseInicial),
+        created_at:     new Date().toISOString(),
+    };
+
+    try {
+        const { error } = await supabaseClient
+            .from('historial_cierres')
+            .insert([cierrePayload]);
+        if (error) throw error;
+        Toast.ok(`✅ Cierre del ${hoy} archivado en el calendario.`, 6000);
+    } catch (err) {
+        console.warn('historial_cierres no disponible aún — guardando localmente:', err.message);
+        // Fallback: guardar en localStorage
+        const histLocal = JSON.parse(localStorage.getItem('cierres_local') || '[]');
+        histLocal.unshift({ ...cierrePayload, local: true });
+        localStorage.setItem('cierres_local', JSON.stringify(histLocal.slice(0, 90)));
+        Toast.ok('Cierre archivado localmente. Ejecuta el SQL de historial_cierres para persistir en la nube.');
+    }
+
+    // ── Resetear contadores del día ───────────────────────────
+    ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(k));
+    totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
+
+    // ── Actualizar calendario si está visible ──────────────────
+    if (document.getElementById('tab-calendario')?.style.display !== 'none') {
+        cargarCalendarioCierres();
+    }
+
+    Toast.ok('Ciclo contable cerrado. Contadores reseteados a $0.');
+    cerrarModalCierre();
+    setTimeout(() => cargarDashboardReal(), 500);
+}
+
+// ── Calendario de cierres — async/await con paginación y filtro por fecha ──
+const _cierresState = { pagina: 0, limite: 20, total: 0, datos: [], filtroFecha: '' };
+
+async function cargarCalendarioCierres(resetPagina = true) {
+    const tbody   = document.getElementById('tabla-calendario-cierres');
+    const resumen = document.getElementById('resumen-calendario');
+    if (!tbody) return;
+
+    if (resetPagina) {
+        _cierresState.pagina = 0;
+        _cierresState.datos  = [];
+    }
+
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-3);">Cargando historial…</td></tr>`;
+
+    try {
+        let query = supabaseClient
+            .from('historial_cierres')
+            .select('*', { count: 'exact' })
+            .order('fecha', { ascending: false })
+            .range(
+                _cierresState.pagina * _cierresState.limite,
+                (_cierresState.pagina + 1) * _cierresState.limite - 1
+            );
+
+        if (_cierresState.filtroFecha) {
+            query = query.eq('fecha', _cierresState.filtroFecha);
+        }
+
+        const { data, error, count } = await query;
+        if (error) throw error;
+
+        _cierresState.total = count || 0;
+        _cierresState.datos = data || [];
+    } catch (_) {
+        // Fallback localStorage si Supabase no tiene la tabla aún
+        const todos = JSON.parse(localStorage.getItem('cierres_local') || '[]');
+        _cierresState.datos  = todos.slice(
+            _cierresState.pagina * _cierresState.limite,
+            (_cierresState.pagina + 1) * _cierresState.limite
+        );
+        _cierresState.total  = todos.length;
+    }
+
+    const cierres = _cierresState.datos;
+
+    if (cierres.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--text-3);">Sin cierres registrados aún.</td></tr>`;
+        if (resumen) resumen.innerHTML = '';
+        return;
+    }
+
+    // ── Totales acumulados del lote visible ──────────────────
+    const totAcc = cierres.reduce((a, c) => ({
+        ing: a.ing + (c.ingresos || 0),
+        eg:  a.eg  + (c.egresos  || 0),
+        ut:  a.ut  + (c.utilidad_neta || 0),
+    }), { ing: 0, eg: 0, ut: 0 });
+
+    if (resumen) {
+        const hayPaginas = _cierresState.total > _cierresState.limite;
+        const labelPag   = hayPaginas
+            ? `<p style="font-size:11px;color:var(--text-3);margin-top:6px;text-align:center;">
+                Mostrando ${cierres.length} de ${_cierresState.total} cierres · Página ${_cierresState.pagina + 1}
+               </p>` : '';
+
+        resumen.innerHTML = `
+            <div style="margin-bottom:18px;">
+                <!-- Filtro por fecha + paginación -->
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+                    <label style="font-size:12px;font-weight:600;color:var(--text-2);">📆 Filtrar por fecha:</label>
+                    <input type="date" id="inp-filtro-fecha-cierres"
+                        value="${_cierresState.filtroFecha}"
+                        onchange="_aplicarFiltroCierres(this.value)"
+                        style="width:180px;border-radius:999px;padding:5px 14px;font-size:12.5px;height:36px;">
+                    ${_cierresState.filtroFecha
+                        ? `<button onclick="_aplicarFiltroCierres('')" class="btn-ghost" style="font-size:12px;padding:5px 14px;height:36px;">✕ Quitar filtro</button>`
+                        : ''}
+                    <div style="flex:1;"></div>
+                    ${_cierresState.pagina > 0
+                        ? `<button onclick="_paginaCierres(-1)" class="btn-ghost" style="font-size:12px;padding:5px 14px;height:36px;">← Anterior</button>` : ''}
+                    ${(_cierresState.pagina + 1) * _cierresState.limite < _cierresState.total
+                        ? `<button onclick="_paginaCierres(1)" class="btn-ghost" style="font-size:12px;padding:5px 14px;height:36px;">Siguiente →</button>` : ''}
+                </div>
+                <!-- KPIs acumulados del lote -->
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;" class="tables-grid">
+                    <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px;text-align:center;">
+                        <p style="font-size:10px;font-weight:700;color:var(--olive);text-transform:uppercase;margin-bottom:4px;">Ingresos Acumulados</p>
+                        <p style="font-size:18px;font-weight:800;color:var(--olive);" class="mono">${formatCOP(totAcc.ing)}</p>
+                    </div>
+                    <div style="background:var(--red-lt);border:1.5px solid var(--red-bd);border-radius:14px;padding:14px;text-align:center;">
+                        <p style="font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;margin-bottom:4px;">Egresos Acumulados</p>
+                        <p style="font-size:18px;font-weight:800;color:var(--red);" class="mono">${formatCOP(totAcc.eg)}</p>
+                    </div>
+                    <div style="background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.25);border-radius:14px;padding:14px;text-align:center;">
+                        <p style="font-size:10px;font-weight:700;color:var(--blue);text-transform:uppercase;margin-bottom:4px;">Utilidad Acumulada</p>
+                        <p style="font-size:18px;font-weight:800;color:var(--blue);" class="mono">${formatCOP(totAcc.ut)}</p>
+                    </div>
+                </div>
+                ${labelPag}
+            </div>`;
+    }
+
+    // ── Render tabla (no bloquea DOM) ────────────────────────
+    const fragment = document.createDocumentFragment();
+    cierres.forEach(c => {
+        const utClass  = (c.utilidad_neta || 0) >= 0 ? 'color:var(--olive)' : 'color:var(--red)';
+        const localBadge = c.local ? `<span style="font-size:9px;color:var(--amber);font-weight:700;"> (local)</span>` : '';
+        const tr = document.createElement('tr');
+        tr.className = 'tbody-row';
+        tr.innerHTML = `
+            <td class="mono" style="font-size:12.5px;font-weight:600;">${c.fecha}${localBadge}</td>
+            <td class="mono" style="text-align:right;color:var(--olive);font-weight:600;">${formatCOP(c.ingresos || 0)}</td>
+            <td class="mono" style="text-align:right;color:var(--red);">${formatCOP(c.egresos || 0)}</td>
+            <td class="mono" style="text-align:right;${utClass};font-weight:700;">${formatCOP(c.utilidad_neta || 0)}</td>
+            <td class="mono" style="text-align:right;font-size:11.5px;">${formatCOP(c.efectivo || 0)}</td>
+            <td class="mono" style="text-align:right;font-size:11.5px;">${formatCOP(c.transferencia || 0)}</td>
+            <td class="mono" style="text-align:right;font-size:11.5px;color:var(--amber);">${formatCOP(c.fiado || 0)}</td>`;
+        fragment.appendChild(tr);
+    });
+    tbody.innerHTML = '';
+    tbody.appendChild(fragment);
+}
+
+function _aplicarFiltroCierres(fecha) {
+    _cierresState.filtroFecha = fecha;
+    cargarCalendarioCierres(true);
+}
+
+function _paginaCierres(delta) {
+    const maxPag = Math.ceil(_cierresState.total / _cierresState.limite) - 1;
+    _cierresState.pagina = Math.max(0, Math.min(_cierresState.pagina + delta, maxPag));
+    cargarCalendarioCierres(false);
+}
+
+
+// ============================================================
+// INICIALIZACIÓN PRINCIPAL
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+    const elFecha = document.getElementById('fecha-actual');
+    if (elFecha) {
+        elFecha.textContent = new Date().toLocaleDateString('es-CO', {
+            weekday: 'short', year: 'numeric', month: 'short', day: 'numeric'
+        });
+    }
+    // El dashboard se carga desde admin.html vía cambiarTab inicial
+});
+// ============================================================
+// MÓDULO A: CONTROL DE ACCESO — SISTEMA DE CIERRE DE PEDIDOS
+// ============================================================
+// Clave en Supabase: tabla 'system_settings', row { key: 'orders_enabled', value: 'true'|'false' }
+// Fallback local: localStorage['orders_enabled_local']
+
+const SETTING_KEY = 'orders_enabled';
+
+/**
+ * Lee el estado del sistema desde Supabase.
+ * Si la tabla no existe aún, usa localStorage como fallback.
+ */
+async function cargarEstadoSistema() {
+    try {
+        const { data, error } = await supabaseClient
+            .from('system_settings')
+            .select('value')
+            .eq('key', SETTING_KEY)
+            .maybeSingle();
+
+        if (error) throw error;
+
+        // Si no hay fila aún, el sistema está habilitado por defecto
+        const habilitado = data ? data.value === 'true' : true;
+        _renderToggleSistema(habilitado);
+        return habilitado;
+    } catch (_) {
+        // Fallback: leer de localStorage si la tabla no existe
+        const local = localStorage.getItem(SETTING_KEY);
+        const habilitado = local === null ? true : local === 'true';
+        _renderToggleSistema(habilitado);
+        return habilitado;
+    }
+}
+
+/**
+ * Alterna el estado del sistema (habilitado ↔ deshabilitado).
+ * Persiste en Supabase y en localStorage como backup.
+ */
+async function toggleEstadoSistema() {
+    const btnToggle = document.getElementById('btn-toggle-sistema');
+    if (!btnToggle) return;
+
+    const estadoActual = btnToggle.dataset.estado === 'true';
+    const nuevoEstado  = !estadoActual;
+
+    // Optimista: actualizar UI de inmediato
+    _renderToggleSistema(nuevoEstado);
+    localStorage.setItem(SETTING_KEY, String(nuevoEstado));
+
+    try {
+        // Upsert en Supabase
+        const { error } = await supabaseClient
+            .from('system_settings')
+            .upsert([{ key: SETTING_KEY, value: String(nuevoEstado) }], { onConflict: 'key' });
+
+        if (error) throw error;
+
+        const msg = nuevoEstado
+            ? '✅ Sistema habilitado: los meseros pueden tomar pedidos.'
+            : '🔒 Sistema bloqueado: los meseros verán aviso de "Fuera de servicio".';
+        Toast.ok(msg, 5000);
+    } catch (err) {
+        console.error('Error al persistir estado del sistema:', err);
+        Toast.info('Estado guardado localmente. Sincronizar cuando haya conexión.');
+    }
+}
+
+/**
+ * Actualiza el toggle en el DOM según el estado actual.
+ */
+function _renderToggleSistema(habilitado) {
+    const btn      = document.getElementById('btn-toggle-sistema');
+    const estadoBadge = document.getElementById('badge-estado-sistema');
+    const desc     = document.getElementById('desc-estado-sistema');
+    if (!btn) return;
+
+    btn.dataset.estado = String(habilitado);
+
+    if (habilitado) {
+        btn.className = 'sw-on';
+        btn.innerHTML = '🟢 Pedidos Habilitados';
+        if (estadoBadge) {
+            estadoBadge.textContent = 'Operativo';
+            estadoBadge.style.cssText = 'background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;';
+        }
+        if (desc) desc.textContent = 'Los meseros pueden crear y registrar pedidos con normalidad.';
+    } else {
+        btn.className = 'sw-off';
+        btn.innerHTML = '🔴 Pedidos Bloqueados';
+        if (estadoBadge) {
+            estadoBadge.textContent = 'Fuera de Servicio';
+            estadoBadge.style.cssText = 'background:var(--red-lt);color:var(--red);border:1.5px solid var(--red-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;';
+        }
+        if (desc) desc.textContent = 'Sistema cerrado. Los meseros recibirán aviso de "Sistema fuera de servicio" al intentar acceder.';
+    }
+}
+
+// ============================================================
+// MÓDULO B: INTELIGENCIA DE PRODUCCIÓN — RECETARIO
+// ============================================================
+// Tablas Supabase necesarias (DDL en basededatos.txt):
+//   production_recipes  { id, name, description, created_at }
+//   recipe_ingredients  { id, recipe_id, supply_id, supply_name, quantity_per_dish, unit }
+//
+// LÓGICA MATEMÁTICA:
+//   La receta define cuánto insumo consume UN solo plato.
+//   Con el stock actual se calcula:
+//     platos_estimados = FLOOR( MIN( stock_i / qty_per_dish_i ) )  ∀ insumo i
+//   El insumo con menor cobertura es el cuello de botella.
+//   El resultado es una ESTIMACIÓN — no es exacto porque en cocina
+//   real hay merme (10-20%). El admin toma ese número y pone las
+//   porciones en el menú; cuando llegan a 0 el plato se bloquea.
+// ============================================================
+
+let _recetasCache = [];
+let _supplyCache  = [];
+let _calcResult   = null;
+
+// ── Carga recetas y puebla el selector ──────────────────────
+async function cargarRecetas() {
+    const tbody = document.getElementById('tabla-recetas');
+    const badge = document.getElementById('badge-recetas-count');
+    if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-3);">Cargando recetas…</td></tr>`;
+
+    try {
+        const { data: recetas, error } = await supabaseClient
+            .from('production_recipes')
+            .select(`id, name, description,
+                     recipe_ingredients ( id, supply_id, supply_name, quantity_per_dish, unit )`)
+            .order('name', { ascending: true });
+
+        if (error) throw error;
+        _recetasCache = recetas || [];
+
+        if (badge) badge.textContent = `${_recetasCache.length} receta${_recetasCache.length !== 1 ? 's' : ''}`;
+
+        // Poblar selector de la calculadora
+        const sel = document.getElementById('sel-receta-calculo');
+        if (sel) {
+            sel.innerHTML = '<option value="">— Seleccionar receta —</option>';
+            _recetasCache.forEach(r => {
+                sel.insertAdjacentHTML('beforeend',
+                    `<option value="${r.id}">${r.name}</option>`);
+            });
+        }
+
+        _renderTablaRecetas();
+    } catch (err) {
+        console.error('Error cargando recetas:', err);
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--red);font-size:12.5px;">Error al cargar. Revisa la consola.</td></tr>`;
+    }
+}
+
+function _renderTablaRecetas() {
+    const tbody = document.getElementById('tabla-recetas');
+    if (!tbody) return;
+
+    if (_recetasCache.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Sin recetas. Crea la primera arriba.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = _recetasCache.map(r => {
+        const ings = (r.recipe_ingredients || []).map(i =>
+            `<span style="background:var(--olive-lt);border:1px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:2px 9px;font-size:10.5px;font-weight:600;white-space:nowrap;">
+                ${i.quantity_per_dish} ${i.unit} ${i.supply_name}
+            </span>`
+        ).join('');
+
+        return `<tr class="tbody-row">
+            <td style="font-size:13px;font-weight:600;color:var(--text-1);white-space:nowrap;">${r.name}</td>
+            <td style="font-size:12px;color:var(--text-3);">${r.description || '—'}</td>
+            <td><div style="display:flex;flex-wrap:wrap;gap:4px;padding:4px 0;">${ings || '<span style="color:var(--text-3);font-size:11.5px;">Sin ingredientes</span>'}</div></td>
+            <td style="text-align:center;">
+                <button onclick="eliminarReceta('${r.id}','${(r.name||'').replace(/'/g,"\'")}')" class="btn-danger">🗑️ Eliminar</button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+// ── Guardar nueva receta ─────────────────────────────────────
+async function guardarReceta() {
+    const nombre = document.getElementById('rec-nombre')?.value.trim();
+    const desc   = document.getElementById('rec-descripcion')?.value.trim();
+
+    if (!nombre) { Toast.error('El nombre de la receta es obligatorio.'); return; }
+
+    const filas = document.querySelectorAll('#tabla-form-ingredientes .ing-row');
+    const ingredientes = [];
+
+    filas.forEach(fila => {
+        const supplyId   = fila.querySelector('.ing-supply-id')?.value || null;
+        const supplyName = fila.querySelector('.ing-supply-name')?.value?.trim();
+        const qty        = parseFloat(fila.querySelector('.ing-qty')?.value);
+        const unit       = fila.querySelector('.ing-unit')?.value?.trim();
+        if (supplyName && !isNaN(qty) && qty > 0 && unit) {
+            ingredientes.push({ supply_id: supplyId, supply_name: supplyName, quantity_per_dish: qty, unit });
+        }
+    });
+
+    if (ingredientes.length === 0) {
+        Toast.error('Agrega al menos un ingrediente válido (nombre, cantidad y unidad).');
+        return;
+    }
+
+    try {
+        const { data: receta, error: errR } = await supabaseClient
+            .from('production_recipes')
+            .insert([{ name: nombre, description: desc || null }])
+            .select('id').single();
+        if (errR) throw errR;
+
+        const { error: errI } = await supabaseClient
+            .from('recipe_ingredients')
+            .insert(ingredientes.map(i => ({ ...i, recipe_id: receta.id })));
+        if (errI) throw errI;
+
+        Toast.ok(`Receta "${nombre}" guardada.`);
+        // Limpiar formulario
+        document.getElementById('rec-nombre').value = '';
+        document.getElementById('rec-descripcion').value = '';
+        document.getElementById('tabla-form-ingredientes').innerHTML = '';
+        agregarFilaIngrediente();
+        cargarRecetas();
+    } catch (err) {
+        console.error('Error guardando receta:', err);
+        Toast.error(`Error: ${err.message}`);
+    }
+}
+
+// ── Fila dinámica de ingrediente ─────────────────────────────
+async function agregarFilaIngrediente() {
+    const tbody = document.getElementById('tabla-form-ingredientes');
+    if (!tbody) return;
+
+    if (_supplyCache.length === 0) {
+        const { data } = await supabaseClient
+            .from('inventory_supplies')
+            .select('id, item_name, unit_of_measure, current_stock')
+            .order('item_name');
+        _supplyCache = data || [];
+    }
+
+    const opts = _supplyCache.map(s =>
+        `<option value="${s.id}" data-unit="${s.unit_of_measure}" data-name="${s.item_name}">
+            ${s.item_name} (${s.current_stock} ${s.unit_of_measure} en stock)
+        </option>`
+    ).join('');
+
+    const filaId = `ing_${Date.now()}`;
+    tbody.insertAdjacentHTML('beforeend', `
+        <tr id="${filaId}" class="ing-row">
+            <td style="padding:6px 8px;">
+                <select class="ing-supply-select" onchange="_autoFillUnit(this,'${filaId}')"
+                    style="font-size:12px;border-radius:999px;padding:5px 10px;height:34px;width:100%;min-width:160px;">
+                    <option value="">— Del inventario o escribe abajo —</option>
+                    ${opts}
+                </select>
+                <input type="hidden" class="ing-supply-id">
+                <input type="text" class="ing-supply-name" placeholder="Nombre (si no está en inventario)"
+                    style="font-size:12px;border-radius:999px;padding:5px 10px;height:34px;margin-top:4px;width:100%;">
+            </td>
+            <td style="padding:6px 8px;width:130px;">
+                <input type="number" class="ing-qty" placeholder="Ej: 0.2" min="0.001" step="0.001"
+                    style="font-size:12px;border-radius:999px;padding:5px 10px;height:34px;width:100%;text-align:center;">
+            </td>
+            <td style="padding:6px 8px;width:110px;">
+                <input type="text" class="ing-unit" placeholder="Kg, Libras…"
+                    style="font-size:12px;border-radius:999px;padding:5px 10px;height:34px;width:100%;">
+            </td>
+            <td style="padding:6px 8px;width:36px;text-align:center;">
+                <button onclick="document.getElementById('${filaId}').remove()"
+                    style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);border-radius:999px;width:28px;height:28px;cursor:pointer;font-size:15px;font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;">×</button>
+            </td>
+        </tr>`);
+}
+
+function _autoFillUnit(selectEl, filaId) {
+    const fila = document.getElementById(filaId);
+    if (!fila) return;
+    const opt  = selectEl.options[selectEl.selectedIndex];
+    if (!opt?.value) return;
+    fila.querySelector('.ing-supply-id').value   = opt.value;
+    fila.querySelector('.ing-supply-name').value = opt.dataset.name || '';
+    fila.querySelector('.ing-unit').value        = opt.dataset.unit || '';
+}
+
+async function eliminarReceta(id, nombre) {
+    if (!confirm(`¿Eliminar la receta "${nombre}"?`)) return;
+    try {
+        await supabaseClient.from('recipe_ingredients').delete().eq('recipe_id', id);
+        await supabaseClient.from('production_recipes').delete().eq('id', id);
+        Toast.ok(`Receta "${nombre}" eliminada.`);
+        cargarRecetas();
+    } catch (err) {
+        Toast.error('Error al eliminar la receta.');
+    }
+}
+
+// ── Calculadora: platos ≈ FLOOR( MIN( stock_i / qty_per_dish_i ) ) ──
+async function calcularProduccion() {
+    const sel      = document.getElementById('sel-receta-calculo');
+    const recetaId = sel?.value;
+    if (!recetaId) { Toast.error('Selecciona una receta primero.'); return; }
+
+    const receta = _recetasCache.find(r => r.id === recetaId);
+    if (!receta?.recipe_ingredients?.length) {
+        Toast.error('La receta no tiene ingredientes. Edítala primero.');
+        return;
+    }
+
+    // Obtener stocks frescos de Supabase
+    const supplyIds = receta.recipe_ingredients.filter(i => i.supply_id).map(i => i.supply_id);
+    let stockMap = {};
+
+    if (supplyIds.length > 0) {
+        const { data: stocks } = await supabaseClient
+            .from('inventory_supplies')
+            .select('id, item_name, current_stock, unit_of_measure')
+            .in('id', supplyIds);
+        (stocks || []).forEach(s => { stockMap[s.id] = s; });
+    }
+
+    // Calcular cobertura por insumo
+    let platosEstimados = Infinity;
+    const detalleIng = receta.recipe_ingredients.map(ing => {
+        const stockActual  = stockMap[ing.supply_id]?.current_stock ?? null;
+        const coberturaEst = (stockActual !== null && ing.quantity_per_dish > 0)
+            ? Math.floor(stockActual / ing.quantity_per_dish)
+            : null;
+
+        if (coberturaEst !== null && coberturaEst < platosEstimados) {
+            platosEstimados = coberturaEst;
+        }
+        return { ...ing, stockActual, coberturaEst };
+    });
+
+    if (!isFinite(platosEstimados)) platosEstimados = 0;
+
+    _calcResult = { recetaId, receta, platosEstimados, detalleIng };
+    _renderResultadoCalculo();
+}
+
+function _renderResultadoCalculo() {
+    const panel = document.getElementById('panel-resultado-calculo');
+    if (!panel || !_calcResult) return;
+    const { receta, platosEstimados, detalleIng } = _calcResult;
+
+    const isCuello = (ing) => ing.coberturaEst !== null && ing.coberturaEst === platosEstimados;
+
+    const filasIng = detalleIng.map(i => {
+        const cuello       = isCuello(i);
+        const consumoTotal = i.stockActual !== null ? (i.quantity_per_dish * platosEstimados).toFixed(3) : '—';
+        const restante     = i.stockActual !== null ? Math.max(0, i.stockActual - i.quantity_per_dish * platosEstimados).toFixed(3) : '—';
+        const stockLabel   = i.stockActual !== null
+            ? `<span class="mono" style="font-size:12.5px;font-weight:600;">${i.stockActual} ${i.unit}</span>`
+            : `<span style="color:var(--amber);font-size:11.5px;font-weight:600;">⚠️ Sin link inventario</span>`;
+        const cuelloLabel  = cuello
+            ? `<span style="font-size:9.5px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.4px;">🔴 Cuello</span>` : '';
+
+        return `<tr style="border-bottom:1px solid var(--border);${cuello ? 'background:rgba(192,57,43,.04);' : ''}">
+            <td style="padding:9px 12px;font-size:12.5px;font-weight:600;color:var(--text-1);">${i.supply_name} ${cuelloLabel}</td>
+            <td style="padding:9px 12px;text-align:center;">${stockLabel}</td>
+            <td style="padding:9px 12px;text-align:center;" class="mono">${i.quantity_per_dish} ${i.unit}</td>
+            <td style="padding:9px 12px;text-align:center;color:${cuello?'var(--red)':'var(--text-2)'};" class="mono">${i.coberturaEst ?? '—'}</td>
+            <td style="padding:9px 12px;text-align:center;color:var(--red);" class="mono">-${consumoTotal}</td>
+            <td style="padding:9px 12px;text-align:center;color:var(--olive);" class="mono">${restante}</td>
+        </tr>`;
+    }).join('');
+
+    panel.className = 'card';
+    panel.style.display = 'block';
+    panel.innerHTML = `
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px;">
+            <div>
+                <p style="font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">${receta.name} — Resultado</p>
+                <div style="display:flex;align-items:baseline;gap:10px;">
+                    <span style="font-size:42px;font-weight:800;color:var(--olive);font-family:'DM Mono',monospace;line-height:1;">${platosEstimados}</span>
+                    <div>
+                        <p style="font-size:14px;font-weight:600;color:var(--text-1);">platos estimados</p>
+                        <p style="font-size:11px;color:var(--text-3);">con el stock actual del inventario</p>
+                    </div>
+                </div>
+            </div>
+            ${platosEstimados > 0 ? `
+            <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px 18px;">
+                <p style="font-size:11px;font-weight:700;color:var(--olive);margin-bottom:8px;">📋 Siguiente paso</p>
+                <p style="font-size:12px;color:var(--text-2);line-height:1.6;">Ve a <strong>Control de Menú</strong> y pon<br><strong>${platosEstimados}</strong> en "Porciones del día" del plato.</p>
+            </div>` : ''}
+        </div>
+
+        <div style="overflow-x:auto;border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px;">
+            <table style="width:100%;border-collapse:collapse;min-width:500px;">
+                <thead>
+                    <tr style="background:var(--surface-2);">
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:left;">Insumo</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Stock Actual</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Por 1 plato</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Alcanza para</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Consume total</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Queda</th>
+                    </tr>
+                </thead>
+                <tbody>${filasIng}</tbody>
+            </table>
+        </div>
+
+        ${platosEstimados > 0 ? `
+        <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:12px;padding:14px 16px;">
+            <p style="font-size:12px;font-weight:700;color:var(--olive);margin-bottom:10px;">📦 Descontar insumos al cerrar el día</p>
+            <p style="font-size:11.5px;color:var(--text-2);margin-bottom:10px;">Ingresa cuántos platos se vendieron realmente y descuenta ese consumo del inventario.</p>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <label style="font-size:12.5px;font-weight:600;color:var(--text-2);margin:0;white-space:nowrap;">Platos vendidos:</label>
+                <input type="number" id="inp-platos-vendidos" value="${platosEstimados}" min="1" max="${platosEstimados}"
+                    style="width:90px;font-size:14px;font-weight:700;text-align:center;border-radius:999px;padding:6px 12px;border:1.5px solid var(--olive-bd);">
+                <button onclick="descontarInsumos()" class="btn-olive">📦 Descontar del Inventario</button>
+                <span style="font-size:11px;color:var(--text-3);">(máx. ${platosEstimados})</span>
+            </div>
+        </div>` : `
+        <div style="background:var(--red-lt);border:1.5px solid var(--red-bd);border-radius:12px;padding:14px 16px;">
+            <p style="font-size:13px;font-weight:700;color:var(--red);">⚠️ Stock insuficiente para producir al menos un plato.</p>
+            <p style="font-size:12px;color:var(--text-2);margin-top:4px;">Revisa el insumo marcado como cuello de botella y repón stock.</p>
+        </div>`}`;
+}
+
+// ── Descuento real del inventario ────────────────────────────
+async function descontarInsumos() {
+    if (!_calcResult) return;
+    const platosVendidos = parseInt(document.getElementById('inp-platos-vendidos')?.value) || 0;
+
+    if (platosVendidos <= 0 || platosVendidos > _calcResult.platosEstimados) {
+        Toast.error(`Ingresa un número entre 1 y ${_calcResult.platosEstimados}.`);
+        return;
+    }
+    if (!confirm(`¿Descontar del inventario el consumo de ${platosVendidos} plato(s)?`)) return;
+
+    const ingsConLink = _calcResult.detalleIng.filter(i => i.supply_id && i.stockActual !== null);
+    let errores = 0;
+
+    for (const ing of ingsConLink) {
+        const nuevoStock = Math.max(0, ing.stockActual - ing.quantity_per_dish * platosVendidos);
+        const { error } = await supabaseClient
+            .from('inventory_supplies')
+            .update({ current_stock: nuevoStock, updated_at: new Date().toISOString() })
+            .eq('id', ing.supply_id);
+        if (error) { console.error('Error descontando', ing.supply_name, error); errores++; }
+    }
+
+    if (errores === 0) {
+        Toast.ok(`✅ ${platosVendidos} plato(s) descontados del inventario correctamente.`);
+    } else {
+        Toast.error(`${errores} insumo(s) no se actualizaron. Revisa la consola.`);
+    }
+
+    _calcResult = null;
+    const panel = document.getElementById('panel-resultado-calculo');
+    if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+    document.getElementById('sel-receta-calculo').value = '';
+    _supplyCache = []; // forzar recarga fresca
+    cargarInventarioReal();
+    cargarRecetas();
 }
