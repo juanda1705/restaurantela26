@@ -437,6 +437,9 @@ function setConexion(estado) {
 
 // ── Muestra el badge de mesa y el banner de bienvenida ──────
 function mostrarInfoMesa(numero, nombre) {
+    // En modo mesero no se muestra badge de mesa del cliente en el header
+    if (_MODO_MESERO) return;
+
     // Badge compacto en el header
     if (elBadgeMesa) {
         elBadgeMesa.textContent   = numero;
@@ -1260,19 +1263,21 @@ elOrderForm.addEventListener('submit', Order.submit.bind(Order));
 // ============================================================
 // MÓDULO MESERO — WaiterFlow v2.0
 // ============================================================
-// Flujo rediseñado: Login PIN → Selección Mesa → Carta completa
-// con carrito visual. Al enviar el pedido, el mesero PERMANECE
-// en la misma mesa y puede tomar otro pedido inmediatamente.
-// Cambia de mesa con un botón en el header sin cerrar sesión.
+// Flujo correcto:
+//   1. Login PIN
+//   2. Carta real cargada (misma carta del cliente)
+//      → El mesero selecciona los platos con + / −
+//   3. Modal de confirmación: tipo entrega + mesa/datos + nombre del cliente
+//   4. Envío a cocina (orders + order_items en Supabase)
 //
-// Activación: abre menu.html?modo=mesero o llama WaiterFlow.init()
+// Activación: menu.html?modo=mesero
+// En modo mesero el cart-bar dice "Confirmar pedido" en lugar de "Ver pedido"
 // ============================================================
 const WaiterFlow = (function() {
 
     // Estado interno
     let _mesero  = null;  // { nombre, pin, cargo }
-    let _mesa    = null;  // número/nombre de mesa seleccionado
-    let _mesaLabel = '';  // etiqueta legible de la mesa
+    let _tipoEntrega = 'mesa'; // 'mesa' | 'para_llevar' | 'domicilio'
 
     // PIN hardcoded hasta que exista tabla waiter_sessions
     const PINES = {
@@ -1282,167 +1287,186 @@ const WaiterFlow = (function() {
         '0000': 'Supervisor',
     };
 
-    // ── CSS del overlay de mesero ─────────────────────────────
+    // CSS del overlay de login y del modal de confirmación de pedido
     const CSS = `
-        #wf-overlay {
+        /* ── Overlay de login ── */
+        #wf-login-overlay {
             position:fixed;inset:0;background:#1a1f18;z-index:10000;
             display:flex;align-items:center;justify-content:center;
             font-family:'DM Sans',sans-serif;
         }
         .wf-card {
             background:#fff;border-radius:24px;padding:32px;
-            width:min(420px,calc(100vw - 32px));
-            box-shadow:0 24px 80px rgba(0,0,0,.4);
+            width:min(400px,calc(100vw - 32px));
+            box-shadow:0 24px 80px rgba(0,0,0,.45);
         }
-        .wf-title {
-            font-size:17px;font-weight:800;color:#1a1f18;
-            margin-bottom:6px;letter-spacing:-.3px;
+        .wf-logo-wrap {
+            text-align:center;margin-bottom:24px;
         }
-        .wf-sub {
-            font-size:12.5px;color:#8a9388;margin-bottom:22px;line-height:1.5;
+        .wf-logo-wrap .wf-icon {
+            font-size:48px;display:block;margin-bottom:8px;
+        }
+        .wf-logo-wrap h2 {
+            font-family:'Cormorant Garamond',serif;font-size:1.6rem;
+            font-weight:400;color:#1a1f18;letter-spacing:-.02em;margin-bottom:2px;
+        }
+        .wf-logo-wrap h2 em { font-style:italic;color:#4a6741; }
+        .wf-logo-wrap p {
+            font-size:11px;color:#8a9388;letter-spacing:.08em;text-transform:uppercase;
         }
         .wf-label {
-            font-size:11px;font-weight:700;text-transform:uppercase;
-            letter-spacing:.7px;color:#4a5248;margin-bottom:6px;display:block;
+            font-size:10.5px;font-weight:600;text-transform:uppercase;
+            letter-spacing:.07em;color:#4a5248;margin-bottom:6px;display:block;
         }
         .wf-input {
-            width:100%;border:1.5px solid #e4e7e2;border-radius:999px;
-            padding:11px 18px;font-size:14px;font-family:'DM Sans',sans-serif;
+            width:100%;border:1.5px solid #e4e7e2;border-radius:12px;
+            padding:12px 16px;font-size:14px;font-family:'DM Sans',sans-serif;
             color:#1a1f18;background:#f7f8f6;outline:none;
             transition:border-color .2s,box-shadow .2s;margin-bottom:14px;
         }
-        .wf-input:focus { border-color:#4a6741;box-shadow:0 0 0 3px rgba(74,103,65,.12); }
+        .wf-input:focus { border-color:#4a6741;box-shadow:0 0 0 3px rgba(74,103,65,.12);background:#fff; }
         .wf-btn {
             width:100%;background:#4a6741;color:#fff;border:none;border-radius:999px;
-            padding:13px;font-size:14px;font-weight:700;cursor:pointer;
-            font-family:'DM Sans',sans-serif;transition:background .2s;
+            padding:14px;font-size:14px;font-weight:600;cursor:pointer;
+            font-family:'DM Sans',sans-serif;transition:background .2s;letter-spacing:.02em;
         }
         .wf-btn:hover { background:#3a5233; }
         .wf-btn:disabled { background:#c8d4c5;cursor:not-allowed; }
         .wf-err {
             background:#fdf5f3;border:1.5px solid rgba(192,80,60,.3);
-            border-radius:12px;padding:9px 14px;font-size:12.5px;color:#6b2a1e;
-            margin-bottom:14px;display:none;
-        }
-        .wf-mesa-grid {
-            display:grid;grid-template-columns:repeat(4,1fr);gap:10px;
-            margin-bottom:16px;
-        }
-        .wf-mesa-btn {
-            background:#f0f2ef;border:1.5px solid #e4e7e2;border-radius:14px;
-            padding:16px 8px;font-size:16px;font-weight:700;cursor:pointer;
-            font-family:'DM Mono',monospace;color:#1a1f18;transition:all .15s;
-            text-align:center;
-        }
-        .wf-mesa-btn:hover { background:#e8ede7;border-color:#c2d09c; }
-        .wf-mesa-btn.selected {
-            background:#4a6741;color:#fff;border-color:#4a6741;
-        }
-        .wf-back {
-            background:none;border:1.5px solid #e4e7e2;color:#4a5248;
-            border-radius:999px;padding:10px 20px;font-size:13px;
-            font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;
-            transition:all .2s;margin-top:10px;width:100%;
-        }
-        .wf-back:hover { background:#f0f2ef; }
-        .wf-badge {
-            display:inline-block;background:#e8ede7;color:#4a6741;
-            border-radius:999px;padding:3px 12px;font-size:11.5px;font-weight:700;
-            margin-bottom:18px;
+            border-radius:10px;padding:9px 14px;font-size:12.5px;color:#6b2a1e;
+            margin-bottom:14px;display:none;line-height:1.5;
         }
 
-        /* ── Header del modo mesero ── */
-        #wf-header {
-            position:fixed;top:0;left:0;right:0;z-index:9999;
-            background:#fff;border-bottom:2px solid #e4e7e2;
-            display:flex;align-items:center;justify-content:space-between;
-            padding:10px 16px;gap:12px;
-            box-shadow:0 2px 12px rgba(0,0,0,.08);
-        }
-        #wf-header-left {
-            display:flex;align-items:center;gap:10px;min-width:0;
-        }
-        #wf-mesa-selector {
-            display:flex;align-items:center;gap:7px;
-            background:#f0f3e8;border:1.5px solid #c2d09c;
-            border-radius:999px;padding:6px 14px;
-            cursor:pointer;transition:all .2s;
+        /* ── Barra de mesero (visible en la carta una vez logueado) ── */
+        #wf-topbar {
+            display:none;
+            position:fixed;top:0;left:0;right:0;z-index:200;
+            background:#1a1f18;
+            padding:10px 16px;
+            align-items:center;justify-content:space-between;
+            gap:10px;
             font-family:'DM Sans',sans-serif;
         }
-        #wf-mesa-selector:hover { background:#e6ecda;border-color:#4a6741; }
-        #wf-mesa-selector span.wf-mesa-nombre {
-            font-size:13px;font-weight:700;color:#4a5a28;
+        #wf-topbar .wf-tb-info {
+            display:flex;align-items:center;gap:8px;
         }
-        #wf-mesa-selector span.wf-mesa-edit {
-            font-size:10px;color:#78786e;font-weight:400;
+        #wf-topbar .wf-tb-avatar {
+            width:32px;height:32px;border-radius:50%;background:#4a6741;
+            display:flex;align-items:center;justify-content:center;
+            font-size:14px;font-weight:700;color:#fff;flex-shrink:0;
         }
-        #wf-header-mesero {
-            font-size:11.5px;color:#8a9388;white-space:nowrap;
-            display:flex;align-items:center;gap:5px;
+        #wf-topbar .wf-tb-name {
+            font-size:13px;font-weight:600;color:#fff;
         }
-        #wf-header-mesero strong { color:#4a5248;font-weight:700; }
+        #wf-topbar .wf-tb-sub {
+            font-size:10.5px;color:#8a9388;
+        }
+        #wf-topbar .wf-tb-cerrar {
+            background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);
+            color:#ccc;border-radius:999px;padding:5px 14px;font-size:12px;
+            font-family:'DM Sans',sans-serif;cursor:pointer;transition:all .2s;white-space:nowrap;
+        }
+        #wf-topbar .wf-tb-cerrar:hover { background:rgba(255,255,255,.15);color:#fff; }
 
-        /* ── Modal de cambio de mesa (dentro del flujo mesero) ── */
-        #wf-cambio-mesa-overlay {
-            position:fixed;inset:0;z-index:10001;
-            background:rgba(26,31,24,.65);backdrop-filter:blur(8px);
-            display:none;align-items:flex-end;justify-content:center;
+        /* ── Modal de confirmación de pedido (mesero) ── */
+        #wf-confirm-modal {
+            display:none;position:fixed;inset:0;z-index:300;
+            align-items:flex-end;justify-content:center;
+            background:rgba(18,18,12,.65);backdrop-filter:blur(8px);
+            -webkit-backdrop-filter:blur(8px);
+            font-family:'DM Sans',sans-serif;
         }
-        #wf-cambio-mesa-overlay.visible { display:flex; }
-        .wf-cambio-panel {
-            background:#fff;border-radius:24px 24px 0 0;
-            width:100%;max-width:480px;padding:20px 24px 32px;
-            box-shadow:0 -8px 40px rgba(0,0,0,.18);
+        #wf-confirm-modal[style*="flex"] {
+            align-items:flex-end !important;
         }
-        .wf-cambio-handle {
-            display:flex;justify-content:center;margin-bottom:16px;
+        .wf-confirm-panel {
+            background:#fff;border-radius:28px 28px 0 0;
+            width:100%;max-width:520px;
+            max-height:92svh;overflow-y:auto;
+            padding:0 24px calc(24px + env(safe-area-inset-bottom,0px));
+            animation:slideUp .38s cubic-bezier(0.16,1,0.3,1) both;
+            box-shadow:0 -8px 48px rgba(0,0,0,.16);
         }
-        .wf-cambio-handle-bar {
-            width:36px;height:4px;background:#e4e7e2;border-radius:999px;
+        .wf-confirm-handle {
+            display:flex;justify-content:center;padding:14px 0 12px;
         }
-
-        /* ── Nombre del cliente (campo flotante sobre el carrito) ── */
-        #wf-nombre-cliente-bar {
-            position:fixed;bottom:0;left:0;right:0;z-index:9998;
-            background:#fff;border-top:1.5px solid #e4e7e2;
-            padding:10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
-            display:none;flex-direction:column;gap:8px;
-            box-shadow:0 -4px 20px rgba(0,0,0,.08);
+        .wf-confirm-handle-bar {
+            width:36px;height:4px;background:#e8e8e2;border-radius:999px;
         }
-        #wf-nombre-cliente-bar.visible { display:flex; }
-        .wf-cliente-row {
-            display:flex;gap:8px;align-items:center;
+        .wf-confirm-title {
+            font-family:'Cormorant Garamond',serif;font-size:1.5rem;
+            font-weight:400;color:#18180f;letter-spacing:-.01em;
+            margin-bottom:4px;
         }
-        .wf-cliente-input {
-            flex:1;border:1.5px solid #e4e7e2;border-radius:999px;
-            padding:10px 16px;font-size:14px;font-family:'DM Sans',sans-serif;
-            color:#1a1f18;background:#f7f8f6;outline:none;
-            transition:border-color .2s;
+        .wf-confirm-sub {
+            font-size:12px;color:#78786e;margin-bottom:20px;
         }
-        .wf-cliente-input:focus { border-color:#4a6741;box-shadow:0 0 0 3px rgba(74,103,65,.1); }
-        .wf-enviar-btn {
-            background:#4a6741;color:#fff;border:none;border-radius:999px;
-            padding:11px 22px;font-size:13.5px;font-weight:700;cursor:pointer;
-            font-family:'DM Sans',sans-serif;white-space:nowrap;transition:background .2s;
-            flex-shrink:0;
+        .wf-confirm-label {
+            font-size:10.5px;font-weight:600;text-transform:uppercase;
+            letter-spacing:.07em;color:#78786e;margin-bottom:8px;display:block;
         }
-        .wf-enviar-btn:hover { background:#3a5233; }
-        .wf-enviar-btn:disabled { background:#c8d4c5;cursor:not-allowed; }
+        .wf-confirm-input {
+            width:100%;border:1.5px solid #e8e8e2;border-radius:12px;
+            padding:12px 15px;font-size:14px;font-family:'DM Sans',sans-serif;
+            color:#18180f;background:#fafaf8;outline:none;
+            transition:border-color .2s,box-shadow .2s;
+        }
+        .wf-confirm-input:focus {
+            border-color:#4a5a28;box-shadow:0 0 0 3px rgba(74,90,40,.08);background:#fff;
+        }
+        .wf-tipo-grid {
+            display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px;
+        }
+        .wf-tipo-btn {
+            padding:12px 8px;border-radius:14px;border:1.5px solid #e8e8e2;
+            background:#fafaf8;color:#78786e;font-family:'DM Sans',sans-serif;
+            font-size:12px;font-weight:400;cursor:pointer;text-align:center;
+            transition:all .2s;-webkit-tap-highlight-color:transparent;line-height:1.4;
+        }
+        .wf-tipo-btn .wf-tipo-icon { display:block;font-size:22px;margin-bottom:4px; }
+        .wf-tipo-btn.active {
+            border-color:#4a5a28;background:#f0f3e8;color:#4a5a28;font-weight:600;
+            box-shadow:0 0 0 2px rgba(74,90,40,.10);
+        }
+        .wf-mesa-grid-mini {
+            display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin-bottom:4px;
+        }
+        .wf-mesa-chip {
+            padding:10px 4px;border-radius:10px;border:1.5px solid #e8e8e2;
+            background:#fafaf8;font-size:14px;font-weight:700;cursor:pointer;
+            font-family:'DM Sans',sans-serif;color:#18180f;text-align:center;
+            transition:all .15s;
+        }
+        .wf-mesa-chip:hover { background:#e8ede7;border-color:#c2d09c; }
+        .wf-mesa-chip.active {
+            background:#4a5a28;color:#fff;border-color:#4a5a28;
+        }
+        .wf-resumen-items {
+            background:#f7f8f5;border-radius:14px;padding:12px 14px;
+            margin-bottom:16px;
+        }
+        .wf-resumen-row {
+            display:flex;justify-content:space-between;align-items:flex-start;
+            padding:7px 0;border-bottom:1px solid #eeefea;font-size:13px;
+            gap:10px;
+        }
+        .wf-resumen-row:last-child { border-bottom:none; }
+        .wf-resumen-nombre { font-weight:500;color:#18180f;flex:1; }
+        .wf-resumen-qty { font-size:11px;color:#b4b4aa;margin-top:2px; }
+        .wf-resumen-precio {
+            font-family:'Cormorant Garamond',serif;font-size:1rem;
+            color:#4a5a28;font-weight:500;white-space:nowrap;flex-shrink:0;
+        }
         .wf-total-row {
             display:flex;justify-content:space-between;align-items:center;
-            font-size:12.5px;color:#8a9388;
+            padding:12px 0 16px;border-top:1px solid #e8e8e2;
         }
-        .wf-total-row strong {
-            font-family:'Cormorant Garamond',serif;font-size:1.25rem;
-            font-weight:500;color:#4a5a28;
+        .wf-total-label { font-size:12.5px;color:#78786e; }
+        .wf-total-value {
+            font-family:'Cormorant Garamond',serif;font-size:1.4rem;
+            font-weight:500;color:#18180f;
         }
-        .wf-notas-input {
-            width:100%;border:1.5px solid #e4e7e2;border-radius:12px;
-            padding:9px 14px;font-size:13px;font-family:'DM Sans',sans-serif;
-            color:#1a1f18;background:#f7f8f6;outline:none;resize:none;
-            transition:border-color .2s;
-        }
-        .wf-notas-input:focus { border-color:#4a6741; }
     `;
 
     function _injectCSS() {
@@ -1452,42 +1476,42 @@ const WaiterFlow = (function() {
         document.head.appendChild(s);
     }
 
-    function _mount(html) {
-        let ov = document.getElementById('wf-overlay');
-        if (!ov) {
-            ov = document.createElement('div');
-            ov.id = 'wf-overlay';
-            document.body.appendChild(ov);
-        }
-        ov.innerHTML = html;
-        ov.style.display = 'flex';
+    function _showErr(el, msg) {
+        if (!el) return;
+        el.textContent = msg;
+        el.style.display = 'block';
+        setTimeout(() => { el.style.display = 'none'; }, 4500);
     }
 
-    function _hide() {
-        const ov = document.getElementById('wf-overlay');
-        if (ov) ov.style.display = 'none';
-    }
-
-    // ── PASO 1: Login PIN ─────────────────────────────────────
+    // ── PASO 1: Login PIN ──────────────────────────────────────────────────────
+    // Overlay oscuro sobre toda la pantalla. Muestra el formulario de login.
     function mostrarLogin() {
         _injectCSS();
-        _mount(`
+
+        let ov = document.getElementById('wf-login-overlay');
+        if (!ov) {
+            ov = document.createElement('div');
+            ov.id = 'wf-login-overlay';
+            document.body.appendChild(ov);
+        }
+        ov.style.display = 'flex';
+        ov.innerHTML = `
             <div class="wf-card">
-                <div style="text-align:center;margin-bottom:22px;">
-                    <span style="font-size:40px;">🍽️</span>
+                <div class="wf-logo-wrap">
+                    <span class="wf-icon">🍽️</span>
+                    <h2>Restaurante <em>la 26</em></h2>
+                    <p>Sistema de Pedidos · Mesero</p>
                 </div>
-                <h2 class="wf-title" style="text-align:center;">Acceso Mesero</h2>
-                <p class="wf-sub" style="text-align:center;">Restaurante la 26 · Sistema de Pedidos</p>
                 <div id="wf-login-err" class="wf-err"></div>
                 <label class="wf-label">Tu nombre</label>
                 <input id="wf-nombre" class="wf-input" type="text"
                     placeholder="Ej: Carlos" autocomplete="off">
                 <label class="wf-label">PIN de acceso</label>
                 <input id="wf-pin" class="wf-input" type="password"
-                    placeholder="••••" maxlength="4" autocomplete="off"
-                    onkeydown="if(event.key==='Enter')WaiterFlow._loginSubmit()">
-                <button class="wf-btn" onclick="WaiterFlow._loginSubmit()">Ingresar al Sistema</button>
-            </div>`);
+                    placeholder="••••" maxlength="4" inputmode="numeric" autocomplete="off"
+                    onkeydown="if(event.key==='Enter') WaiterFlow._loginSubmit()">
+                <button class="wf-btn" onclick="WaiterFlow._loginSubmit()">Ingresar →</button>
+            </div>`;
         setTimeout(() => document.getElementById('wf-nombre')?.focus(), 100);
     }
 
@@ -1499,258 +1523,397 @@ const WaiterFlow = (function() {
         if (!nombre) { _showErr(err, 'Ingresa tu nombre.'); return; }
         if (!pin)    { _showErr(err, 'Ingresa el PIN.'); return; }
 
-        const nombrePIN = PINES[pin];
-        if (!nombrePIN) { _showErr(err, 'PIN incorrecto. Intenta de nuevo.'); return; }
+        const cargo = PINES[pin];
+        if (!cargo)  { _showErr(err, 'PIN incorrecto. Intenta de nuevo.'); return; }
 
-        _mesero = { nombre, pin, cargo: nombrePIN };
-        mostrarSeleccionMesa();
-    }
+        _mesero = { nombre, pin, cargo };
 
-    // ── PASO 2: Selección de Mesa (primera vez o cambio) ──────
-    function mostrarSeleccionMesa(esCambio = false) {
-        _injectCSS();
+        // Ocultar overlay de login
+        const ov = document.getElementById('wf-login-overlay');
+        if (ov) ov.style.display = 'none';
 
-        // Si es un cambio de mesa, mostrar como drawer inferior
-        if (esCambio) {
-            let ov = document.getElementById('wf-cambio-mesa-overlay');
-            if (!ov) {
-                ov = document.createElement('div');
-                ov.id = 'wf-cambio-mesa-overlay';
-                document.body.appendChild(ov);
-            }
-            const mesas = Array.from({length:12}, (_,i) => i+1)
-                .map(n => `<button class="wf-mesa-btn${_mesa == n ? ' selected' : ''}"
-                    onclick="WaiterFlow._seleccionarMesa(${n}, true)">${n}</button>`)
-                .join('');
-            ov.innerHTML = `
-                <div class="wf-cambio-panel">
-                    <div class="wf-cambio-handle"><div class="wf-cambio-handle-bar"></div></div>
-                    <h3 style="font-size:16px;font-weight:800;color:#1a1f18;margin-bottom:4px;">Cambiar Mesa</h3>
-                    <p style="font-size:12.5px;color:#8a9388;margin-bottom:16px;">Selecciona la nueva mesa del cliente</p>
-                    <div class="wf-mesa-grid">${mesas}
-                        <button class="wf-mesa-btn${_mesa==='barra'?' selected':''}"
-                            onclick="WaiterFlow._seleccionarMesa('barra', true)"
-                            style="font-size:12px;font-family:'DM Sans',sans-serif;">🪑<br>Barra</button>
-                        <button class="wf-mesa-btn${_mesa==='para_llevar'?' selected':''}"
-                            onclick="WaiterFlow._seleccionarMesa('para_llevar', true)"
-                            style="font-size:11px;font-family:'DM Sans',sans-serif;">📦<br>Para Llevar</button>
-                        <button class="wf-mesa-btn${_mesa==='domicilio'?' selected':''}"
-                            onclick="WaiterFlow._seleccionarMesa('domicilio', true)"
-                            style="font-size:11px;font-family:'DM Sans',sans-serif;">🛵<br>Domicilio</button>
-                    </div>
-                    <button class="wf-back" onclick="WaiterFlow._cerrarCambioMesa()">✕ Cancelar</button>
-                </div>`;
-            ov.classList.add('visible');
-            return;
-        }
+        // Mostrar barra del mesero sobre la carta
+        _mostrarTopbar();
 
-        // Primera vez: pantalla completa
-        const mesas = Array.from({length:12}, (_,i) => i+1)
-            .map(n => `<button class="wf-mesa-btn" onclick="WaiterFlow._seleccionarMesa(${n})">${n}</button>`)
-            .join('');
+        // Ajustar el header de la carta para que no quede tapado
+        _ajustarHeaderParaMesero();
 
-        _mount(`
-            <div class="wf-card">
-                <span class="wf-badge">👤 ${_mesero.nombre}</span>
-                <h2 class="wf-title">Seleccionar Mesa</h2>
-                <p class="wf-sub">¿En qué mesa están los clientes?</p>
-                <div class="wf-mesa-grid">${mesas}
-                    <button class="wf-mesa-btn" onclick="WaiterFlow._seleccionarMesa('barra')"
-                        style="font-size:12px;font-family:'DM Sans',sans-serif;">🪑<br>Barra</button>
-                    <button class="wf-mesa-btn" onclick="WaiterFlow._seleccionarMesa('para_llevar')"
-                        style="font-size:11px;font-family:'DM Sans',sans-serif;">📦<br>Para Llevar</button>
-                    <button class="wf-mesa-btn" onclick="WaiterFlow._seleccionarMesa('domicilio')"
-                        style="font-size:11px;font-family:'DM Sans',sans-serif;">🛵<br>Domicilio</button>
-                </div>
-                <button class="wf-back" onclick="WaiterFlow.mostrarLogin()">← Regresar</button>
-            </div>`);
-    }
+        // Cambiar texto del botón del carrito para mesero
+        _adaptarCartBar();
 
-    function _cerrarCambioMesa() {
-        const ov = document.getElementById('wf-cambio-mesa-overlay');
-        if (ov) ov.classList.remove('visible');
-    }
-
-    function _seleccionarMesa(mesa, esCambio = false) {
-        _mesa = mesa;
-        _mesaLabel = isNaN(mesa) ? String(mesa).toUpperCase().replace('_', ' ') : `Mesa ${mesa}`;
-
-        if (esCambio) {
-            // Solo cambiar el contexto, limpiar carrito y actualizar header
-            _cerrarCambioMesa();
-            cart = [];
-            actualizarCarritoBar();
-            _actualizarHeaderMesero();
-            _actualizarBaraCliente();
-            Toast.ok(`✅ Mesa cambiada a ${_mesaLabel}`);
-            return;
-        }
-
-        // Primera vez: activar la carta completa con el header de mesero
-        _activarModoCartaMesero();
-    }
-
-    // ── PASO 3: Activar la carta completa con UI de mesero ────
-    function _activarModoCartaMesero() {
-        _injectCSS();
-
-        // Ocultar el overlay de pantalla completa
-        _hide();
-
-        // Inyectar header del mesero
-        _inyectarHeaderMesero();
-
-        // Inyectar barra inferior de nombre + enviar (reemplaza la barra del carrito del cliente)
-        _inyectarBaraCliente();
-
-        // Ajustar el padding top del body para el header del mesero
-        document.body.style.paddingTop = '60px';
-        // La barra inferior del cliente reemplaza la del carrito
-        document.body.style.paddingBottom = 'calc(140px + env(safe-area-inset-bottom, 0px))';
-
-        // Ocultar la barra del carrito pública (no la usamos en modo mesero)
-        if (elCartBar) elCartBar.style.display = 'none';
-
-        // Mostrar la carta cargando, y si ya está cargada mostrarla directamente
-        if (slots && slots.length > 0) {
-            mostrarMenu();
-            renderizarCatsBar();
-            renderizarMenu();
-        } else {
-            mostrarLoader();
+        // Cargar la carta real (si no está cargada aún)
+        if (!restaurantId) {
+            cargarMenu();
+        } else if (slots.length === 0) {
             cargarMenu();
         }
+        // Si ya está cargada (restaurantId y slots existen), simplemente mostrarla
+        else {
+            mostrarMenu();
+        }
     }
 
-    function _inyectarHeaderMesero() {
-        if (document.getElementById('wf-header')) return;
-        const h = document.createElement('div');
-        h.id = 'wf-header';
-        h.innerHTML = `
-            <div id="wf-header-left">
-                <div id="wf-mesa-selector" onclick="WaiterFlow.mostrarSeleccionMesa(true)">
-                    <span style="font-size:16px;">🍽️</span>
-                    <span class="wf-mesa-nombre">${_mesaLabel}</span>
-                    <span class="wf-mesa-edit">▾ cambiar</span>
-                </div>
-            </div>
-            <div id="wf-header-mesero">
-                <span>👤</span>
-                <strong>${_mesero.nombre}</strong>
-                <button onclick="WaiterFlow.mostrarLogin()" title="Cerrar sesión"
-                    style="background:none;border:none;cursor:pointer;font-size:14px;
-                    color:#8a9388;padding:2px 4px;margin-left:4px;">⏏</button>
-            </div>`;
-        document.body.prepend(h);
-    }
-
-    function _actualizarHeaderMesero() {
-        const el = document.querySelector('#wf-mesa-selector .wf-mesa-nombre');
-        if (el) el.textContent = _mesaLabel;
-    }
-
-    function _inyectarBaraCliente() {
-        if (document.getElementById('wf-nombre-cliente-bar')) return;
-        const bar = document.createElement('div');
-        bar.id = 'wf-nombre-cliente-bar';
+    // ── Barra superior del mesero ──────────────────────────────────────────────
+    function _mostrarTopbar() {
+        _injectCSS();
+        let bar = document.getElementById('wf-topbar');
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'wf-topbar';
+            document.body.insertBefore(bar, document.body.firstChild);
+        }
+        const iniciales = (_mesero.nombre || 'M').charAt(0).toUpperCase();
         bar.innerHTML = `
-            <div class="wf-total-row">
-                <span id="wf-cart-resumen">Carrito vacío</span>
-                <strong id="wf-cart-total">$0</strong>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:7px;">
-                <input id="wf-cliente-nombre" class="wf-cliente-input" type="text"
-                    placeholder="Nombre del cliente (opcional)" autocomplete="off">
-                <textarea id="wf-notas-pedido" class="wf-notas-input" rows="1"
-                    placeholder="Notas especiales: Sin picante · Sin cebolla…"></textarea>
-            </div>
-            <div class="wf-cliente-row">
-                <div style="flex:1;">
-                    <div id="wf-enviar-err" style="font-size:11.5px;color:#c0503c;display:none;padding:2px 0 4px;"></div>
+            <div class="wf-tb-info">
+                <div class="wf-tb-avatar">${iniciales}</div>
+                <div>
+                    <div class="wf-tb-name">${_mesero.nombre} · <span style="color:#c2d09c;font-weight:400;">${_mesero.cargo}</span></div>
+                    <div class="wf-tb-sub">Modo Mesero · Restaurante la 26</div>
                 </div>
-                <button id="wf-enviar-btn" class="wf-enviar-btn"
+            </div>
+            <button class="wf-tb-cerrar" onclick="WaiterFlow._cerrarSesion()">Cerrar sesión</button>`;
+        bar.style.display = 'flex';
+
+        // Actualizar el subtítulo del header de la carta
+        const subtitle = document.getElementById('header-subtitle');
+        if (subtitle) subtitle.textContent = 'Modo Mesero';
+    }
+
+    function _ajustarHeaderParaMesero() {
+        // Empuja el header sticky de la carta hacia abajo para que no lo tape la topbar
+        const appHeader = document.querySelector('.app-header');
+        if (appHeader) appHeader.style.top = '52px';
+        // También ajusta el body padding-top
+        document.body.style.paddingTop = '52px';
+    }
+
+    function _adaptarCartBar() {
+        // En modo mesero el texto del carrito cambia: "Confirmar pedido del cliente"
+        const cartBtn = document.querySelector('.cart-bar-btn span:nth-child(2)');
+        if (cartBtn) cartBtn.textContent = 'Confirmar pedido';
+        // Redirigir el click del carrito al modal de confirmación del mesero
+        const cartBarBtn = document.querySelector('.cart-bar-btn');
+        if (cartBarBtn) {
+            cartBarBtn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (cart.length === 0) {
+                    Toast.error('Agrega al menos un plato al pedido.');
+                    return;
+                }
+                _abrirConfirmModal();
+            };
+        }
+    }
+
+    function _cerrarSesion() {
+        _mesero = null;
+        _tipoEntrega = 'mesa';
+        cart = [];
+        actualizarCarritoBar();
+
+        const bar = document.getElementById('wf-topbar');
+        if (bar) bar.style.display = 'none';
+
+        const appHeader = document.querySelector('.app-header');
+        if (appHeader) appHeader.style.top = '0';
+        document.body.style.paddingTop = '';
+
+        // Ocultar la carta
+        const appMenu = document.getElementById('app-menu');
+        if (appMenu) appMenu.style.display = 'none';
+
+        mostrarLogin();
+    }
+
+    // ── PASO 2: Modal de confirmación del pedido ───────────────────────────────
+    // Aparece cuando el mesero presiona el carrito flotante.
+    // Aquí se define: tipo de entrega, mesa/dirección, nombre del cliente y notas.
+    function _abrirConfirmModal() {
+        _injectCSS();
+
+        // Construir resumen de ítems
+        const itemsHTML = cart.map(item => {
+            const slot = slots.find(s => s.id === item.slotId);
+            if (!slot) return '';
+            const subtotal = slot.precio * item.cantidad;
+            return `
+                <div class="wf-resumen-row">
+                    <div>
+                        <div class="wf-resumen-nombre">${slot.nombre}</div>
+                        <div class="wf-resumen-qty">${item.cantidad} × ${slot.precio > 0 ? formatCOP(slot.precio) : 'Incluido'}</div>
+                    </div>
+                    <div class="wf-resumen-precio">${slot.precio > 0 ? formatCOP(subtotal) : '—'}</div>
+                </div>`;
+        }).join('');
+
+        const total = calcularTotal();
+
+        // Chips de mesa: 1-15 + Barra
+        const mesaChips = Array.from({length:15}, (_,i) => i+1)
+            .map(n => `<button class="wf-mesa-chip" data-mesa="${n}" onclick="WaiterFlow._seleccionarMesaChip(${n})">${n}</button>`)
+            .join('');
+
+        let modal = document.getElementById('wf-confirm-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'wf-confirm-modal';
+            document.body.appendChild(modal);
+        }
+
+        modal.innerHTML = `
+            <div class="wf-confirm-panel">
+                <div class="wf-confirm-handle"><div class="wf-confirm-handle-bar"></div></div>
+
+                <p class="wf-confirm-title">Confirmar pedido</p>
+                <p class="wf-confirm-sub">Mesero: ${_mesero.nombre} · Revisa y completa los datos</p>
+
+                <!-- Resumen de platos -->
+                <div class="wf-resumen-items">${itemsHTML}</div>
+                <div class="wf-total-row">
+                    <span class="wf-total-label">Total</span>
+                    <span class="wf-total-value">${formatCOP(total)}</span>
+                </div>
+
+                <!-- Tipo de entrega -->
+                <span class="wf-confirm-label">Tipo de entrega</span>
+                <div class="wf-tipo-grid" style="margin-bottom:18px;">
+                    <button id="wf-tipo-mesa"     class="wf-tipo-btn active" onclick="WaiterFlow._seleccionarTipo('mesa')">
+                        <span class="wf-tipo-icon">🍽️</span>Mesa
+                    </button>
+                    <button id="wf-tipo-llevar"   class="wf-tipo-btn" onclick="WaiterFlow._seleccionarTipo('para_llevar')">
+                        <span class="wf-tipo-icon">📦</span>Para llevar
+                    </button>
+                    <button id="wf-tipo-domicilio" class="wf-tipo-btn" onclick="WaiterFlow._seleccionarTipo('domicilio')">
+                        <span class="wf-tipo-icon">🛵</span>Domicilio
+                    </button>
+                </div>
+
+                <!-- Panel: Mesa en el restaurante -->
+                <div id="wf-panel-mesa">
+                    <span class="wf-confirm-label">Número de mesa <span style="color:#b83232">*</span></span>
+                    <div class="wf-mesa-grid-mini" style="margin-bottom:14px;">${mesaChips}
+                        <button class="wf-mesa-chip" data-mesa="barra" onclick="WaiterFlow._seleccionarMesaChip('barra')"
+                            style="font-size:11px;">Barra</button>
+                    </div>
+                    <input id="wf-mesa-manual" class="wf-confirm-input" type="text"
+                        inputmode="numeric" placeholder="O escribe el número de mesa…"
+                        style="margin-bottom:14px;"
+                        oninput="WaiterFlow._mesaManual(this.value)">
+                </div>
+
+                <!-- Panel: Para llevar / Domicilio -->
+                <div id="wf-panel-externo" style="display:none;">
+                    <div id="wf-panel-direccion" style="display:none;margin-bottom:14px;">
+                        <span class="wf-confirm-label">Dirección de entrega <span style="color:#b83232">*</span></span>
+                        <input id="wf-direccion" class="wf-confirm-input" type="text"
+                            placeholder="Ej: Cra 27 #45-12, Cabecera…" autocomplete="street-address">
+                    </div>
+                </div>
+
+                <!-- Nombre del cliente -->
+                <span class="wf-confirm-label" style="margin-top:4px;">Nombre del cliente <span style="color:#b83232">*</span></span>
+                <input id="wf-cliente-nombre" class="wf-confirm-input" type="text"
+                    placeholder="Ej: Andrés García" autocomplete="off"
+                    style="margin-bottom:14px;">
+
+                <!-- Notas -->
+                <span class="wf-confirm-label">Notas especiales (opcional)</span>
+                <input id="wf-notas-confirm" class="wf-confirm-input" type="text"
+                    placeholder="Ej: Sin picante · Sin cebolla" autocomplete="off"
+                    style="margin-bottom:20px;">
+
+                <div id="wf-confirm-err" class="wf-err"></div>
+
+                <button id="wf-enviar-final"
+                    style="width:100%;background:#4a5a28;color:#fff;border:none;border-radius:999px;
+                    padding:16px;font-size:14px;font-weight:600;cursor:pointer;
+                    font-family:'DM Sans',sans-serif;transition:background .2s;letter-spacing:.02em;
+                    box-shadow:0 4px 16px rgba(74,90,40,.25);margin-bottom:10px;"
                     onclick="WaiterFlow._enviarPedido()">
                     🚀 Enviar a Cocina
                 </button>
+                <button onclick="WaiterFlow._cerrarConfirmModal()"
+                    style="width:100%;background:transparent;border:1.5px solid #e8e8e2;color:#78786e;
+                    border-radius:999px;padding:13px;font-size:13px;font-family:'DM Sans',sans-serif;
+                    cursor:pointer;transition:all .2s;">
+                    ← Seguir agregando platos
+                </button>
             </div>`;
-        document.body.appendChild(bar);
-        _actualizarBaraCliente();
+
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+        setTimeout(() => document.getElementById('wf-cliente-nombre')?.focus(), 350);
     }
 
-    function _actualizarBaraCliente() {
-        const bar     = document.getElementById('wf-nombre-cliente-bar');
-        const resumen = document.getElementById('wf-cart-resumen');
-        const total   = document.getElementById('wf-cart-total');
-        const btn     = document.getElementById('wf-enviar-btn');
-        if (!bar) return;
+    function _cerrarConfirmModal() {
+        const modal = document.getElementById('wf-confirm-modal');
+        if (modal) modal.style.display = 'none';
+        document.body.style.overflow = '';
+    }
 
-        const qty     = calcularCantidadTotal();
-        const monto   = calcularTotal();
+    function _seleccionarTipo(tipo) {
+        _tipoEntrega = tipo;
+        ['mesa','llevar','domicilio'].forEach(t => {
+            const btn = document.getElementById(`wf-tipo-${t}`);
+            if (btn) btn.classList.remove('active');
+        });
+        const activo = document.getElementById(`wf-tipo-${tipo === 'para_llevar' ? 'llevar' : tipo}`);
+        if (activo) activo.classList.add('active');
 
-        if (resumen) {
-            resumen.textContent = qty > 0
-                ? `${qty} ítem${qty !== 1 ? 's' : ''} · ${_mesaLabel}`
-                : `Carrito vacío · ${_mesaLabel}`;
+        const panelMesa    = document.getElementById('wf-panel-mesa');
+        const panelExterno = document.getElementById('wf-panel-externo');
+        const panelDireccion = document.getElementById('wf-panel-direccion');
+
+        if (tipo === 'mesa') {
+            if (panelMesa)    panelMesa.style.display    = 'block';
+            if (panelExterno) panelExterno.style.display = 'none';
+        } else {
+            if (panelMesa)    panelMesa.style.display    = 'none';
+            if (panelExterno) panelExterno.style.display = 'block';
+            if (panelDireccion) {
+                panelDireccion.style.display = (tipo === 'domicilio') ? 'block' : 'none';
+            }
         }
-        if (total) total.textContent = formatCOP(monto);
-        if (btn) btn.disabled = qty === 0;
-
-        bar.classList.add('visible');
     }
 
-    // ── ENVÍO DEL PEDIDO ──────────────────────────────────────
-    async function _enviarPedido() {
-        const btn     = document.getElementById('wf-enviar-btn');
-        const errEl   = document.getElementById('wf-enviar-err');
-        const cliente = document.getElementById('wf-cliente-nombre')?.value.trim() || '';
-        const notas   = document.getElementById('wf-notas-pedido')?.value.trim() || '';
+    // Mesa seleccionada desde chips
+    function _seleccionarMesaChip(mesa) {
+        document.querySelectorAll('.wf-mesa-chip').forEach(el => el.classList.remove('active'));
+        const chip = document.querySelector(`.wf-mesa-chip[data-mesa="${mesa}"]`);
+        if (chip) chip.classList.add('active');
+        const manual = document.getElementById('wf-mesa-manual');
+        if (manual) manual.value = '';
+        tableNumber = isNaN(mesa) ? String(mesa).charAt(0).toUpperCase() + String(mesa).slice(1) : `Mesa ${mesa}`;
+        _mesaSeleccionada = mesa;
+    }
 
-        if (cart.length === 0) {
-            _showErr(errEl, 'Agrega al menos un plato al carrito.');
+    // Mesa escrita manualmente
+    function _mesaManual(val) {
+        document.querySelectorAll('.wf-mesa-chip').forEach(el => el.classList.remove('active'));
+        _mesaSeleccionada = val.trim();
+        tableNumber = `Mesa ${val.trim()}`;
+    }
+
+    // ── PASO 3: Envío a cocina ──────────────────────────────────────────────────
+    async function _enviarPedido() {
+        const btn        = document.getElementById('wf-enviar-final');
+        const err        = document.getElementById('wf-confirm-err');
+        const cliente    = document.getElementById('wf-cliente-nombre')?.value.trim();
+        const notas      = document.getElementById('wf-notas-confirm')?.value.trim();
+        const direccion  = document.getElementById('wf-direccion')?.value.trim();
+
+        // Validaciones
+        if (!cliente) {
+            _showErr(err, 'Ingresa el nombre del cliente.');
+            document.getElementById('wf-cliente-nombre')?.focus();
             return;
         }
 
-        if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+        if (_tipoEntrega === 'mesa') {
+            const mesaVal = _mesaSeleccionada || document.getElementById('wf-mesa-manual')?.value.trim();
+            if (!mesaVal) {
+                _showErr(err, 'Selecciona o ingresa el número de mesa.');
+                return;
+            }
+            _mesaSeleccionada = mesaVal;
+            tableNumber = isNaN(mesaVal) ? String(mesaVal) : `Mesa ${mesaVal}`;
+        }
+
+        if (_tipoEntrega === 'domicilio' && !direccion) {
+            _showErr(err, 'Ingresa la dirección de entrega para el domicilio.');
+            document.getElementById('wf-direccion')?.focus();
+            return;
+        }
+
+        if (cart.length === 0) {
+            _showErr(err, 'El pedido está vacío.');
+            return;
+        }
+
+        if (btn) { btn.disabled = true; btn.textContent = 'Enviando a cocina…'; }
 
         try {
+            // Resolver restaurant_id si aún no está disponible
             if (!restaurantId) {
                 restaurantId = await resolverRestaurantId();
             }
 
-            // Resolver table_id
-            let tId = null;
-            if (!isNaN(_mesa)) {
-                const { data: mesaData } = await supabaseClient
-                    .from('tables')
-                    .select('id')
-                    .eq('restaurant_id', restaurantId)
-                    .eq('number', parseInt(_mesa))
-                    .maybeSingle();
-                tId = mesaData?.id || null;
+            // Resolver table_id según tipo de entrega
+            let tId = tableId; // puede ya estar resuelto si cargarMenu() corrió
+
+            if (_tipoEntrega === 'mesa' && _mesaSeleccionada) {
+                const mesaNum = parseInt(_mesaSeleccionada);
+                if (!isNaN(mesaNum)) {
+                    const { data: md } = await supabaseClient
+                        .from('tables')
+                        .select('id')
+                        .eq('restaurant_id', restaurantId)
+                        .eq('number', mesaNum)
+                        .maybeSingle();
+                    if (md?.id) tId = md.id;
+                }
             }
 
+            // Si no se resolvió, buscar/crear mesa genérica
             if (!tId) {
-                const { data: mesaGen } = await supabaseClient
+                const { data: mg } = await supabaseClient
                     .from('tables')
                     .select('id')
                     .eq('restaurant_id', restaurantId)
                     .ilike('label', '%para llevar%')
                     .maybeSingle();
-                tId = mesaGen?.id || null;
+
+                if (mg?.id) {
+                    tId = mg.id;
+                } else {
+                    const { data: mn } = await supabaseClient
+                        .from('tables')
+                        .upsert([{
+                            restaurant_id: restaurantId,
+                            number: 0,
+                            label: 'Para Llevar / Domicilio',
+                            qr_code: `VIRTUAL-TAKEAWAY-${restaurantId}`,
+                            capacity: 99,
+                            status: 'available',
+                        }], { onConflict: 'restaurant_id,number' })
+                        .select('id')
+                        .single();
+                    tId = mn?.id || null;
+                }
             }
 
+            if (!tId) {
+                _showErr(err, 'No se pudo identificar la mesa. Recarga e intenta de nuevo.');
+                if (btn) { btn.disabled = false; btn.textContent = '🚀 Enviar a Cocina'; }
+                return;
+            }
+
+            // Construir etiqueta de mesa / modalidad
+            let mesaLabel;
+            if (_tipoEntrega === 'mesa') {
+                mesaLabel = tableNumber || `Mesa ${_mesaSeleccionada}`;
+            } else if (_tipoEntrega === 'para_llevar') {
+                mesaLabel = 'Para Llevar';
+            } else {
+                mesaLabel = 'Domicilio';
+            }
+
+            // Nota completa para cocina
             const notasFinal = [
-                `[${_mesaLabel.toUpperCase()}]`,
+                `[${mesaLabel.toUpperCase()}]`,
                 `[Mesero: ${_mesero.nombre}]`,
+                _tipoEntrega === 'domicilio' && direccion ? `Dirección: ${direccion}` : null,
                 notas || null,
             ].filter(Boolean).join(' | ');
 
-            // Resolver menu_item_ids del carrito
+            // Resolver IDs reales de los menu_items del carrito
             const itemsResueltos = await resolverMenuItemIds();
 
-            const total = calcularTotal();
-            const orderNumber = `MES-${Date.now()}`;
+            const total       = calcularTotal();
+            const orderNumber = `MES-${generarNumeroOrden().split('-').slice(-2).join('-')}`;
 
+            // Insertar orden
             const { data: orden, error: errOrd } = await supabaseClient
                 .from('orders')
                 .insert([{
@@ -1758,7 +1921,7 @@ const WaiterFlow = (function() {
                     table_id:      tId,
                     order_number:  orderNumber,
                     status:        'pending',
-                    customer_name: cliente || null,
+                    customer_name: cliente,
                     notes:         notasFinal,
                     total_amount:  total,
                     daily_menu_id: dailyMenuId || null,
@@ -1768,6 +1931,7 @@ const WaiterFlow = (function() {
 
             if (errOrd) throw errOrd;
 
+            // Insertar order_items
             if (itemsResueltos.length > 0) {
                 await supabaseClient.from('order_items').insert(
                     itemsResueltos.map(item => ({
@@ -1782,83 +1946,91 @@ const WaiterFlow = (function() {
                 );
             }
 
-            // ✅ Éxito — limpiar carrito pero MANTENER mesa y sesión
-            const nItems = cart.length;
+            // Limpiar carrito y mostrar éxito
+            _cerrarConfirmModal();
             cart = [];
             actualizarCarritoBar();
-            _actualizarBaraCliente();
-            renderizarMenu(); // refrescar tarjetas (contadores a 0)
+            renderizarMenu();
 
-            // Limpiar campos
-            const campoCliente = document.getElementById('wf-cliente-nombre');
-            const campoNotas   = document.getElementById('wf-notas-pedido');
-            if (campoCliente) campoCliente.value = '';
-            if (campoNotas)   campoNotas.value   = '';
-
-            // Toast con resumen
-            Toast.ok(`✅ Pedido enviado · ${_mesaLabel} · ${nItems} ítem(s) · ${orderNumber.slice(-8)}`);
+            _mostrarExitoMesero(orderNumber, cliente, mesaLabel, itemsResueltos.length);
 
         } catch (e) {
-            console.error('[La 26] WaiterFlow error:', e);
-            _showErr(errEl, `Error al enviar: ${e?.message || 'Intenta de nuevo.'}`);
-        } finally {
+            console.error('[La 26] WaiterFlow._enviarPedido error:', e);
+            _showErr(err, `Error al enviar: ${e?.message || 'Intenta de nuevo.'}`);
             if (btn) { btn.disabled = false; btn.textContent = '🚀 Enviar a Cocina'; }
         }
     }
 
-    function _showErr(el, msg) {
-        if (!el) return;
-        el.textContent = msg;
-        el.style.display = 'block';
-        setTimeout(() => { el.style.display = 'none'; }, 4000);
+    function _mostrarExitoMesero(orderNumber, cliente, mesa, numPlatos) {
+        // Reutilizar el modal de éxito ya existente en el HTML
+        const elSuccessModal  = document.getElementById('success-modal');
+        const elSuccessOrder  = document.getElementById('success-order-no');
+
+        if (elSuccessModal && elSuccessOrder) {
+            elSuccessOrder.textContent = `${orderNumber} · ${mesa} · ${cliente}`;
+            elSuccessModal.style.display = 'flex';
+
+            // Sobrescribir el botón "Hacer otro pedido" para el modo mesero
+            const btnOtro = elSuccessModal.querySelector('button[onclick="Order.newOrder()"]');
+            if (btnOtro) {
+                btnOtro.textContent = 'Nuevo pedido';
+                btnOtro.onclick = () => {
+                    elSuccessModal.style.display = 'none';
+                    _mesaSeleccionada = null;
+                    tableNumber       = null;
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                };
+            }
+        } else {
+            Toast.ok(`✅ Pedido ${orderNumber} enviado a cocina — ${numPlatos} plato(s)`);
+        }
     }
+
+    // Variable interna de mesa seleccionada en el confirm modal
+    let _mesaSeleccionada = null;
 
     // API pública
     return {
         init:                  mostrarLogin,
         mostrarLogin,
-        mostrarSeleccionMesa,
         _loginSubmit,
-        _seleccionarMesa,
-        _cerrarCambioMesa,
+        _cerrarSesion,
+        _seleccionarTipo,
+        _seleccionarMesaChip,
+        _mesaManual,
+        _abrirConfirmModal,
+        _cerrarConfirmModal,
         _enviarPedido,
-        _actualizarBaraCliente,
-        _hide,
     };
 })();
 
-// ── Auto-activar modo mesero si viene con ?modo=mesero en la URL ──
-// ======================================================
-// MODO MESERO: si ?modo=mesero, WaiterFlow toma control
-// total. cargarMenu() NO se ejecuta (no se carga la carta
-// del cliente). El overlay ocupa 100vw x 100vh.
-// ======================================================
+// ============================================================
+// MODO MESERO — Activación automática si ?modo=mesero en URL
+// ============================================================
+// En modo mesero:
+//   - NO se muestra el modal de mesa/bienvenida del cliente.
+//   - La carta sí se carga (el mesero la ve y selecciona platos).
+//   - El carrito flotante abre el modal de confirmación del mesero.
+//   - Aparece la barra topbar del mesero encima del header.
+// ============================================================
 const _MODO_MESERO = new URLSearchParams(window.location.search).get('modo') === 'mesero';
 
 (function() {
     if (!_MODO_MESERO) return;
-    // Ocultar inmediatamente el loader y la carta publica
-    document.addEventListener('DOMContentLoaded', () => {
-        const loader  = document.getElementById('app-loader');
-        const menu    = document.getElementById('app-menu');
-        const cartBar = document.getElementById('cart-bar');
+
+    function _iniciarModoMesero() {
+        // Evitar que aparezca el modal de bienvenida del cliente
         const mesaModal = document.getElementById('mesa-welcome-modal');
-        if (loader)    { loader.style.display    = 'none'; }
-        if (menu)      { menu.style.display      = 'none'; }
-        if (cartBar)   { cartBar.style.display   = 'none'; }
-        if (mesaModal) { mesaModal.style.display = 'none'; }
+        if (mesaModal) mesaModal.style.display = 'none';
+
+        // Arrancar el login del mesero
         WaiterFlow.init();
-    }, { once: true });
-    if (document.readyState !== 'loading') {
-        const loader  = document.getElementById('app-loader');
-        const menu    = document.getElementById('app-menu');
-        const cartBar = document.getElementById('cart-bar');
-        const mesaModal = document.getElementById('mesa-welcome-modal');
-        if (loader)    { loader.style.display    = 'none'; }
-        if (menu)      { menu.style.display      = 'none'; }
-        if (cartBar)   { cartBar.style.display   = 'none'; }
-        if (mesaModal) { mesaModal.style.display = 'none'; }
-        WaiterFlow.init();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _iniciarModoMesero, { once: true });
+    } else {
+        _iniciarModoMesero();
     }
 })();
 
@@ -1914,10 +2086,17 @@ async function cargarMenu() {
         console.warn('[La 26] Guard system_settings no disponible:', _guardErr?.message);
     }
 
-    // ── 1. Capturar contexto de mesa/modalidad (sessionStorage > URL params) ──
-    //    ACCESO PÚBLICO: nunca pide contraseña, solo valida ubicación del cliente.
-    const sesion = capturarContexto();
-    if (!sesion) return; // modal de bienvenida visible — esperando elección del cliente
+    // ── 1. Capturar contexto de mesa/modalidad ──
+    //    En modo mesero se omite el modal de bienvenida del cliente.
+    let sesion;
+    if (_MODO_MESERO) {
+        // El mesero no necesita mesa_id del cliente aquí.
+        // WaiterFlow maneja mesa/nombre en el modal de confirmación.
+        sesion = { mesa: 'mesero', nombre: '', modalidad: 'mesa' };
+    } else {
+        sesion = capturarContexto();
+        if (!sesion) return; // modal de bienvenida visible — esperando elección del cliente
+    }
 
     const mesaParam   = sesion.mesa;
     const nombreParam = sesion.nombre;
@@ -2041,7 +2220,8 @@ async function cargarMenu() {
 // ============================================================
 // INICIO
 // ============================================================
-// No cargar la carta del cliente si estamos en modo mesero
+// En modo mesero cargarMenu() es llamado por WaiterFlow._loginSubmit() tras el login.
+// En modo cliente se llama automaticamente al cargar la pagina.
 if (!_MODO_MESERO) { cargarMenu(); }
 
 // ─── CONSTANTE: ID de la mesa virtual para pedidos sin mesa física ────────────
