@@ -1625,7 +1625,7 @@ const WaiterFlow = (function() {
                     </p>
                     <button class="wf-btn" onclick="WaiterFlow.mostrarSeleccionMesa()"
                         style="margin-bottom:10px;">📋 Nuevo Pedido</button>
-                    <button class="wf-back" onclick="WaiterFlow._hide()">Salir al Menú</button>
+                    <button class="wf-back" onclick="WaiterFlow.mostrarLogin()">Nuevo turno / Cambiar mesero</button>
                 </div>`);
 
         } catch (e) {
@@ -1658,13 +1658,37 @@ const WaiterFlow = (function() {
 })();
 
 // ── Auto-activar modo mesero si viene con ?modo=mesero en la URL ──
+// ======================================================
+// MODO MESERO: si ?modo=mesero, WaiterFlow toma control
+// total. cargarMenu() NO se ejecuta (no se carga la carta
+// del cliente). El overlay ocupa 100vw x 100vh.
+// ======================================================
+const _MODO_MESERO = new URLSearchParams(window.location.search).get('modo') === 'mesero';
+
 (function() {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('modo') === 'mesero') {
-        // Esperar a que el DOM esté listo
-        document.addEventListener('DOMContentLoaded', () => WaiterFlow.init(), { once: true });
-        // Si ya está cargado
-        if (document.readyState !== 'loading') WaiterFlow.init();
+    if (!_MODO_MESERO) return;
+    // Ocultar inmediatamente el loader y la carta publica
+    document.addEventListener('DOMContentLoaded', () => {
+        const loader  = document.getElementById('app-loader');
+        const menu    = document.getElementById('app-menu');
+        const cartBar = document.getElementById('cart-bar');
+        const mesaModal = document.getElementById('mesa-welcome-modal');
+        if (loader)    { loader.style.display    = 'none'; }
+        if (menu)      { menu.style.display      = 'none'; }
+        if (cartBar)   { cartBar.style.display   = 'none'; }
+        if (mesaModal) { mesaModal.style.display = 'none'; }
+        WaiterFlow.init();
+    }, { once: true });
+    if (document.readyState !== 'loading') {
+        const loader  = document.getElementById('app-loader');
+        const menu    = document.getElementById('app-menu');
+        const cartBar = document.getElementById('cart-bar');
+        const mesaModal = document.getElementById('mesa-welcome-modal');
+        if (loader)    { loader.style.display    = 'none'; }
+        if (menu)      { menu.style.display      = 'none'; }
+        if (cartBar)   { cartBar.style.display   = 'none'; }
+        if (mesaModal) { mesaModal.style.display = 'none'; }
+        WaiterFlow.init();
     }
 })();
 
@@ -1847,7 +1871,8 @@ async function cargarMenu() {
 // ============================================================
 // INICIO
 // ============================================================
-cargarMenu();
+// No cargar la carta del cliente si estamos en modo mesero
+if (!_MODO_MESERO) { cargarMenu(); }
 
 // ─── CONSTANTE: ID de la mesa virtual para pedidos sin mesa física ────────────
 // Reemplaza este valor con el UUID real que generó Supabase en el paso 1
