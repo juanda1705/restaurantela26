@@ -1538,6 +1538,10 @@ const WaiterFlow = (function() {
         // Ajustar el header de la carta para que no quede tapado
         _ajustarHeaderParaMesero();
 
+        // Mostrar de nuevo el cart-bar (fue ocultado antes del login)
+        const cartBar = document.getElementById('cart-bar');
+        if (cartBar) cartBar.style.display = '';
+
         // Cambiar texto del botón del carrito para mesero
         _adaptarCartBar();
 
@@ -2019,8 +2023,14 @@ const _MODO_MESERO = new URLSearchParams(window.location.search).get('modo') ===
     if (!_MODO_MESERO) return;
 
     function _iniciarModoMesero() {
-        // Evitar que aparezca el modal de bienvenida del cliente
+        // Ocultar el loader, el menú y la barra del carrito hasta que el mesero haga login
+        const loader    = document.getElementById('app-loader');
+        const appMenu   = document.getElementById('app-menu');
+        const cartBar   = document.getElementById('cart-bar');
         const mesaModal = document.getElementById('mesa-welcome-modal');
+        if (loader)    loader.style.display    = 'none';
+        if (appMenu)   appMenu.style.display   = 'none';
+        if (cartBar)   cartBar.style.display   = 'none';
         if (mesaModal) mesaModal.style.display = 'none';
 
         // Arrancar el login del mesero
