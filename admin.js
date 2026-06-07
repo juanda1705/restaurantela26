@@ -549,7 +549,7 @@ async function descontarInsumosPorOrden(orderId) {
     // Cargar todas las recetas con sus ingredientes
     const { data: recetas } = await supabaseClient
         .from('production_recipes')
-        .select(`name, recipe_ingredients ( supply_id, supply_name, quantity_per_dish, unit )`);
+        .select(`name, recipe_ingredients ( supply_id, supply_name, quantity_per_dish, quantity_required, unit )`);
 
     if (!recetas || recetas.length === 0) return;
 
@@ -584,7 +584,8 @@ async function descontarInsumosPorOrden(orderId) {
         const qty = item.quantity || 1;
         receta.recipe_ingredients.forEach(ing => {
             if (!ing.supply_id) return;
-            descuentos[ing.supply_id] = (descuentos[ing.supply_id] || 0) + ing.quantity_per_dish * qty;
+            const _qpd = ing.quantity_per_dish ?? ing.quantity_required ?? 0;
+            descuentos[ing.supply_id] = (descuentos[ing.supply_id] || 0) + _qpd * qty;
         });
     });
 
@@ -1685,7 +1686,7 @@ async function cargarRecetas() {
         const { data: recetas, error } = await supabaseClient
             .from('production_recipes')
             .select(`id, name, description,
-                     recipe_ingredients ( id, supply_id, supply_name, quantity_per_dish, unit )`)
+                     recipe_ingredients ( id, supply_id, supply_name, quantity_per_dish, quantity_required, unit )`)
             .order('name', { ascending: true });
 
         if (error) throw error;
@@ -1722,7 +1723,7 @@ function _renderTablaRecetas() {
     tbody.innerHTML = _recetasCache.map(r => {
         const ings = (r.recipe_ingredients || []).map(i =>
             `<span style="background:var(--olive-lt);border:1px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:2px 9px;font-size:10.5px;font-weight:600;white-space:nowrap;">
-                ${i.quantity_per_dish} ${i.unit} ${i.supply_name}
+                ${i.quantity_per_dish ?? i.quantity_required ?? '?'} ${i.unit} ${i.supply_name}
             </span>`
         ).join('');
 
@@ -1753,7 +1754,7 @@ async function guardarReceta() {
         const qty        = parseFloat(fila.querySelector('.ing-qty')?.value);
         const unit       = fila.querySelector('.ing-unit')?.value?.trim();
         if (supplyName && !isNaN(qty) && qty > 0 && unit) {
-            ingredientes.push({ supply_id: supplyId, supply_name: supplyName, quantity_per_dish: qty, unit });
+            ingredientes.push({ supply_id: supplyId, supply_name: supplyName, quantity_per_dish: qty, quantity_required: qty, unit });
         }
     });
 
@@ -1884,8 +1885,9 @@ async function calcularProduccion() {
     let platosEstimados = Infinity;
     const detalleIng = receta.recipe_ingredients.map(ing => {
         const stockActual  = stockMap[ing.supply_id]?.current_stock ?? null;
-        const coberturaEst = (stockActual !== null && ing.quantity_per_dish > 0)
-            ? Math.floor(stockActual / ing.quantity_per_dish)
+        const _qpd2 = ing.quantity_per_dish ?? ing.quantity_required ?? 0;
+        const coberturaEst = (stockActual !== null && _qpd2 > 0)
+            ? Math.floor(stockActual / _qpd2)
             : null;
 
         if (coberturaEst !== null && coberturaEst < platosEstimados) {
@@ -1909,8 +1911,9 @@ function _renderResultadoCalculo() {
 
     const filasIng = detalleIng.map(i => {
         const cuello       = isCuello(i);
-        const consumoTotal = i.stockActual !== null ? (i.quantity_per_dish * platosEstimados).toFixed(3) : '—';
-        const restante     = i.stockActual !== null ? Math.max(0, i.stockActual - i.quantity_per_dish * platosEstimados).toFixed(3) : '—';
+        const _qpd3 = i.quantity_per_dish ?? i.quantity_required ?? 0;
+        const consumoTotal = i.stockActual !== null ? (_qpd3 * platosEstimados).toFixed(3) : '—';
+        const restante     = i.stockActual !== null ? Math.max(0, i.stockActual - _qpd3 * platosEstimados).toFixed(3) : '—';
         const stockLabel   = i.stockActual !== null
             ? `<span class="mono" style="font-size:12.5px;font-weight:600;">${i.stockActual} ${i.unit}</span>`
             : `<span style="color:var(--amber);font-size:11.5px;font-weight:600;">⚠️ Sin link inventario</span>`;
