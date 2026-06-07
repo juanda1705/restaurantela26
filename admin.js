@@ -129,11 +129,24 @@ function getRangoByCodigo(codigo) {
 // ============================================================
 async function cargarDashboardReal() {
     try {
+        // ── Rango del día actual en zona horaria Colombia (UTC-5) ──────────
+        const _ahora     = new Date();
+        const _offsetMs  = 5 * 60 * 60 * 1000; // UTC-5 Bogotá
+        const _hoyLocal  = new Date(_ahora.getTime() - _offsetMs);
+        const _yyyy      = _hoyLocal.getUTCFullYear();
+        const _mm        = String(_hoyLocal.getUTCMonth() + 1).padStart(2, '0');
+        const _dd        = String(_hoyLocal.getUTCDate()).padStart(2, '0');
+        const _inicioDia = `${_yyyy}-${_mm}-${_dd}T00:00:00-05:00`; // medianoche Bogotá
+        const _finDia    = `${_yyyy}-${_mm}-${_dd}T23:59:59-05:00`; // fin del día Bogotá
+
         // payment_method ahora existe en BD (columna VARCHAR(20)) — se incluye en el SELECT
+        // FILTRO DE FECHA: solo órdenes del día actual (reset a $0 cada mañana)
         const { data: orders, error } = await supabaseClient
             .from('orders')
             .select(`id, order_number, customer_name, total_amount, status, notes, payment_method,
-                     table_id, order_items ( quantity, notes, unit_price )`);
+                     table_id, order_items ( quantity, notes, unit_price )`)
+            .gte('created_at', _inicioDia)
+            .lte('created_at', _finDia);
 
         if (error) throw error;
 
@@ -277,10 +290,12 @@ async function cargarDashboardReal() {
             }
         }
 
-        // Cargar egresos para KPI
+        // Cargar egresos para KPI — solo del día actual
         const { data: gastos } = await supabaseClient
             .from('operating_expenses')
-            .select('amount');
+            .select('amount')
+            .gte('created_at', _inicioDia)
+            .lte('created_at', _finDia);
         globalEgresos = (gastos || []).reduce(
             (acc, g) => acc + (parseFloat(g.amount) || 0), 0
         );
@@ -1087,9 +1102,21 @@ async function cargarGastosReal() {
         </td></tr>`;
 
     try {
+        // Filtro por día actual (misma lógica que el dashboard)
+        const _ahora2    = new Date();
+        const _offsetMs2 = 5 * 60 * 60 * 1000;
+        const _hoyL2     = new Date(_ahora2.getTime() - _offsetMs2);
+        const _yyyy2     = _hoyL2.getUTCFullYear();
+        const _mm2       = String(_hoyL2.getUTCMonth() + 1).padStart(2, '0');
+        const _dd2       = String(_hoyL2.getUTCDate()).padStart(2, '0');
+        const _ini2      = `${_yyyy2}-${_mm2}-${_dd2}T00:00:00-05:00`;
+        const _fin2      = `${_yyyy2}-${_mm2}-${_dd2}T23:59:59-05:00`;
+
         const { data: egresos, error } = await supabaseClient
             .from('operating_expenses')
             .select('*')
+            .gte('created_at', _ini2)
+            .lte('created_at', _fin2)
             .order('created_at', { ascending: false });
 
         if (error) throw error;
