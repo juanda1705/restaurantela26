@@ -1,9 +1,9 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE MESERO
-// menu.js · Versión 5.0 — Flujo blindado
+// menu.js · Versión 6.0 — Flujo directo (sin auth)
 // Bucaramanga, Santander — Colombia
 //
-// FLUJO: Login → Selector de Origen → Menú → Carrito → Envío
+// FLUJO: Carta → Carrito → Modal de Pedido → Envío
 // ============================================================
 
 'use strict';
@@ -21,52 +21,26 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // CATEGORÍAS DE MENÚ
 // ============================================================
 const CATEGORIAS = {
-    protein:       { label: 'Proteína con Salsa', icono: '🥩', orden: 1 },
-    side:          { label: 'Principio',          icono: '🍲', orden: 2 },
-    drink:         { label: 'Bebida',             icono: '🥤', orden: 3 },
-    a_la_carte:    { label: 'A la Carta',         icono: '✨', orden: 4 },
-    executive_lunch:{ label: 'Menú Ejecutivo',    icono: '🍱', orden: 5 },
-    dessert:       { label: 'Postre',             icono: '🍮', orden: 6 },
+    protein:        { label: 'Proteína con Salsa',  icono: '🥩', orden: 1 },
+    side:           { label: 'Principio',           icono: '🍲', orden: 2 },
+    drink:          { label: 'Bebida',              icono: '🥤', orden: 3 },
+    a_la_carte:     { label: 'A la Carta',          icono: '✨', orden: 4 },
+    executive_lunch:{ label: 'Menú Ejecutivo',      icono: '🍱', orden: 5 },
+    dessert:        { label: 'Postre',              icono: '🍮', orden: 6 },
 };
 
 const ITEM_TYPES_VALIDOS = ['protein','side','drink','a_la_carte','executive_lunch','dessert'];
 
 // ============================================================
-// ESTADO GLOBAL — Todo en un solo objeto
+// ESTADO GLOBAL
 // ============================================================
 const State = {
-    // Sesión del mesero
-    meseroEmail: null,
-    meseroNombre: null,
-
-    // Contexto del pedido actual
-    modalidad:   null,   // 'mesa' | 'para_llevar' | 'domicilio'
-    mesa:        null,   // número/label de mesa
-    clienteNombre: '',
-    direccion:   '',
-
-    // Datos del restaurante
     restaurantId: null,
     dailyMenuId:  null,
-    tableId:      null,  // UUID de la mesa en BD
-
-    // Menú y carrito
-    slots:       [],     // platos disponibles
-    cart:        [],     // [{ slotId, cantidad }]
-    filtro:      'todos',
+    slots:        [],
+    cart:         [],
+    filtro:       'todos',
     isSubmitting: false,
-
-    // Limpia el estado de pedido (sin cerrar sesión del mesero)
-    resetPedido() {
-        this.modalidad    = null;
-        this.mesa         = null;
-        this.clienteNombre = '';
-        this.direccion    = '';
-        this.tableId      = null;
-        this.cart         = [];
-        this.filtro       = 'todos';
-        this.isSubmitting = false;
-    },
 };
 
 // ============================================================
@@ -92,9 +66,9 @@ const Toast = (function() {
     function show(msg, tipo = 'info', duracion = 3800) {
         _ensureContainer();
         const c = {
-            ok:    { bg: '#f5f7f0', border: 'rgba(74,103,65,0.35)', text: '#2e4028', dot: '#4a6741' },
-            error: { bg: '#fdf5f3', border: 'rgba(192,80,60,0.30)', text: '#6b2a1e', dot: '#c0503c' },
-            info:  { bg: '#f5f7f0', border: 'rgba(74,103,65,0.25)', text: '#3a4a38', dot: '#4a6741' },
+            ok:    { bg: '#f5f7f0', border: 'rgba(74,103,65,0.35)',  text: '#2e4028', dot: '#4a6741' },
+            error: { bg: '#fdf5f3', border: 'rgba(192,80,60,0.30)',  text: '#6b2a1e', dot: '#c0503c' },
+            info:  { bg: '#f5f7f0', border: 'rgba(74,103,65,0.25)',  text: '#3a4a38', dot: '#4a6741' },
         }[tipo] || {};
 
         const t = document.createElement('div');
@@ -177,255 +151,7 @@ function slotsFiltrados() {
 }
 
 // ============================================================
-// PASO 1: AUTENTICACIÓN
-// ============================================================
-const Auth = {
-
-    async login() {
-        const emailEl = document.getElementById('login-email');
-        const passEl  = document.getElementById('login-pass');
-        const errorEl = document.getElementById('login-error');
-        const btnEl   = document.getElementById('btn-login');
-
-        const email = emailEl.value.trim();
-        const pass  = passEl.value;
-
-        // Limpiar errores previos
-        errorEl.style.display = 'none';
-        emailEl.classList.remove('error');
-        passEl.classList.remove('error');
-
-        if (!email) {
-            emailEl.classList.add('error');
-            emailEl.focus();
-            return;
-        }
-        if (!pass) {
-            passEl.classList.add('error');
-            passEl.focus();
-            return;
-        }
-
-        btnEl.disabled    = true;
-        btnEl.textContent = 'Verificando…';
-
-        try {
-            const { data, error } = await db.auth.signInWithPassword({ email, pass });
-
-            if (error) {
-                this._mostrarError(errorEl, 'Correo o contraseña incorrectos.');
-                emailEl.classList.add('error');
-                passEl.classList.add('error');
-                passEl.value = '';
-                passEl.focus();
-                return;
-            }
-
-            // Login exitoso
-            State.meseroEmail  = email;
-            State.meseroNombre = data.user?.user_metadata?.name
-                              || data.user?.email?.split('@')[0]
-                              || 'Mesero';
-
-            // Ocultar login y mostrar selector de origen
-            document.getElementById('screen-login').style.display = 'none';
-            Origen.mostrar();
-
-            // Resolver restaurant_id en segundo plano
-            _resolverRestaurant();
-
-        } catch (err) {
-            this._mostrarError(errorEl, 'Error de conexión. Verifica tu red.');
-        } finally {
-            btnEl.disabled    = false;
-            btnEl.textContent = 'Entrar';
-        }
-    },
-
-    _mostrarError(el, msg) {
-        el.textContent    = msg;
-        el.style.display  = 'block';
-        // Shake visual
-        el.style.animation = 'none';
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => { el.style.animation = 'shake 0.35s ease'; });
-        });
-    },
-
-    togglePass() {
-        const inp = document.getElementById('login-pass');
-        const btn = inp.nextElementSibling;
-        if (inp.type === 'password') {
-            inp.type    = 'text';
-            btn.textContent = '🙈';
-        } else {
-            inp.type    = 'password';
-            btn.textContent = '👁';
-        }
-    },
-
-    async logout() {
-        await db.auth.signOut().catch(() => {});
-        State.resetPedido();
-        State.meseroEmail  = null;
-        State.meseroNombre = null;
-
-        // Volver al login
-        document.getElementById('app-main').classList.remove('visible');
-        document.getElementById('screen-origen').classList.remove('visible');
-        document.getElementById('screen-login').style.display = 'flex';
-        document.getElementById('login-pass').value = '';
-        document.getElementById('login-error').style.display = 'none';
-    },
-};
-
-// ============================================================
-// PASO 2: SELECTOR DE ORIGEN
-// ============================================================
-const Origen = {
-
-    _tabActual: 'mesa',
-
-    mostrar() {
-        const el = document.getElementById('screen-origen');
-        el.classList.add('visible');
-        // Limpiar campos
-        ['inp-mesa','inp-nombre-mesa','inp-nombre-llevar','inp-nombre-dom','inp-direccion']
-            .forEach(id => {
-                const el = document.getElementById(id);
-                if (el) { el.value = ''; el.classList.remove('error'); }
-            });
-        this.setTab('mesa');
-    },
-
-    ocultar() {
-        document.getElementById('screen-origen').classList.remove('visible');
-    },
-
-    setTab(tab) {
-        this._tabActual = tab;
-
-        ['mesa','llevar','domicilio'].forEach(t => {
-            document.getElementById(`tab-${t}`)
-                .classList.toggle('active', t === tab);
-            const panel = document.getElementById(`panel-${t}`);
-            panel.classList.toggle('visible', t === tab);
-        });
-
-        // Foco en el primer campo del panel activo
-        setTimeout(() => {
-            const primer = document.querySelector(`#panel-${tab} .input-field`);
-            if (primer) primer.focus();
-        }, 80);
-    },
-
-    confirmar() {
-        const tab = this._tabActual;
-
-        if (tab === 'mesa') {
-            const mesaEl  = document.getElementById('inp-mesa');
-            const nombreEl = document.getElementById('inp-nombre-mesa');
-            const mesa    = mesaEl.value.trim();
-
-            if (!mesa) {
-                mesaEl.classList.add('error');
-                mesaEl.focus();
-                return;
-            }
-            mesaEl.classList.remove('error');
-
-            State.modalidad     = 'mesa';
-            State.mesa          = mesa;
-            State.clienteNombre = nombreEl.value.trim();
-
-        } else if (tab === 'llevar') {
-            const nombreEl = document.getElementById('inp-nombre-llevar');
-            const nombre   = nombreEl.value.trim();
-
-            if (!nombre) {
-                nombreEl.classList.add('error');
-                nombreEl.focus();
-                return;
-            }
-            nombreEl.classList.remove('error');
-
-            State.modalidad     = 'para_llevar';
-            State.mesa          = 'Para Llevar';
-            State.clienteNombre = nombre;
-
-        } else if (tab === 'domicilio') {
-            const nombreEl  = document.getElementById('inp-nombre-dom');
-            const dirEl     = document.getElementById('inp-direccion');
-            const nombre    = nombreEl.value.trim();
-            const direccion = dirEl.value.trim();
-
-            if (!nombre) {
-                nombreEl.classList.add('error');
-                nombreEl.focus();
-                return;
-            }
-            nombreEl.classList.remove('error');
-
-            if (!direccion) {
-                dirEl.classList.add('error');
-                dirEl.focus();
-                return;
-            }
-            dirEl.classList.remove('error');
-
-            State.modalidad     = 'domicilio';
-            State.mesa          = 'Domicilio';
-            State.clienteNombre = nombre;
-            State.direccion     = direccion;
-        }
-
-        this.ocultar();
-        this._mostrarApp();
-    },
-
-    _mostrarApp() {
-        const main = document.getElementById('app-main');
-        main.classList.add('visible');
-
-        // Actualizar badge de mesa en el header
-        const badge = document.getElementById('badge-mesa');
-        if (badge) {
-            badge.textContent   = State.modalidad === 'mesa'
-                ? `Mesa ${State.mesa}`
-                : State.modalidad === 'para_llevar'
-                ? '🛵 Para Llevar'
-                : '📦 Domicilio';
-            badge.style.display = 'inline-flex';
-        }
-
-        // Actualizar subtítulo del modal de pedido
-        const sub = document.getElementById('modal-subtitulo');
-        if (sub) {
-            sub.textContent = State.modalidad === 'mesa'
-                ? `Mesa ${State.mesa}${State.clienteNombre ? ' · ' + State.clienteNombre : ''}`
-                : State.modalidad === 'para_llevar'
-                ? `Para Llevar · ${State.clienteNombre}`
-                : `Domicilio · ${State.clienteNombre}`;
-        }
-
-        // Pre-llenar el campo de nombre en el modal
-        const formNombre = document.getElementById('form-nombre');
-        if (formNombre) {
-            formNombre.value = State.clienteNombre;
-        }
-
-        // Limpiar carrito
-        State.cart   = [];
-        State.filtro = 'todos';
-        _actualizarCartBar();
-
-        // Cargar el menú
-        Menu.cargar();
-    },
-};
-
-// ============================================================
-// RESOLVER RESTAURANT_ID (una sola vez)
+// RESOLVER RESTAURANT_ID
 // ============================================================
 let _restaurantResolving = false;
 
@@ -433,17 +159,14 @@ async function _resolverRestaurant() {
     if (State.restaurantId || _restaurantResolving) return;
     _restaurantResolving = true;
     try {
-        // Por slug
         const { data: r1 } = await db.from('restaurants')
             .select('id').eq('slug', RESTAURANT_SLUG).maybeSingle();
         if (r1?.id) { State.restaurantId = r1.id; return; }
 
-        // Cualquiera
         const { data: r2 } = await db.from('restaurants')
             .select('id').limit(1).maybeSingle();
         if (r2?.id) { State.restaurantId = r2.id; return; }
 
-        // Crear
         const { data: r3 } = await db.from('restaurants')
             .insert([{ name: 'Restaurante la 26', slug: RESTAURANT_SLUG }])
             .select('id').single();
@@ -457,27 +180,22 @@ async function _resolverRestaurant() {
 }
 
 // ============================================================
-// RESOLVER TABLE_ID (mesa física o virtual)
+// RESOLVER TABLE_ID
 // ============================================================
-async function _resolverTableId() {
-    if (!State.restaurantId) {
-        await _resolverRestaurant();
-    }
+async function _resolverTableId(modalidad, mesa) {
+    if (!State.restaurantId) await _resolverRestaurant();
     if (!State.restaurantId) return null;
 
-    if (State.modalidad === 'mesa') {
-        const mesaVal = State.mesa;
-        // Buscar por number o label
+    if (modalidad === 'mesa') {
+        const mesaVal = mesa;
         const { data } = await db.from('tables')
             .select('id')
             .eq('restaurant_id', State.restaurantId)
             .or(`number.eq.${isNaN(mesaVal) ? 0 : mesaVal},label.ilike.${mesaVal}`)
             .maybeSingle();
         if (data?.id) return data.id;
-        // No encontrada — usar virtual como fallback
     }
 
-    // Para llevar / domicilio — usar mesa virtual
     const { data: mv } = await db.from('tables')
         .select('id')
         .eq('restaurant_id', State.restaurantId)
@@ -486,7 +204,6 @@ async function _resolverTableId() {
 
     if (mv?.id) return mv.id;
 
-    // Crear mesa virtual
     const { data: mn } = await db.from('tables')
         .upsert([{
             restaurant_id: State.restaurantId,
@@ -502,21 +219,19 @@ async function _resolverTableId() {
 }
 
 // ============================================================
-// PASO 3: MENÚ
+// MENÚ — Carga y renderizado
 // ============================================================
 const Menu = {
 
     async cargar() {
         _mostrarEstado('loader');
 
-        // Asegurar restaurant_id
         if (!State.restaurantId) await _resolverRestaurant();
         if (!State.restaurantId) {
             _mostrarEstado('error', 'No se pudo identificar el restaurante. Contacta al administrador.');
             return;
         }
 
-        // Intentar cargar desde menú del día
         try {
             const { data: dm } = await db.from('daily_menus')
                 .select('id')
@@ -553,16 +268,16 @@ const Menu = {
         }
 
         State.slots = data.map(s => ({
-            id:         s.id,
-            menuItemId: s.menu_item_id,
-            nombre:     s.item_name,
-            precio:     Number(s.price) || 0,
+            id:          s.id,
+            menuItemId:  s.menu_item_id,
+            nombre:      s.item_name,
+            precio:      Number(s.price) || 0,
             descripcion: '',
-            itemType:   CATEGORIAS[s.item_type] ? s.item_type : 'a_la_carte',
-            porciones:  s.is_truly_available
-                            ? Math.max(0, (s.portions_available || 0) - (s.portions_sold || 0))
-                            : 0,
-            disponible: Boolean(s.is_truly_available),
+            itemType:    CATEGORIAS[s.item_type] ? s.item_type : 'a_la_carte',
+            porciones:   s.is_truly_available
+                             ? Math.max(0, (s.portions_available || 0) - (s.portions_sold || 0))
+                             : 0,
+            disponible:  Boolean(s.is_truly_available),
         }));
 
         _renderizarMenu();
@@ -602,13 +317,13 @@ const Menu = {
 
 // ── Control de pantalla ──────────────────────────────────────
 function _mostrarEstado(estado, msg = '') {
-    const loader  = document.getElementById('app-loader');
-    const error   = document.getElementById('app-error');
+    const loader   = document.getElementById('app-loader');
+    const error    = document.getElementById('app-error');
     const sections = document.getElementById('menu-sections');
 
-    if (loader)  loader.style.display   = estado === 'loader' ? 'flex'  : 'none';
-    if (error)   error.style.display    = estado === 'error'  ? 'flex'  : 'none';
-    if (sections) sections.style.display = estado === 'menu'   ? 'block' : 'none';
+    if (loader)   loader.style.display    = estado === 'loader' ? 'flex'  : 'none';
+    if (error)    error.style.display     = estado === 'error'  ? 'flex'  : 'none';
+    if (sections) sections.style.display  = estado === 'menu'   ? 'block' : 'none';
 
     if (estado === 'error' && msg) {
         const el = document.getElementById('error-msg');
@@ -680,7 +395,6 @@ function _renderizarMenu() {
         return;
     }
 
-    // Agrupar por tipo
     const grupos = {};
     lista.forEach(slot => {
         const tipo = CATEGORIAS[slot.itemType] ? slot.itemType : 'a_la_carte';
@@ -719,8 +433,8 @@ function _crearTarjeta(slot) {
     const qty        = enCarrito ? enCarrito.cantidad : 0;
 
     let badgeHTML = '';
-    if (!disponible)   badgeHTML = `<span class="badge-agotado">Agotado</span>`;
-    else if (pocas)    badgeHTML = `<span class="badge-pocas">¡Solo quedan ${slot.porciones}!</span>`;
+    if (!disponible)  badgeHTML = `<span class="badge-agotado">Agotado</span>`;
+    else if (pocas)   badgeHTML = `<span class="badge-pocas">¡Solo quedan ${slot.porciones}!</span>`;
 
     const precioHTML = slot.precio > 0
         ? `<span class="plate-price">${formatCOP(slot.precio)}</span>`
@@ -810,9 +524,8 @@ const Cart = {
         _refrescarTarjeta(slotId);
         _actualizarCartBar();
 
-        // Actualizar resumen si el modal está abierto
         if (document.getElementById('order-modal').classList.contains('open')) {
-            this._renderSummary();
+            Cart._renderSummary();
         }
     },
 
@@ -862,9 +575,9 @@ const Cart = {
 };
 
 function _actualizarCartBar() {
-    const qty    = calcularCantidadTotal();
-    const total  = calcularTotal();
-    const bar    = document.getElementById('cart-bar');
+    const qty     = calcularCantidadTotal();
+    const total   = calcularTotal();
+    const bar     = document.getElementById('cart-bar');
     const countEl = document.getElementById('cart-count');
     const totalEl = document.getElementById('cart-total');
 
@@ -872,16 +585,13 @@ function _actualizarCartBar() {
     if (totalEl) totalEl.textContent = formatCOP(total);
 
     if (bar) {
-        if (qty > 0) {
-            bar.classList.add('visible');
-        } else {
-            bar.classList.remove('visible');
-        }
+        if (qty > 0) bar.classList.add('visible');
+        else         bar.classList.remove('visible');
     }
 }
 
 // ============================================================
-// PASO 5: ENVÍO DEL PEDIDO
+// ENVÍO DEL PEDIDO
 // ============================================================
 const Order = {
 
@@ -892,50 +602,56 @@ const Order = {
             return;
         }
 
-        const btnEl    = document.getElementById('btn-enviar');
-        const nombreEl = document.getElementById('form-nombre');
-        const notasEl  = document.getElementById('form-notas');
+        const btnEl      = document.getElementById('btn-enviar');
+        const mesaEl     = document.getElementById('form-mesa');
+        const nombreEl   = document.getElementById('form-nombre');
+        const notasEl    = document.getElementById('form-notas');
+        const modalidadEl = document.querySelector('input[name="form-modalidad"]:checked');
 
-        // Leer valores del formulario
-        const nombreFinal = (nombreEl?.value || State.clienteNombre || '').trim();
-        const notas       = (notasEl?.value || '').trim();
+        const mesa       = (mesaEl?.value     || '').trim();
+        const nombre     = (nombreEl?.value   || '').trim();
+        const notas      = (notasEl?.value    || '').trim();
+        const modalidad  = modalidadEl?.value || 'mesa';
+
+        // Validar mesa si aplica
+        if (modalidad === 'mesa' && !mesa) {
+            mesaEl?.classList.add('error');
+            mesaEl?.focus();
+            Toast.error('Indica el número de mesa.');
+            return;
+        }
+        mesaEl?.classList.remove('error');
 
         State.isSubmitting = true;
         if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Enviando…'; }
 
         try {
-            // 1. Asegurar restaurant_id y table_id
             if (!State.restaurantId) await _resolverRestaurant();
             if (!State.restaurantId) throw new Error('No se pudo identificar el restaurante.');
 
-            State.tableId = await _resolverTableId();
-            if (!State.tableId) throw new Error('No se pudo identificar la mesa.');
+            const tableId = await _resolverTableId(modalidad, mesa);
+            if (!tableId) throw new Error('No se pudo identificar la mesa.');
 
-            // 2. Resolver IDs reales de menu_items
             const itemsResueltos = await this._resolverMenuItemIds();
 
-            // 3. Construir nota de cocina
+            // Construir nota de cocina
             let notaCocina = '';
-            if (State.modalidad === 'mesa') {
-                notaCocina = `[MESA ${State.mesa}]`;
-            } else if (State.modalidad === 'para_llevar') {
-                notaCocina = `[PARA LLEVAR] Cliente: ${nombreFinal}`;
-            } else if (State.modalidad === 'domicilio') {
-                notaCocina = `[DOMICILIO] Cliente: ${nombreFinal} — Dir: ${State.direccion}`;
-            }
+            if (modalidad === 'mesa')       notaCocina = `[MESA ${mesa}]`;
+            else if (modalidad === 'llevar') notaCocina = `[PARA LLEVAR] Cliente: ${nombre}`;
+            else if (modalidad === 'domicilio') notaCocina = `[DOMICILIO] Cliente: ${nombre}`;
             if (notas) notaCocina += ` | ${notas}`;
 
             const numeroOrden = generarNumeroOrden();
             const total       = calcularTotal();
 
-            // 4. Insertar orden
+            // Insertar orden
             const { data: orden, error: errOrd } = await db.from('orders')
                 .insert([{
                     restaurant_id: State.restaurantId,
-                    table_id:      State.tableId,
+                    table_id:      tableId,
                     order_number:  numeroOrden,
                     status:        'pending',
-                    customer_name: nombreFinal || null,
+                    customer_name: nombre || null,
                     total_amount:  total,
                     daily_menu_id: State.dailyMenuId || null,
                     notes:         notaCocina || null,
@@ -945,10 +661,10 @@ const Order = {
 
             if (errOrd) throw errOrd;
 
-            // 5. Insertar ítems
+            // Insertar ítems
             if (itemsResueltos.length > 0) {
-                const { error: errItems } = await db.from('order_items')
-                    .insert(itemsResueltos.map(item => ({
+                await db.from('order_items').insert(
+                    itemsResueltos.map(item => ({
                         order_id:           orden.id,
                         menu_item_id:       item.menuItemId,
                         daily_menu_slot_id: item.slotId,
@@ -956,20 +672,15 @@ const Order = {
                         unit_price:         item.precio,
                         item_status:        'pending',
                         notes:              `[nombre]${item.nombre}`,
-                    })));
-
-                if (errItems) {
-                    console.error('[La 26] order_items error:', errItems);
-                    // No bloqueamos — la orden principal ya existe
-                }
+                    }))
+                );
             }
 
             this._mostrarExito(numeroOrden);
 
         } catch (err) {
             console.error('[La 26] Error enviando pedido:', err);
-            const det = err?.message || err?.details || '';
-            Toast.error('No se pudo enviar el pedido.' + (det ? `\n${det}` : ''), 5000);
+            Toast.error('No se pudo enviar el pedido. Verifica tu conexión.', 5000);
         } finally {
             State.isSubmitting = false;
             if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Enviar a cocina'; }
@@ -977,7 +688,6 @@ const Order = {
     },
 
     async _resolverMenuItemIds() {
-        // Cargar todos los menu_items del restaurante para hacer match por nombre
         const { data: items } = await db.from('menu_items')
             .select('id,name,price,item_type')
             .eq('is_active', true)
@@ -993,24 +703,21 @@ const Order = {
 
             let menuItemId = slot.menuItemId;
 
-            // Si no tenemos menuItemId, buscar por nombre
             if (!menuItemId && lista.length > 0) {
                 const nombre = (slot.nombre || '').toLowerCase().trim();
                 const exacto = lista.find(m => m.name.toLowerCase().trim() === nombre);
-                if (exacto) {
-                    menuItemId = exacto.id;
-                } else {
-                    const parcial = lista.find(m => m.name.toLowerCase().includes(nombre.slice(0, 8)));
-                    menuItemId = parcial?.id || lista[0]?.id || null;
-                }
+                menuItemId   = exacto?.id
+                    ?? lista.find(m => m.name.toLowerCase().includes(nombre.slice(0, 8)))?.id
+                    ?? lista[0]?.id
+                    ?? null;
             }
 
             resultado.push({
-                slotId:     item.slotId,
+                slotId:    item.slotId,
                 menuItemId,
-                cantidad:   item.cantidad,
-                precio:     slot.precio,
-                nombre:     slot.nombre,
+                cantidad:  item.cantidad,
+                precio:    slot.precio,
+                nombre:    slot.nombre,
             });
         }
 
@@ -1025,20 +732,16 @@ const Order = {
 
         document.getElementById('success-modal').classList.add('open');
 
-        // Limpiar carrito
         State.cart = [];
         _actualizarCartBar();
     },
 
-    // Nuevo pedido en la misma mesa/modalidad
     nuevoPedido() {
         document.getElementById('success-modal').classList.remove('open');
 
-        // Limpiar campo de notas (el nombre lo conservamos para la misma mesa)
         const notasEl = document.getElementById('form-notas');
         if (notasEl) notasEl.value = '';
 
-        // Scroll al top
         window.scrollTo({ top: 0, behavior: 'smooth' });
         _renderizarMenu();
     },
@@ -1049,7 +752,7 @@ const Order = {
 };
 
 // ============================================================
-// TIEMPO REAL — escucha cambios de disponibilidad
+// TIEMPO REAL
 // ============================================================
 function _suscribirRealtime() {
     if (!State.dailyMenuId || !State.restaurantId) return;
@@ -1058,37 +761,18 @@ function _suscribirRealtime() {
         .on('postgres_changes', {
             event: '*', schema: 'public', table: 'daily_menu_slots',
             filter: `daily_menu_id=eq.${State.dailyMenuId}`,
-        }, () => {
-            Menu.cargar();
-        })
+        }, () => Menu.cargar())
         .on('postgres_changes', {
             event: 'UPDATE', schema: 'public', table: 'menu_items',
             filter: `restaurant_id=eq.${State.restaurantId}`,
-        }, () => {
-            if (State.dailyMenuId) Menu.cargar();
-        })
+        }, () => { if (State.dailyMenuId) Menu.cargar(); })
         .subscribe();
 }
 
 // ============================================================
-// INIT — verificar si hay sesión activa de Supabase
+// INIT — Carga directa, sin autenticación
 // ============================================================
 (async function init() {
-    // Comprobar si Supabase ya tiene una sesión activa
-    try {
-        const { data: { session } } = await db.auth.getSession();
-        if (session?.user) {
-            // Sesión existente — saltar el login
-            State.meseroEmail  = session.user.email;
-            State.meseroNombre = session.user.user_metadata?.name
-                              || session.user.email?.split('@')[0]
-                              || 'Mesero';
-
-            document.getElementById('screen-login').style.display = 'none';
-            Origen.mostrar();
-            _resolverRestaurant();
-        }
-    } catch (_) {
-        // Sin sesión — mostrar login (ya está visible por defecto)
-    }
+    await _resolverRestaurant();
+    Menu.cargar();
 })();
