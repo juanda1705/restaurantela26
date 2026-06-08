@@ -780,8 +780,6 @@ const Order = {
             const tableId = await _resolverTableId(modalidad, mesa);
             if (!tableId) throw new Error('No se pudo identificar la mesa.');
 
-            const itemsResueltos = await this._resolverMenuItemIds();
-
             // Construir nota de cocina
             let notaCocina = '';
             if (modalidad === 'mesa')       notaCocina = `[MESA ${mesa}]`;
@@ -809,34 +807,55 @@ const Order = {
 
             if (errOrd) throw errOrd;
 
-            // Insertar ítems
-            if (itemsResueltos.length > 0) {
-                const payload = itemsResueltos.map(item => ({
-                    order_id:           orden.id,
-                    menu_item_id:       item.menuItemId,   // puede ser null si no se resolvió
-                    daily_menu_slot_id: item.slotId,       // null si es mock o sin daily_menu
-                    quantity:           item.cantidad,
-                    unit_price:         item.precio,
-                    item_status:        'pending',
-                    notes:              `[nombre]${item.nombre}`, // prefijo que lee la cocina
-                }));
+            // ── Construir payload de ítems ────────────────────────────
+            // PROBLEMA 2 FIX — causa raíz:
+            //   La función _resolverMenuItemIds() hacía búsqueda fuzzy por nombre
+            //   y cuando no encontraba coincidencia usaba fallbackId = lista[0]?.id,
+            //   es decir, el primer producto alfabético de la BD (ej: "Albondigas").
+            //   Además, el segundo intento de insert tenía un bug de clave:
+            //   referenciaba item.menu_item_id (snake_case) en vez de item.menuItemId
+            //   (camelCase), lo que producía undefined → forzaba el primer item siempre.
+            //
+            //   Solución: NO usar búsqueda fuzzy ni fallback de ID.
+            //   - slot.menuItemId YA es el ID correcto (viene directo de menu_items.id).
+            //   - El nombre viaja en notes con prefijo [nombre] — la cocina lo lee desde ahí.
+            //   - Si el insert falla por FK inválida, reintentar con menu_item_id = null.
+            //     Supabase acepta null en menu_item_id; la cocina usa notes de todas formas.
 
+            const payload = State.cart
+                .map(item => {
+                    const slot = State.slots.find(s => s.id === item.slotId);
+                    if (!slot) return null;
+
+                    const esSlotMock = item.slotId?.startsWith('demo-');
+                    const dailySlotId = (esSlotMock || !State.dailyMenuId) ? null : item.slotId;
+
+                    return {
+                        order_id:           orden.id,
+                        // menuItemId viene exactamente del catálogo — nunca un fallback ajeno
+                        menu_item_id:       (!esSlotMock && slot.menuItemId) ? slot.menuItemId : null,
+                        daily_menu_slot_id: dailySlotId,
+                        quantity:           item.cantidad,
+                        unit_price:         slot.precio,
+                        item_status:        'pending',
+                        // [nombre] es la fuente de verdad para cocina — siempre lleva el nombre real
+                        notes:              `[nombre]${slot.nombre}`,
+                    };
+                })
+                .filter(Boolean);
+
+            if (payload.length > 0) {
                 const { error: errItems } = await db.from('order_items').insert(payload);
 
                 if (errItems) {
                     console.warn('[La 26] order_items primer intento falló:', errItems.message);
-                    // Segundo intento: forzar menu_item_id con el primer item_id disponible
-                    // y daily_menu_slot_id en null para evitar cualquier FK inválida
-                    const { data: primerItem } = await db.from('menu_items')
-                        .select('id').eq('restaurant_id', State.restaurantId)
-                        .eq('is_active', true).limit(1).maybeSingle();
-
+                    // Segundo intento: menu_item_id = null para evitar cualquier FK inválida.
+                    // La cocina siempre lee el nombre desde notes[nombre], nunca desde el join.
                     const payloadSeguro = payload.map(item => ({
                         ...item,
-                        menu_item_id:       item.menu_item_id || primerItem?.id || null,
+                        menu_item_id:       null,
                         daily_menu_slot_id: null,
                     }));
-
                     const { error: errItems2 } = await db.from('order_items').insert(payloadSeguro);
                     if (errItems2) {
                         console.error('[La 26] order_items segundo intento falló:', errItems2.message);
@@ -853,65 +872,6 @@ const Order = {
             State.isSubmitting = false;
             if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Enviar a cocina'; }
         }
-    },
-
-    async _resolverMenuItemIds() {
-        const { data: items } = await db.from('menu_items')
-            .select('id,name,price,item_type')
-            .eq('is_active', true)
-            .eq('restaurant_id', State.restaurantId)
-            .in('item_type', ['executive_lunch','a_la_carte','drink','dessert','side','protein']);
-
-        const lista      = items || [];
-        const fallbackId = lista[0]?.id || null;
-        const resultado  = [];
-
-        for (const item of State.cart) {
-            const slot = State.slots.find(s => s.id === item.slotId);
-            if (!slot) continue;
-
-            let menuItemId = slot.menuItemId;
-
-            if (!menuItemId && lista.length > 0) {
-                const nombreBuscar = (slot.nombre || '').toLowerCase().trim();
-
-                // 1. Coincidencia exacta
-                const exacto = lista.find(m =>
-                    m.name.toLowerCase().trim() === nombreBuscar
-                );
-                // 2. Coincidencia parcial (primera palabra)
-                const parcial = !exacto && lista.find(m =>
-                    m.name.toLowerCase().includes(nombreBuscar.split(' ')[0]) ||
-                    nombreBuscar.includes(m.name.toLowerCase().split(' ')[0])
-                );
-                // 3. Mismo item_type
-                const mismoCat = !exacto && !parcial && lista.find(m =>
-                    m.item_type === slot.itemType
-                );
-
-                menuItemId = exacto?.id || parcial?.id || mismoCat?.id || fallbackId;
-            }
-
-            // NUNCA omitir el ítem — si no hay menuItemId, se inserta con null.
-            // La cocina lee el nombre desde notes con prefijo [nombre], no desde el join.
-            if (!menuItemId) {
-                console.warn(`[La 26] Sin menu_item_id para "${slot.nombre}". Insertando con null.`);
-            }
-
-            // daily_menu_slot_id: null si es slot mock o si no hay menú del día
-            const esSlotMock = item.slotId && item.slotId.startsWith('demo-');
-            const dailySlotId = (esSlotMock || !State.dailyMenuId) ? null : item.slotId;
-
-            resultado.push({
-                slotId:    dailySlotId,
-                menuItemId: menuItemId || null,
-                cantidad:  item.cantidad,
-                precio:    slot.precio,
-                nombre:    slot.nombre,
-            });
-        }
-
-        return resultado;
     },
 
     _mostrarExito(numeroOrden) {
