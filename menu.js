@@ -661,23 +661,28 @@ const Order = {
 
             if (errOrd) throw errOrd;
 
-            // Insertar ítems
-            if (itemsResueltos.length > 0) {
-                const { error: errItems } = await db.from('order_items').insert(
-                    itemsResueltos.map(item => ({
-                        order_id:           orden.id,
-                        menu_item_id:       item.menuItemId   || null,
-                        daily_menu_slot_id: item.slotId       || null,
-                        quantity:           item.cantidad,
-                        unit_price:         item.precio,
-                        item_status:        'pending',
-                        // El nombre va en notes para que la cocina siempre lo pueda leer
-                        notes: item.nombre,
-                    }))
-                );
-                if (errItems) {
-                    console.error('[La 26] order_items error:', errItems);
-                    // No bloqueamos — la orden principal ya existe
+            // Insertar ítems uno por uno para aislar errores de FK
+            for (const item of itemsResueltos) {
+                const payload = {
+                    order_id:           orden.id,
+                    menu_item_id:       item.menuItemId || null,
+                    daily_menu_slot_id: null,        // siempre null — evita FK inválida
+                    quantity:           item.cantidad,
+                    unit_price:         item.precio,
+                    item_status:        'pending',
+                    notes:              item.nombre,  // nombre limpio, sin prefijos
+                };
+
+                const { error: errItem } = await db.from('order_items').insert([payload]);
+                if (errItem) {
+                    // Si falla con menu_item_id, reintentar sin él
+                    const { error: errItem2 } = await db.from('order_items').insert([{
+                        ...payload,
+                        menu_item_id: null,
+                    }]);
+                    if (errItem2) {
+                        console.error('[La 26] order_item error (fallback):', errItem2, item.nombre);
+                    }
                 }
             }
 
