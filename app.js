@@ -600,16 +600,29 @@ function _crearCardHTML(order, esNuevo = false) {
         itemsHTML = items.map(item => {
             const parsed = _parsearNotes(item.notes);
 
-            // Resolución del nombre — 4 capas
-            const nombrePlato = item.menu_items?.name
-                || parsed.nombrePlato
+            // PROBLEMA 2 FIX — prioridad de resolución del nombre:
+            //   ANTES: item.menu_items?.name (JOIN) tenía prioridad máxima.
+            //          Si menu_item_id apuntaba al producto equivocado (bug del
+            //          fallback fuzzy en menu.js), el JOIN devolvía ese nombre
+            //          incorrecto (ej: "Albondigas") ignorando el notes correcto.
+            //
+            //   AHORA: notes[nombre] tiene prioridad máxima.
+            //          El mesero escribe [nombre]<plato real> en el momento del
+            //          pedido. Es la fuente de verdad. El JOIN solo se usa como
+            //          respaldo para órdenes antiguas sin prefijo [nombre].
+            //
+            // Capa 1: prefijo [nombre] en notes  → fuente de verdad del pedido
+            // Capa 2: notes plano sin prefijo     → órdenes antiguas
+            // Capa 3: item.menu_items?.name (JOIN) → respaldo para casos legacy
+            // Capa 4: placeholder
+
+            const nombrePlato = parsed.nombrePlato
                 || (item.notes && !item.notes.startsWith('[nombre]') ? item.notes : null)
+                || item.menu_items?.name
                 || '(Plato sin nombre)';
 
-            // Nota del cliente: lo que va después de " | " en notes
-            const notaCliente = item.menu_items?.name
-                ? (item.notes?.startsWith('[nombre]') ? parsed.notaCliente : item.notes)
-                : parsed.notaCliente;
+            // Nota del cliente: texto libre después de " | " en notes
+            const notaCliente = parsed.notaCliente;
 
             return `
             <div class="order-item">
