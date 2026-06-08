@@ -663,17 +663,22 @@ const Order = {
 
             // Insertar ítems
             if (itemsResueltos.length > 0) {
-                await db.from('order_items').insert(
+                const { error: errItems } = await db.from('order_items').insert(
                     itemsResueltos.map(item => ({
                         order_id:           orden.id,
-                        menu_item_id:       item.menuItemId,
-                        daily_menu_slot_id: item.slotId,
+                        menu_item_id:       item.menuItemId   || null,
+                        daily_menu_slot_id: item.slotId       || null,
                         quantity:           item.cantidad,
                         unit_price:         item.precio,
                         item_status:        'pending',
-                        notes:              `[nombre]${item.nombre}`,
+                        // El nombre va en notes para que la cocina siempre lo pueda leer
+                        notes: item.nombre,
                     }))
                 );
+                if (errItems) {
+                    console.error('[La 26] order_items error:', errItems);
+                    // No bloqueamos — la orden principal ya existe
+                }
             }
 
             this._mostrarExito(numeroOrden);
@@ -697,27 +702,42 @@ const Order = {
         const lista     = items || [];
         const resultado = [];
 
+        // Verificar si los IDs de los slots son UUIDs reales de daily_menu_slots
+        // (la vista puede devolver IDs de menu_items, no de daily_menu_slots)
+        let slotIdsValidos = new Set();
+        if (State.dailyMenuId) {
+            const { data: slotsReales } = await db.from('daily_menu_slots')
+                .select('id')
+                .eq('daily_menu_id', State.dailyMenuId);
+            if (slotsReales) slotsReales.forEach(s => slotIdsValidos.add(s.id));
+        }
+
         for (const item of State.cart) {
             const slot = State.slots.find(s => s.id === item.slotId);
             if (!slot) continue;
 
             let menuItemId = slot.menuItemId;
 
+            // Si no tenemos menuItemId, buscar por nombre exacto primero
             if (!menuItemId && lista.length > 0) {
-                const nombre = (slot.nombre || '').toLowerCase().trim();
-                const exacto = lista.find(m => m.name.toLowerCase().trim() === nombre);
+                const nombreBuscar = (slot.nombre || '').toLowerCase().trim();
+                const exacto = lista.find(m => m.name.toLowerCase().trim() === nombreBuscar);
                 menuItemId   = exacto?.id
-                    ?? lista.find(m => m.name.toLowerCase().includes(nombre.slice(0, 8)))?.id
-                    ?? lista[0]?.id
+                    ?? lista.find(m => m.name.toLowerCase().includes(nombreBuscar.slice(0, 8)))?.id
                     ?? null;
+                // No usar lista[0] como fallback — mejor null que un plato equivocado
             }
 
+            // daily_menu_slot_id: solo si el ID existe como slot real en BD
+            const dailySlotId = slotIdsValidos.has(item.slotId) ? item.slotId : null;
+
             resultado.push({
-                slotId:    item.slotId,
+                slotId:       dailySlotId,
                 menuItemId,
-                cantidad:  item.cantidad,
-                precio:    slot.precio,
-                nombre:    slot.nombre,
+                cantidad:     item.cantidad,
+                precio:       slot.precio,
+                nombre:       slot.nombre,
+                itemType:     slot.itemType,
             });
         }
 
