@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#ffffff">
-    <title>Restaurante la 26 — Carta del Día</title>
+    <title>Restaurante la 26 — Panel Mesero</title>
 
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="logo.png">
@@ -14,20 +14,19 @@
     <!-- Supabase JS v2 — debe cargar ANTES que menu.js -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-    <!-- ══ GUARD DE ACCESO PÚBLICO ══════════════════════════
-         menu.html es 100% pública. Nunca pide login.
-         Este script se ejecuta ANTES que cualquier otro.
-         Elimina claves de sesión interna (cocina/admin) que
-         pudieran haber quedado de una visita anterior.
-         Las claves de mesa del cliente se conservan intactas.
-    ══════════════════════════════════════════════════════ -->
+    <!-- ══ FIX 1 — GUARD CORREGIDO ══════════════════════════════
+         menu.html es la pantalla del MESERO.
+         Limpiamos claves del flujo cliente pero NUNCA tocamos
+         meseroNombre / meseroCargo (son la sesión del mesero).
+         Sin este fix, cada recarga borraba el login del mesero.
+    ═══════════════════════════════════════════════════════════ -->
     <script>
     (function() {
-        // Limpiar claves de autenticación interna de cocina/admin
-        ['user_role','auth_token','admin_session','cocina_session','staff_token']
-            .forEach(function(k){ sessionStorage.removeItem(k); });
-        // NUNCA redirigir desde menu.html hacia index.html
-        // El cliente del menú no necesita contraseña ni sesión
+        [
+            'user_role','auth_token','admin_session','cocina_session','staff_token',
+            'mesa_id','mesa_nombre','mesa_modalidad','mesa_direccion'
+        ].forEach(function(k){ sessionStorage.removeItem(k); });
+        // meseroNombre y meseroCargo se conservan siempre
     })();
     </script>
 
@@ -74,14 +73,10 @@
             -moz-osx-font-smoothing: grayscale;
         }
 
-        /* Textura grain ultra-sutil */
         body::before {
             content: '';
-            position: fixed;
-            inset: 0;
-            pointer-events: none;
-            z-index: 0;
-            opacity: 0.018;
+            position: fixed; inset: 0;
+            pointer-events: none; z-index: 0; opacity: 0.018;
             background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.78' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
         }
 
@@ -95,7 +90,6 @@
         @keyframes slideUp { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
         @keyframes scaleIn { from { transform:scale(0.90); opacity:0; } to { transform:scale(1); opacity:1; } }
         @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.25} }
-        @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
 
         .spinner {
             width: 40px; height: 40px;
@@ -104,273 +98,149 @@
             border-radius: 50%;
             animation: spin 0.85s linear infinite;
         }
-
-        .pulse-anim      { animation: pulse 2s ease-in-out infinite; }
-        .fade-up         { animation: fadeUp  0.50s cubic-bezier(.22,.68,0,1.2) both; }
-        .slide-up-modal  { animation: slideUp 0.38s cubic-bezier(0.16, 1, 0.3, 1) both; }
-        .scale-in        { animation: scaleIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
+        .pulse-anim     { animation: pulse 2s ease-in-out infinite; }
+        .fade-up        { animation: fadeUp  0.50s cubic-bezier(.22,.68,0,1.2) both; }
+        .slide-up-modal { animation: slideUp 0.38s cubic-bezier(0.16, 1, 0.3, 1) both; }
+        .scale-in       { animation: scaleIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
         /* ═══════════════════════════════════════════
            HEADER
         ═══════════════════════════════════════════ */
         .app-header {
-            position: sticky;
-            top: 0;
-            z-index: 40;
+            position: sticky; top: 0; z-index: 40;
             background: rgba(255,255,255,0.97);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
             border-bottom: 1px solid var(--border);
         }
-
         .header-top {
-            display: flex;
-            align-items: center;
+            display: flex; align-items: center;
             justify-content: space-between;
             padding: 10px 18px 8px;
         }
-
-        /* ── Logo imagen + wordmark ── */
-        .logo-lockup {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
+        .logo-lockup { display: flex; align-items: center; gap: 10px; }
         .logo-lockup img {
-            width: 42px;
-            height: 42px;
-            object-fit: contain;
-            border-radius: 8px;
-            flex-shrink: 0;
+            width: 42px; height: 42px;
+            object-fit: contain; border-radius: 8px; flex-shrink: 0;
         }
         .logo-wordmark h1 {
             font-family: 'Cormorant Garamond', serif;
-            font-size: 1.45rem;
-            font-weight: 400;
-            color: var(--ink);
-            letter-spacing: -0.015em;
-            line-height: 1.1;
+            font-size: 1.45rem; font-weight: 400;
+            color: var(--ink); letter-spacing: -0.015em; line-height: 1.1;
         }
-        .logo-wordmark h1 em {
-            font-style: italic;
-            color: var(--oliva);
-        }
+        .logo-wordmark h1 em { font-style: italic; color: var(--oliva); }
         .logo-wordmark p {
-            font-size: 10px;
-            color: var(--ink-ghost);
-            letter-spacing: 0.10em;
-            text-transform: uppercase;
-            margin-top: 2px;
-            font-weight: 400;
+            font-size: 10px; color: var(--ink-ghost);
+            letter-spacing: 0.10em; text-transform: uppercase;
+            margin-top: 2px; font-weight: 400;
         }
-
-        /* ── Badge de mesa ── */
         .badge-mesa {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            background: var(--oliva-pale);
-            border: 1px solid var(--oliva-bd);
-            color: var(--oliva);
-            font-size: 11px;
-            font-weight: 500;
-            letter-spacing: 0.03em;
-            padding: 5px 13px;
-            border-radius: 9999px;
-            white-space: nowrap;
-            transition: all 0.3s ease;
+            display: inline-flex; align-items: center; gap: 5px;
+            background: var(--oliva-pale); border: 1px solid var(--oliva-bd);
+            color: var(--oliva); font-size: 11px; font-weight: 500;
+            letter-spacing: 0.03em; padding: 5px 13px;
+            border-radius: 9999px; white-space: nowrap; transition: all 0.3s ease;
         }
-
-        /* ── Indicador de conexión ── */
         .conn-dot {
-            width: 7px; height: 7px;
-            border-radius: 50%;
-            background: #d4a853;
-            display: block;
-            flex-shrink: 0;
-            transition: background 0.4s ease;
+            width: 7px; height: 7px; border-radius: 50%;
+            background: #d4a853; display: block; flex-shrink: 0;
         }
 
         /* ═══════════════════════════════════════════
-           BANNER DE BIENVENIDA (mesa + nombre)
+           BANNER DE BIENVENIDA
         ═══════════════════════════════════════════ */
         .welcome-banner {
-            display: none;
-            align-items: center;
-            gap: 8px;
-            margin: 0 18px;
-            padding: 9px 14px;
-            background: var(--oliva-pale);
-            border: 1px solid var(--oliva-bd);
+            display: none; align-items: center; gap: 8px;
+            margin: 0 18px 2px; padding: 9px 14px;
+            background: var(--oliva-pale); border: 1px solid var(--oliva-bd);
             border-radius: 12px;
-            margin-bottom: 2px;
         }
-        .welcome-banner.visible {
-            display: flex;
-        }
-        .welcome-banner span.icon {
-            font-size: 13px;
-            flex-shrink: 0;
-        }
-        .welcome-banner p {
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--oliva);
-            letter-spacing: 0.02em;
-        }
+        .welcome-banner.visible { display: flex; }
+        .welcome-banner span.icon { font-size: 13px; flex-shrink: 0; }
+        .welcome-banner p { font-size: 12px; font-weight: 500; color: var(--oliva); letter-spacing: 0.02em; }
 
         /* ═══════════════════════════════════════════
            BARRA DE CATEGORÍAS
         ═══════════════════════════════════════════ */
         .cats-bar {
-            display: flex;
-            gap: 7px;
-            overflow-x: auto;
+            display: flex; gap: 7px; overflow-x: auto;
             scroll-snap-type: x mandatory;
             -webkit-overflow-scrolling: touch;
-            padding: 10px 18px 14px;
-            scrollbar-width: none;
+            padding: 10px 18px 14px; scrollbar-width: none;
         }
         .cats-bar::-webkit-scrollbar { display: none; }
-
         .cat-btn {
-            flex-shrink: 0;
-            scroll-snap-align: start;
-            padding: 7px 16px;
-            border-radius: 9999px;
-            border: 1.5px solid var(--border);
-            background: #fff;
-            color: var(--ink-muted);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 12.5px;
-            font-weight: 400;
-            white-space: nowrap;
-            cursor: pointer;
-            transition: all 0.25s ease;
+            flex-shrink: 0; scroll-snap-align: start;
+            padding: 7px 16px; border-radius: 9999px;
+            border: 1.5px solid var(--border); background: #fff;
+            color: var(--ink-muted); font-family: 'DM Sans', sans-serif;
+            font-size: 12.5px; font-weight: 400; white-space: nowrap;
+            cursor: pointer; transition: all 0.25s ease;
             -webkit-tap-highlight-color: transparent;
         }
         .cat-btn:active { transform: scale(0.95); }
         .cat-btn:hover  { border-color: var(--oliva-bd); color: var(--oliva); background: var(--oliva-pale); }
         .cat-btn.active {
-            background: var(--oliva);
-            border-color: var(--oliva);
-            color: #fff;
-            font-weight: 500;
+            background: var(--oliva); border-color: var(--oliva);
+            color: #fff; font-weight: 500;
             box-shadow: 0 2px 12px rgba(74,90,40,0.22);
         }
 
         /* ═══════════════════════════════════════════
-           ENCABEZADO DE SECCIÓN
+           SECCIÓN DE MENÚ
         ═══════════════════════════════════════════ */
         .section-label {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 0 18px;
-            margin: 26px 0 10px;
+            display: flex; align-items: center; gap: 10px;
+            padding: 0 18px; margin: 26px 0 10px;
         }
         .section-label h2 {
             font-family: 'Cormorant Garamond', serif;
-            font-size: 1.25rem;
-            font-weight: 400;
-            color: var(--ink);
-            letter-spacing: -0.01em;
-            white-space: nowrap;
-            line-height: 1.2;
+            font-size: 1.25rem; font-weight: 400;
+            color: var(--ink); letter-spacing: -0.01em;
+            white-space: nowrap; line-height: 1.2;
         }
-        .section-label::after {
-            content: '';
-            flex: 1;
-            height: 1px;
-            background: var(--border);
-        }
+        .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
         /* ═══════════════════════════════════════════
            TARJETA DE PLATO
         ═══════════════════════════════════════════ */
         .plate-card {
-            margin: 0 18px 9px;
-            background: #ffffff;
-            border: 1px solid var(--border);
-            border-radius: 16px;
+            margin: 0 18px 9px; background: #ffffff;
+            border: 1px solid var(--border); border-radius: 16px;
             padding: 15px 15px 15px 16px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
             box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 3px 10px rgba(0,0,0,0.025);
             transition: box-shadow 0.22s ease, transform 0.18s ease;
             animation: fadeUp 0.45s cubic-bezier(.22,.68,0,1.2) both;
             -webkit-tap-highlight-color: transparent;
         }
         .plate-card:active { transform: scale(0.987); }
-
         .plate-info { flex: 1; min-width: 0; }
-
-        .plate-name {
-            font-size: 14px;
-            font-weight: 500;
-            color: var(--ink);
-            line-height: 1.35;
-            margin-bottom: 3px;
-        }
+        .plate-name { font-size: 14px; font-weight: 500; color: var(--ink); line-height: 1.35; margin-bottom: 3px; }
         .plate-desc {
-            font-size: 11.5px;
-            color: var(--ink-muted);
-            line-height: 1.55;
-            margin-bottom: 7px;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
+            font-size: 11.5px; color: var(--ink-muted); line-height: 1.55; margin-bottom: 7px;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
         }
         .plate-price {
             font-family: 'Cormorant Garamond', serif;
-            font-size: 1.1rem;
-            font-weight: 500;
-            color: var(--oliva);
-            letter-spacing: -0.01em;
+            font-size: 1.1rem; font-weight: 500; color: var(--oliva); letter-spacing: -0.01em;
         }
         .plate-price.incluido {
-            font-family: 'DM Sans', sans-serif;
-            font-size: 11px;
-            font-weight: 500;
-            color: var(--oliva);
-            background: var(--oliva-pale);
-            border: 1px solid var(--oliva-bd);
-            padding: 2px 9px;
-            border-radius: 9999px;
-            letter-spacing: 0.03em;
+            font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 500;
+            color: var(--oliva); background: var(--oliva-pale); border: 1px solid var(--oliva-bd);
+            padding: 2px 9px; border-radius: 9999px; letter-spacing: 0.03em;
         }
-
-        /* Agotado */
-        .plate-card.agotado {
-            opacity: 0.50;
-            pointer-events: none;
-            background: var(--crema-dk);
-        }
+        .plate-card.agotado { opacity: 0.50; pointer-events: none; background: var(--crema-dk); }
         .plate-card.agotado .plate-name { text-decoration: line-through; color: var(--ink-muted); }
-
-        /* ─ Badges de estado ─ */
         .badge-agotado {
-            display: inline-block;
-            font-size: 10px;
-            font-weight: 500;
-            color: var(--red);
-            background: rgba(184,50,50,0.07);
-            border: 1px solid rgba(184,50,50,0.16);
-            padding: 2px 8px;
-            border-radius: 9999px;
+            display: inline-block; font-size: 10px; font-weight: 500;
+            color: var(--red); background: rgba(184,50,50,0.07);
+            border: 1px solid rgba(184,50,50,0.16); padding: 2px 8px; border-radius: 9999px;
         }
         .badge-pocas {
-            display: inline-block;
-            font-size: 10px;
-            font-weight: 500;
-            color: var(--amber);
-            background: rgba(180,83,9,0.07);
-            border: 1px solid rgba(180,83,9,0.18);
-            padding: 2px 8px;
-            border-radius: 9999px;
+            display: inline-block; font-size: 10px; font-weight: 500;
+            color: var(--amber); background: rgba(180,83,9,0.07);
+            border: 1px solid rgba(180,83,9,0.18); padding: 2px 8px; border-radius: 9999px;
             animation: pulse 2s ease-in-out infinite;
         }
 
@@ -378,232 +248,116 @@
            CONTROL DE CANTIDAD
         ═══════════════════════════════════════════ */
         .qty-chip {
-            display: flex;
-            align-items: center;
-            background: var(--oliva-pale);
-            border: 1.5px solid var(--oliva-bd);
-            border-radius: 9999px;
-            padding: 2px;
-            flex-shrink: 0;
-            gap: 0;
+            display: flex; align-items: center;
+            background: var(--oliva-pale); border: 1.5px solid var(--oliva-bd);
+            border-radius: 9999px; padding: 2px; flex-shrink: 0;
         }
         .qty-chip button {
-            width: 30px; height: 30px;
-            border-radius: 50%;
-            border: none;
-            background: transparent;
-            color: var(--oliva);
-            font-size: 18px;
-            font-weight: 300;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.15s ease;
-            line-height: 1;
+            width: 30px; height: 30px; border-radius: 50%; border: none;
+            background: transparent; color: var(--oliva); font-size: 18px;
+            font-weight: 300; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.15s ease; line-height: 1;
             -webkit-tap-highlight-color: transparent;
         }
         .qty-chip button:active { background: var(--oliva-pale2); border-radius: 50%; }
         .qty-chip span {
-            min-width: 26px;
-            text-align: center;
-            font-size: 13.5px;
-            font-weight: 600;
-            color: var(--oliva);
+            min-width: 26px; text-align: center;
+            font-size: 13.5px; font-weight: 600; color: var(--oliva);
             font-variant-numeric: tabular-nums;
         }
-
-        /* ─ Botón añadir (qty = 0) ─ */
         .btn-add {
-            width: 36px; height: 36px;
-            border-radius: 50%;
-            border: 1.5px solid var(--oliva-bd);
-            background: var(--oliva-pale);
-            color: var(--oliva);
-            font-size: 22px;
-            font-weight: 300;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-            transition: all 0.2s ease;
-            -webkit-tap-highlight-color: transparent;
+            width: 36px; height: 36px; border-radius: 50%;
+            border: 1.5px solid var(--oliva-bd); background: var(--oliva-pale);
+            color: var(--oliva); font-size: 22px; font-weight: 300; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+            transition: all 0.2s ease; -webkit-tap-highlight-color: transparent;
         }
         .btn-add:hover  { background: var(--oliva); border-color: var(--oliva); color: #fff; }
         .btn-add:active { transform: scale(0.88); }
 
         /* ═══════════════════════════════════════════
-           BARRA DEL CARRITO FLOTANTE
+           BARRA FLOTANTE DEL CARRITO
         ═══════════════════════════════════════════ */
         .cart-bar-btn {
-            width: 100%;
-            background: var(--oliva);
-            border: none;
-            border-radius: 18px;
-            padding: 14px 20px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
+            width: 100%; background: var(--oliva); border: none;
+            border-radius: 18px; padding: 14px 20px; cursor: pointer;
+            display: flex; align-items: center; justify-content: space-between;
             transition: all 0.22s ease;
             box-shadow: 0 4px 20px rgba(74,90,40,0.30);
             -webkit-tap-highlight-color: transparent;
         }
         .cart-bar-btn:hover  { background: var(--oliva-lt); box-shadow: 0 6px 28px rgba(74,90,40,0.38); }
         .cart-bar-btn:active { transform: scale(0.975); }
-
         .cart-badge {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 20px; height: 20px;
-            padding: 0 5px;
-            border-radius: 9999px;
-            background: rgba(255,255,255,0.25);
+            display: inline-flex; align-items: center; justify-content: center;
+            min-width: 20px; height: 20px; padding: 0 5px;
+            border-radius: 9999px; background: rgba(255,255,255,0.25);
             border: 1px solid rgba(255,255,255,0.4);
-            font-size: 11px;
-            font-weight: 600;
-            color: #fff;
-            font-variant-numeric: tabular-nums;
+            font-size: 11px; font-weight: 600; color: #fff; font-variant-numeric: tabular-nums;
         }
 
         /* ═══════════════════════════════════════════
-           MODAL DE PEDIDO (DRAWER INFERIOR)
+           MODAL DE PEDIDO
         ═══════════════════════════════════════════ */
         .modal-overlay {
-            position: absolute;
-            inset: 0;
+            position: absolute; inset: 0;
             background: rgba(18,18,12,0.55);
-            backdrop-filter: blur(6px);
-            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
         }
-
         .modal-panel {
-            position: absolute;
-            bottom: 0; left: 0; right: 0;
-            background: #fff;
-            border-radius: 24px 24px 0 0;
-            max-height: 90svh;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
+            position: absolute; bottom: 0; left: 0; right: 0;
+            background: #fff; border-radius: 24px 24px 0 0;
+            max-height: 90svh; display: flex; flex-direction: column; overflow: hidden;
         }
-
-        .modal-handle {
-            display: flex;
-            justify-content: center;
-            padding: 12px 0 4px;
-            flex-shrink: 0;
-        }
-        .modal-handle-bar {
-            width: 36px; height: 4px;
-            background: var(--border);
-            border-radius: 9999px;
-        }
-
-        /* Fila de resumen */
+        .modal-handle { display: flex; justify-content: center; padding: 12px 0 4px; flex-shrink: 0; }
+        .modal-handle-bar { width: 36px; height: 4px; background: var(--border); border-radius: 9999px; }
         .summary-row {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 10px;
-            padding: 13px 0;
-            border-bottom: 1px solid var(--border-lt);
+            display: flex; align-items: flex-start; justify-content: space-between;
+            gap: 10px; padding: 13px 0; border-bottom: 1px solid var(--border-lt);
         }
         .summary-row:last-child { border-bottom: none; }
-        .summary-name {
-            font-size: 13.5px;
-            font-weight: 500;
-            color: var(--ink);
-            line-height: 1.3;
-            margin-bottom: 2px;
-        }
-        .summary-qty {
-            font-size: 11.5px;
-            color: var(--ink-ghost);
-        }
+        .summary-name { font-size: 13.5px; font-weight: 500; color: var(--ink); line-height: 1.3; margin-bottom: 2px; }
+        .summary-qty  { font-size: 11.5px; color: var(--ink-ghost); }
         .summary-price {
-            font-family: 'Cormorant Garamond', serif;
-            font-size: 1.05rem;
-            font-weight: 500;
-            color: var(--oliva);
-            white-space: nowrap;
-            flex-shrink: 0;
+            font-family: 'Cormorant Garamond', serif; font-size: 1.05rem;
+            font-weight: 500; color: var(--oliva); white-space: nowrap; flex-shrink: 0;
         }
 
         /* ═══════════════════════════════════════════
-           INPUTS Y FORMULARIO DE PEDIDO
+           INPUTS Y FORMULARIO
         ═══════════════════════════════════════════ */
         .input-nombre {
-            width: 100%;
-            padding: 12px 15px;
-            border-radius: 12px;
-            border: 1.5px solid var(--border);
-            background: var(--crema-bg);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 14px;
-            color: var(--ink);
-            outline: none;
+            width: 100%; padding: 12px 15px; border-radius: 12px;
+            border: 1.5px solid var(--border); background: var(--crema-bg);
+            font-family: 'DM Sans', sans-serif; font-size: 14px;
+            color: var(--ink); outline: none;
             transition: border-color 0.22s ease, box-shadow 0.22s ease;
         }
         .input-nombre::placeholder { color: var(--ink-ghost); }
-        .input-nombre:focus {
-            border-color: var(--oliva);
-            box-shadow: 0 0 0 3px rgba(74,90,40,0.08);
-            background: #fff;
-        }
+        .input-nombre:focus { border-color: var(--oliva); box-shadow: 0 0 0 3px rgba(74,90,40,0.08); background: #fff; }
 
-        /* ─ Selector de modalidad (Para Llevar / Domicilio) ─ */
-        .modalidad-group {
-            display: flex;
-            gap: 8px;
-            margin-top: 2px;
-        }
+        .modalidad-group { display: flex; gap: 8px; margin-top: 2px; }
         .modalidad-btn {
-            flex: 1;
-            padding: 10px 8px;
-            border-radius: 12px;
-            border: 1.5px solid var(--border);
-            background: var(--crema-bg);
-            color: var(--ink-muted);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 12.5px;
-            font-weight: 400;
-            cursor: pointer;
-            text-align: center;
-            transition: all 0.22s ease;
-            -webkit-tap-highlight-color: transparent;
-            line-height: 1.3;
+            flex: 1; padding: 10px 8px; border-radius: 12px;
+            border: 1.5px solid var(--border); background: var(--crema-bg);
+            color: var(--ink-muted); font-family: 'DM Sans', sans-serif;
+            font-size: 12.5px; font-weight: 400; cursor: pointer; text-align: center;
+            transition: all 0.22s ease; -webkit-tap-highlight-color: transparent; line-height: 1.3;
         }
         .modalidad-btn:active { transform: scale(0.97); }
         .modalidad-btn.selected {
-            border-color: var(--oliva);
-            background: var(--oliva-pale);
-            color: var(--oliva);
-            font-weight: 500;
-            box-shadow: 0 0 0 2px rgba(74,90,40,0.10);
+            border-color: var(--oliva); background: var(--oliva-pale);
+            color: var(--oliva); font-weight: 500; box-shadow: 0 0 0 2px rgba(74,90,40,0.10);
         }
-        .modalidad-btn .moda-icon {
-            display: block;
-            font-size: 18px;
-            margin-bottom: 3px;
-        }
+        .modalidad-btn .moda-icon { display: block; font-size: 18px; margin-bottom: 3px; }
 
-        /* ─ Botón confirmar ─ */
         .btn-confirmar {
-            width: 100%;
-            padding: 16px 24px;
-            border-radius: 9999px;
-            background: var(--oliva);
-            color: #fff;
-            font-family: 'DM Sans', sans-serif;
-            font-size: 14px;
-            font-weight: 500;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            border: none;
-            cursor: pointer;
+            width: 100%; padding: 16px 24px; border-radius: 9999px;
+            background: var(--oliva); color: #fff;
+            font-family: 'DM Sans', sans-serif; font-size: 14px;
+            font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase;
+            border: none; cursor: pointer;
             transition: background 0.22s ease, transform 0.16s ease, box-shadow 0.22s ease;
             box-shadow: 0 4px 16px rgba(74,90,40,0.20);
             -webkit-tap-highlight-color: transparent;
@@ -612,203 +366,91 @@
         .btn-confirmar:active  { transform: scale(0.975); }
         .btn-confirmar:disabled { opacity: 0.48; cursor: not-allowed; transform: none; box-shadow: none; }
 
-        /* ─ Botón secundario ─ */
         .btn-secundario {
-            width: 100%;
-            padding: 14px 24px;
-            border-radius: 9999px;
-            background: transparent;
-            border: 1.5px solid var(--border);
-            color: var(--ink-muted);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 13.5px;
-            font-weight: 400;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            -webkit-tap-highlight-color: transparent;
+            width: 100%; padding: 14px 24px; border-radius: 9999px;
+            background: transparent; border: 1.5px solid var(--border);
+            color: var(--ink-muted); font-family: 'DM Sans', sans-serif;
+            font-size: 13.5px; font-weight: 400; cursor: pointer;
+            transition: all 0.2s ease; -webkit-tap-highlight-color: transparent;
         }
         .btn-secundario:hover { border-color: var(--ink-muted); color: var(--ink); }
 
-        /* ═══════════════════════════════════════════
-           ANIMACIÓN DEL CHECK (modal de éxito)
-        ═══════════════════════════════════════════ */
+        /* Animación del check (modal éxito) */
         .check-path {
-            stroke-dasharray: 100;
-            stroke-dashoffset: 100;
+            stroke-dasharray: 100; stroke-dashoffset: 100;
             transition: stroke-dashoffset 0.65s 0.25s cubic-bezier(0.65,0,0.35,1);
         }
         .check-path.drawn { stroke-dashoffset: 0; }
 
-        /* ─ Separador oliva ─ */
         .rule-oliva {
-            display: block;
-            width: 28px; height: 2px;
-            background: var(--oliva);
-            border-radius: 2px;
-            margin: 0 auto 18px;
+            display: block; width: 28px; height: 2px;
+            background: var(--oliva); border-radius: 2px; margin: 0 auto 18px;
         }
 
-        /* ═══════════════════════════════════════════
-           ESTADO VACÍO / EMPTY STATE
-        ═══════════════════════════════════════════ */
-        .empty-state {
-            text-align: center;
-            padding: 56px 28px;
-        }
+        .empty-state { text-align: center; padding: 56px 28px; }
         .empty-state .icon { font-size: 36px; margin-bottom: 14px; }
         .empty-state p { font-size: 13.5px; color: var(--ink-muted); line-height: 1.6; }
 
-        /* ═══════════════════════════════════════════
-           MODAL ÉXITO
-        ═══════════════════════════════════════════ */
         .success-card {
-            position: relative;
-            background: #fff;
-            border-radius: 24px;
-            padding: 36px 28px 30px;
-            max-width: 320px;
-            width: 100%;
-            text-align: center;
-            border: 1px solid var(--border);
+            position: relative; background: #fff; border-radius: 24px;
+            padding: 36px 28px 30px; max-width: 320px; width: 100%;
+            text-align: center; border: 1px solid var(--border);
             box-shadow: 0 24px 64px rgba(0,0,0,0.12);
         }
 
-        /* ═══════════════════════════════════════════
-           SECTION LABEL (field-label reutilizable)
-        ═══════════════════════════════════════════ */
         .field-label {
-            display: block;
-            font-size: 10.5px;
-            font-weight: 500;
-            color: var(--ink-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            margin-bottom: 7px;
+            display: block; font-size: 10.5px; font-weight: 500;
+            color: var(--ink-muted); text-transform: uppercase;
+            letter-spacing: 0.08em; margin-bottom: 7px;
         }
 
-        /* ═══════════════════════════════════════════
-           UTILIDADES
-        ═══════════════════════════════════════════ */
         .z-content { position: relative; z-index: 1; }
         .hidden-field { display: none !important; }
 
         /* ═══════════════════════════════════════════
-           MODAL DE BIENVENIDA — Selección de mesa
-           Aparece cuando no hay mesa_id en sessionStorage/URL.
-           NUNCA redirige a index.html (cocina/admin).
+           MODAL DE BIENVENIDA
+           El MeseroPanel.init() lo oculta al arrancar.
         ═══════════════════════════════════════════ */
         #mesa-welcome-modal {
-            position: fixed;
-            inset: 0;
-            z-index: 80;
+            position: fixed; inset: 0; z-index: 80;
             background: rgba(18,18,12,0.72);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            display: none;
-            align-items: flex-end;
-            justify-content: center;
-            padding: 0;
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            display: none; align-items: flex-end; justify-content: center; padding: 0;
         }
-
-        /* Estado activo — menu.js lo activa con style.display='flex' */
-        #mesa-welcome-modal[style*="flex"] {
-            align-items: flex-end !important;
-            justify-content: center !important;
-        }
-
+        #mesa-welcome-modal[style*="flex"] { align-items: flex-end !important; justify-content: center !important; }
         .wm-panel {
-            background: #fff;
-            border-radius: 28px 28px 0 0;
-            width: 100%;
-            max-width: 480px;
+            background: #fff; border-radius: 28px 28px 0 0; width: 100%; max-width: 480px;
             padding: 0 0 env(safe-area-inset-bottom, 20px);
             animation: slideUp 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
             box-shadow: 0 -8px 48px rgba(0,0,0,0.14);
         }
-
-        .wm-handle {
-            display: flex;
-            justify-content: center;
-            padding: 14px 0 0;
-        }
-        .wm-handle-bar {
-            width: 36px; height: 4px;
-            background: var(--border);
-            border-radius: 9999px;
-        }
-
-        .wm-header {
-            padding: 16px 24px 12px;
-            text-align: center;
-        }
-        .wm-header img {
-            width: 52px; height: 52px;
-            object-fit: contain;
-            border-radius: 10px;
-            margin-bottom: 10px;
-        }
+        .wm-handle { display: flex; justify-content: center; padding: 14px 0 0; }
+        .wm-handle-bar { width: 36px; height: 4px; background: var(--border); border-radius: 9999px; }
+        .wm-header { padding: 16px 24px 12px; text-align: center; }
+        .wm-header img { width: 52px; height: 52px; object-fit: contain; border-radius: 10px; margin-bottom: 10px; }
         .wm-header h2 {
-            font-family: 'Cormorant Garamond', serif;
-            font-size: 1.65rem;
-            font-weight: 400;
-            color: var(--ink);
-            letter-spacing: -0.015em;
-            line-height: 1.15;
-            margin-bottom: 4px;
+            font-family: 'Cormorant Garamond', serif; font-size: 1.65rem;
+            font-weight: 400; color: var(--ink); letter-spacing: -0.015em;
+            line-height: 1.15; margin-bottom: 4px;
         }
         .wm-header h2 em { font-style: italic; color: var(--oliva); }
-        .wm-header p {
-            font-size: 12px;
-            color: var(--ink-ghost);
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-        }
-
-        /* Tabs de selección */
-        .wm-tabs {
-            display: flex;
-            gap: 8px;
-            padding: 4px 24px 16px;
-        }
+        .wm-header p { font-size: 12px; color: var(--ink-ghost); letter-spacing: 0.06em; text-transform: uppercase; }
+        .wm-tabs { display: flex; gap: 8px; padding: 4px 24px 16px; }
         .wm-tab {
-            flex: 1;
-            padding: 10px 12px;
-            border-radius: 12px;
-            border: 1.5px solid var(--border);
-            background: var(--crema-bg);
-            color: var(--ink-muted);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 12.5px;
-            font-weight: 400;
-            cursor: pointer;
-            text-align: center;
-            transition: all 0.22s ease;
-            -webkit-tap-highlight-color: transparent;
-            line-height: 1.35;
+            flex: 1; padding: 10px 12px; border-radius: 12px;
+            border: 1.5px solid var(--border); background: var(--crema-bg);
+            color: var(--ink-muted); font-family: 'DM Sans', sans-serif;
+            font-size: 12.5px; font-weight: 400; cursor: pointer; text-align: center;
+            transition: all 0.22s ease; -webkit-tap-highlight-color: transparent; line-height: 1.35;
         }
         .wm-tab .wm-tab-icon { display: block; font-size: 20px; margin-bottom: 3px; }
         .wm-tab:active { transform: scale(0.97); }
         .wm-tab-active {
-            border-color: var(--oliva);
-            background: var(--oliva-pale);
-            color: var(--oliva);
-            font-weight: 500;
-            box-shadow: 0 0 0 2px rgba(74,90,40,0.10);
+            border-color: var(--oliva); background: var(--oliva-pale);
+            color: var(--oliva); font-weight: 500; box-shadow: 0 0 0 2px rgba(74,90,40,0.10);
         }
-
-        /* Paneles de formulario */
-        .wm-panel-content {
-            padding: 0 24px 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 11px;
-        }
-
-        /* Error en campo del welcome modal */
-        .wm-field-error {
-            border-color: var(--red) !important;
-            box-shadow: 0 0 0 3px rgba(184,50,50,0.10) !important;
-        }
+        .wm-panel-content { padding: 0 24px 20px; display: flex; flex-direction: column; gap: 11px; }
+        .wm-field-error { border-color: var(--red) !important; box-shadow: 0 0 0 3px rgba(184,50,50,0.10) !important; }
     </style>
 </head>
 
@@ -819,51 +461,30 @@
     ═══════════════════════════════════════════════════════ -->
     <header class="app-header">
         <div class="header-top">
-
-            <!-- Logo + wordmark editorial -->
             <div class="logo-lockup">
                 <img src="logo.png" alt="Logo Restaurante la 26" width="42" height="42">
                 <div class="logo-wordmark">
                     <h1>Restaurante <em>la 26</em></h1>
-                    <p>Carta del Día</p>
+                    <p>Panel Mesero</p>
                 </div>
             </div>
-
-            <!-- Mesa + indicador de conexión -->
             <div style="display:flex;align-items:center;gap:8px;">
-                <!--
-                    ID: badge-mesa
-                    menu.js escribe aquí el número o nombre de mesa
-                -->
                 <span id="badge-mesa" class="badge-mesa" style="display:none;"></span>
-
-                <!--
-                    ID: conn-dot
-                    menu.js cambia el color: amarillo=cargando, verde=ok, rojo=error
-                -->
                 <span id="conn-dot" class="conn-dot pulse-anim" title="Conectando..."></span>
             </div>
         </div>
 
-        <!--
-            ID: welcome-banner
-            menu.js lo muestra con la confirmación de mesa/modalidad
-        -->
         <div id="welcome-banner" class="welcome-banner">
             <span class="icon">📍</span>
             <p id="welcome-text"></p>
         </div>
 
-        <!-- Barra de filtros por categoría -->
-        <nav class="cats-bar" id="cats-bar" aria-label="Categorías del menú">
-            <!-- menu.js inyecta botones .cat-btn aquí -->
-        </nav>
+        <nav class="cats-bar" id="cats-bar" aria-label="Categorías del menú"></nav>
     </header>
 
 
     <!-- ═══════════════════════════════════════════════════════
          ESTADO: CARGANDO
-         ID: app-loader → menu.js lo oculta al terminar
     ═══════════════════════════════════════════════════════ -->
     <div id="app-loader" class="z-content"
         style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:62svh;gap:14px;">
@@ -874,8 +495,6 @@
 
     <!-- ═══════════════════════════════════════════════════════
          ESTADO: ERROR
-         ID: app-error     → menu.js lo muestra si algo falla
-         ID: error-message → menu.js escribe el texto del error
     ═══════════════════════════════════════════════════════ -->
     <div id="app-error" class="z-content"
         style="display:none;flex-direction:column;align-items:center;justify-content:center;min-height:62svh;padding:36px 24px;text-align:center;">
@@ -891,39 +510,24 @@
 
     <!-- ═══════════════════════════════════════════════════════
          VISTA PRINCIPAL: MENÚ DEL DÍA
-         ID: app-menu → menu.js lo muestra cuando los datos están listos
     ═══════════════════════════════════════════════════════ -->
     <main id="app-menu" class="z-content" style="display:none;padding-bottom:1.5rem;">
-        <!--
-            ID: menu-sections
-            menu.js inyecta aquí secciones con .section-label y .plate-card
-        -->
         <div id="menu-sections"></div>
     </main>
 
 
     <!-- ═══════════════════════════════════════════════════════
          BARRA FLOTANTE DEL CARRITO
-         ID: cart-bar → menu.js la muestra/oculta según haya ítems
     ═══════════════════════════════════════════════════════ -->
     <div id="cart-bar" class="z-content"
         style="position:fixed;bottom:0;left:0;right:0;z-index:45;padding:10px 16px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));transform:translateY(115%);opacity:0;pointer-events:none;">
-
         <button class="cart-bar-btn" onclick="Cart.openSummary()" aria-label="Ver pedido">
             <div style="display:flex;align-items:center;gap:9px;">
                 <span style="font-size:18px;line-height:1;">🛒</span>
                 <span style="font-size:13.5px;font-weight:500;color:#fff;letter-spacing:0.01em;">Ver pedido</span>
-                <!--
-                    ID: cart-count → menu.js muestra cuántos ítems hay
-                -->
                 <span id="cart-count" class="cart-badge">0</span>
             </div>
-
-            <!--
-                ID: cart-total → menu.js muestra el total en pesos colombianos
-            -->
-            <span id="cart-total"
-                class="font-display"
+            <span id="cart-total" class="font-display"
                 style="font-size:1.15rem;font-weight:500;color:#fff;font-variant-numeric:tabular-nums;">
                 $0
             </span>
@@ -933,22 +537,12 @@
 
     <!-- ═══════════════════════════════════════════════════════
          MODAL: RESUMEN DEL PEDIDO
-         ID: order-modal → menu.js lo abre/cierra
     ═══════════════════════════════════════════════════════ -->
     <div id="order-modal" style="display:none;position:fixed;inset:0;z-index:50;" role="dialog" aria-modal="true">
-
-        <!-- Overlay oscuro — click cierra el modal -->
         <div class="modal-overlay" onclick="Cart.closeSummary()"></div>
-
-        <!-- Panel deslizable desde abajo -->
         <div class="modal-panel slide-up-modal">
+            <div class="modal-handle"><div class="modal-handle-bar"></div></div>
 
-            <!-- Handle visual -->
-            <div class="modal-handle">
-                <div class="modal-handle-bar"></div>
-            </div>
-
-            <!-- Cabecera del modal -->
             <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 20px 14px;flex-shrink:0;border-bottom:1px solid var(--border);">
                 <div>
                     <h2 class="font-display"
@@ -963,108 +557,57 @@
                 </button>
             </div>
 
-            <!--
-                ID: summary-items
-                menu.js → Cart.renderSummary() inyecta las filas de ítems aquí
-            -->
             <div id="summary-items" style="flex:1;overflow-y:auto;padding:0 20px;"></div>
 
-            <!-- Pie: total + formulario + confirmar -->
             <div style="flex-shrink:0;padding:16px 20px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--border);background:#fff;display:flex;flex-direction:column;gap:13px;">
-
-                <!-- Fila de total -->
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <span style="font-size:12.5px;color:var(--ink-muted);font-weight:400;">Total del pedido</span>
-                    <!--
-                        ID: summary-total → menu.js actualiza este valor
-                    -->
-                    <span id="summary-total"
-                        class="font-display"
+                    <span id="summary-total" class="font-display"
                         style="font-size:1.35rem;font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums;">
                         $0
                     </span>
                 </div>
 
-                <!--
-                    ID: order-form → menu.js escucha el submit de este formulario
-                -->
                 <form id="order-form" style="display:flex;flex-direction:column;gap:11px;">
-
-                    <!--
-                        ID: nombre-field-wrapper
-                        Se muestra siempre para pedidos en mesa y para llevar/domicilio
-                        menu.js puede ocultarlo si ya se capturó el nombre via QR
-                    -->
                     <div id="nombre-field-wrapper">
                         <label for="customer-name" class="field-label">
                             ¿A qué nombre avisamos cuando esté listo?
                         </label>
-                        <!--
-                            ID: customer-name → menu.js lee este valor al confirmar
-                        -->
-                        <input
-                            id="customer-name"
-                            type="text"
-                            placeholder="Tu nombre…"
-                            autocomplete="given-name"
-                            class="input-nombre"
-                        >
+                        <input id="customer-name" type="text" placeholder="Tu nombre…"
+                            autocomplete="given-name" class="input-nombre">
                     </div>
 
-                    <!--
-                        ID: delivery-fields-wrapper
-                        Solo se muestra si la modalidad es "para_llevar" / "domicilio"
-                        menu.js lo revela dinámicamente según sessionStorage
-                    -->
-                    <div id="delivery-fields-wrapper" class="hidden-field" style="display:flex;flex-direction:column;gap:11px;">
-
-                        <!-- Selector: Retiro en restaurante vs Envío a domicilio -->
+                    <div id="delivery-fields-wrapper" class="hidden-field"
+                        style="display:flex;flex-direction:column;gap:11px;">
                         <div>
                             <label class="field-label">Modalidad de entrega</label>
                             <div class="modalidad-group">
-                                <button
-                                    type="button"
-                                    id="btn-retiro"
-                                    class="modalidad-btn selected"
+                                <button type="button" id="btn-retiro" class="modalidad-btn selected"
                                     onclick="Order.seleccionarEntrega('retiro')">
                                     <span class="moda-icon">🏠</span>
                                     Retiro en<br>el Restaurante
                                 </button>
-                                <button
-                                    type="button"
-                                    id="btn-domicilio"
-                                    class="modalidad-btn"
+                                <button type="button" id="btn-domicilio" class="modalidad-btn"
                                     onclick="Order.seleccionarEntrega('domicilio')">
                                     <span class="moda-icon">🛵</span>
                                     Envío a<br>Domicilio
                                 </button>
                             </div>
                         </div>
-
-                        <!--
-                            ID: direccion-wrapper
-                            Solo aparece si el cliente elige "Envío a Domicilio"
-                        -->
                         <div id="direccion-wrapper" class="hidden-field">
                             <label for="delivery-address" class="field-label">
                                 Dirección de entrega <span style="color:var(--red);">*</span>
                             </label>
-                            <input
-                                id="delivery-address"
-                                type="text"
+                            <input id="delivery-address" type="text"
                                 placeholder="Ej: Cra 27 #45-12, Apto 301, Cabecera…"
-                                autocomplete="street-address"
-                                class="input-nombre"
-                            >
+                                autocomplete="street-address" class="input-nombre">
                         </div>
                     </div>
 
-                    <!-- Botón confirmar pedido -->
                     <button type="submit" class="btn-confirmar">
                         Enviar pedido a cocina
                     </button>
                 </form>
-
             </div>
         </div>
     </div>
@@ -1072,37 +615,24 @@
 
     <!-- ═══════════════════════════════════════════════════════
          MODAL: ÉXITO — Pedido enviado a cocina
-         ID: success-modal → menu.js lo muestra tras insertar en la DB
     ═══════════════════════════════════════════════════════ -->
     <div id="success-modal"
         style="display:none;position:fixed;inset:0;z-index:60;align-items:center;justify-content:center;padding:24px;"
         role="dialog" aria-modal="true">
 
-        <!-- Overlay -->
         <div style="position:absolute;inset:0;background:rgba(18,18,12,0.78);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);"></div>
 
-        <!-- Tarjeta central -->
         <div class="success-card scale-in">
-
             <span class="rule-oliva"></span>
-
-            <!-- Ícono animado de check -->
             <div style="width:72px;height:72px;border-radius:50%;background:var(--oliva-pale);border:1.5px solid var(--oliva-bd);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;">
                 <svg viewBox="0 0 52 52" style="width:36px;height:36px;">
-                    <circle cx="26" cy="26" r="25"
-                        fill="none" stroke="rgba(74,90,40,0.12)" stroke-width="1.5"/>
-                    <polyline
-                        id="success-check"
-                        class="check-path"
+                    <circle cx="26" cy="26" r="25" fill="none" stroke="rgba(74,90,40,0.12)" stroke-width="1.5"/>
+                    <polyline id="success-check" class="check-path"
                         points="11,27 22,38 41,16"
-                        fill="none"
-                        stroke="var(--oliva)"
-                        stroke-width="3.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"/>
+                        fill="none" stroke="var(--oliva)" stroke-width="3.5"
+                        stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
             </div>
-
             <h3 class="font-display"
                 style="font-size:1.75rem;font-weight:400;color:var(--ink);margin-bottom:8px;line-height:1.18;">
                 ¡Pedido<br>en camino!
@@ -1110,117 +640,76 @@
             <p style="font-size:12.5px;color:var(--ink-muted);line-height:1.65;margin-bottom:6px;">
                 Tu comida ya se está preparando en cocina.
             </p>
-
-            <!--
-                ID: success-order-no → menu.js muestra el número de orden
-            -->
             <p id="success-order-no"
                 style="font-family:'Courier New',monospace;font-size:11px;font-weight:700;color:var(--oliva);letter-spacing:0.13em;text-transform:uppercase;margin-bottom:24px;opacity:0.8;">
             </p>
-
             <div style="display:flex;flex-direction:column;gap:8px;">
-                <button onclick="Order.newOrder()" class="btn-confirmar">
-                    Hacer otro pedido
-                </button>
+                <button onclick="Order.newOrder()" class="btn-confirmar">Hacer otro pedido</button>
                 <button onclick="document.getElementById('success-modal').style.display='none'"
-                    class="btn-secundario">
-                    Cerrar
-                </button>
+                    class="btn-secundario">Cerrar</button>
             </div>
         </div>
     </div>
 
 
     <!-- ═══════════════════════════════════════════════════════
-         MODAL DE BIENVENIDA — Selección de mesa o modalidad
-         Aparece si el cliente entra sin QR (sin mesa_id).
-         NUNCA redirige a index.html (login de cocina).
-         menu.js → MesaModal.mostrar() lo activa cuando corresponde.
+         MODAL DE BIENVENIDA
+         MeseroPanel.init() lo oculta automáticamente al arrancar.
+         Solo aparecería si se accede sin sesión de mesero activa
+         Y el MeseroPanel no suprime el flujo cliente.
     ═══════════════════════════════════════════════════════ -->
     <div id="mesa-welcome-modal" role="dialog" aria-modal="true" aria-label="Selecciona tu mesa">
-
         <div class="wm-panel">
-
-            <!-- Handle -->
             <div class="wm-handle"><div class="wm-handle-bar"></div></div>
-
-            <!-- Cabecera con logo -->
             <div class="wm-header">
                 <img src="logo.png" alt="Restaurante la 26">
                 <h2>Restaurante <em>la 26</em></h2>
                 <p>¿Dónde estás hoy?</p>
             </div>
-
-            <!-- Tabs: En el restaurante vs Para llevar -->
             <div class="wm-tabs">
-                <button
-                    id="wm-tab-mesa"
-                    class="wm-tab wm-tab-active"
+                <button id="wm-tab-mesa" class="wm-tab wm-tab-active"
                     onclick="MesaModal.cambiarTab('mesa')">
                     <span class="wm-tab-icon">🍽️</span>
                     Estoy en el<br>restaurante
                 </button>
-                <button
-                    id="wm-tab-llevar"
-                    class="wm-tab"
+                <button id="wm-tab-llevar" class="wm-tab"
                     onclick="MesaModal.cambiarTab('llevar')">
                     <span class="wm-tab-icon">🛵</span>
                     Para llevar /<br>Domicilio
                 </button>
             </div>
-
-            <!-- ── PANEL: Mesa en el restaurante ── -->
             <div id="wm-panel-mesa" class="wm-panel-content">
                 <div>
                     <label for="wm-mesa-numero" class="field-label">
                         Número de mesa <span style="color:var(--red);">*</span>
                     </label>
-                    <input
-                        id="wm-mesa-numero"
-                        type="text"
-                        inputmode="numeric"
-                        placeholder="Ej: 5, 12, Barra…"
-                        autocomplete="off"
-                        class="input-nombre"
+                    <input id="wm-mesa-numero" type="text" inputmode="numeric"
+                        placeholder="Ej: 5, 12, Barra…" autocomplete="off" class="input-nombre"
                         onkeydown="if(event.key==='Enter') MesaModal.confirmarMesa()">
                 </div>
                 <div>
-                    <label for="wm-nombre-mesa" class="field-label">
-                        Tu nombre (opcional)
-                    </label>
-                    <input
-                        id="wm-nombre-mesa"
-                        type="text"
+                    <label for="wm-nombre-mesa" class="field-label">Tu nombre (opcional)</label>
+                    <input id="wm-nombre-mesa" type="text"
                         placeholder="Para avisarte cuando esté listo…"
-                        autocomplete="given-name"
-                        class="input-nombre"
+                        autocomplete="given-name" class="input-nombre"
                         onkeydown="if(event.key==='Enter') MesaModal.confirmarMesa()">
                 </div>
                 <button class="btn-confirmar" onclick="MesaModal.confirmarMesa()">
                     Ver la carta →
                 </button>
             </div>
-
-            <!-- ── PANEL: Para llevar / Domicilio ── -->
             <div id="wm-panel-llevar" class="wm-panel-content" style="display:none;">
                 <div>
                     <label for="wm-nombre-llevar" class="field-label">
                         Tu nombre <span style="color:var(--red);">*</span>
                     </label>
-                    <input
-                        id="wm-nombre-llevar"
-                        type="text"
+                    <input id="wm-nombre-llevar" type="text"
                         placeholder="¿A nombre de quién va el pedido?"
-                        autocomplete="given-name"
-                        class="input-nombre">
+                        autocomplete="given-name" class="input-nombre">
                 </div>
                 <div>
-                    <label for="wm-tipo-llevar" class="field-label">
-                        ¿Cómo lo recibes?
-                    </label>
-                    <select
-                        id="wm-tipo-llevar"
-                        class="input-nombre"
+                    <label for="wm-tipo-llevar" class="field-label">¿Cómo lo recibes?</label>
+                    <select id="wm-tipo-llevar" class="input-nombre"
                         onchange="MesaModal.toggleDireccion()"
                         style="cursor:pointer;appearance:auto;">
                         <option value="retiro">🏠 Retiro en el restaurante</option>
@@ -1231,34 +720,31 @@
                     <label for="wm-direccion" class="field-label">
                         Dirección de entrega <span style="color:var(--red);">*</span>
                     </label>
-                    <input
-                        id="wm-direccion"
-                        type="text"
+                    <input id="wm-direccion" type="text"
                         placeholder="Ej: Cra 27 #45-12, Apto 301, Cabecera…"
-                        autocomplete="street-address"
-                        class="input-nombre">
+                        autocomplete="street-address" class="input-nombre">
                 </div>
                 <button class="btn-confirmar" onclick="MesaModal.confirmarLlevar()">
                     Ver la carta →
                 </button>
             </div>
-
         </div>
     </div>
 
 
     <!-- ═══════════════════════════════════════════════════════
-         SCRIPT DEL MENÚ — siempre al final del body
+         SCRIPT DEL MENÚ
+         FIX 2, 3, 4 están dentro de menu.js
+         ?v= fuerza al navegador a descargar la versión nueva
     ═══════════════════════════════════════════════════════ -->
-    <script src="menu.js"></script>
+    <script src="menu.js?v=2025061001"></script>
 
-    <!-- Dispara la animación del check cuando aparece el modal de éxito -->
+    <!-- Animación del check al mostrar el modal de éxito -->
     <script>
         (function () {
             var successModal = document.getElementById('success-modal');
             var successCheck = document.getElementById('success-check');
             if (!successModal || !successCheck) return;
-
             new MutationObserver(function () {
                 var visible = successModal.style.display !== 'none'
                     && !successModal.classList.contains('hidden');
