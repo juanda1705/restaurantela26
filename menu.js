@@ -41,7 +41,123 @@ const State = {
     cart:         [],
     filtro:       'todos',
     isSubmitting: false,
+    sistemaHabilitado: true,    // refleja system_settings.orders_enabled
 };
+
+// ============================================================
+// CONTROL DE ACCESO — LEE system_settings.orders_enabled
+// Misma tabla y clave que usa admin.js (SETTING_KEY = 'orders_enabled')
+// ============================================================
+const ORDERS_SETTING_KEY = 'orders_enabled';
+
+/**
+ * Consulta la tabla system_settings en Supabase.
+ * Fallback: localStorage (misma clave que admin.js usa como backup).
+ * Retorna true si el sistema está habilitado, false si está bloqueado.
+ */
+async function _verificarSistemaHabilitado() {
+    try {
+        const { data, error } = await db
+            .from('system_settings')
+            .select('value')
+            .eq('key', ORDERS_SETTING_KEY)
+            .maybeSingle();
+
+        if (error) throw error;
+
+        // Sin fila → habilitado por defecto (igual que admin.js)
+        return data ? data.value === 'true' : true;
+    } catch (_) {
+        // Fallback: localStorage — mismo mecanismo que admin.js
+        const local = localStorage.getItem(ORDERS_SETTING_KEY);
+        return local === null ? true : local === 'true';
+    }
+}
+
+/**
+ * Muestra la pantalla de "Sistema fuera de servicio" bloqueando
+ * todas las interacciones. Se activa cuando orders_enabled = false.
+ */
+function _mostrarSistemaBloqueado() {
+    // Ocultar pantalla de menú y loader
+    const loader   = document.getElementById('app-loader');
+    const error    = document.getElementById('app-error');
+    const sections = document.getElementById('menu-sections');
+    const cartBar  = document.getElementById('cart-bar');
+
+    if (loader)   loader.style.display   = 'none';
+    if (error)    error.style.display    = 'none';
+    if (sections) sections.style.display = 'none';
+    if (cartBar)  cartBar.classList.remove('visible');
+
+    // Vaciar carrito silenciosamente
+    State.cart  = [];
+    State.slots = [];
+
+    // Mostrar o crear el panel de bloqueo
+    let bloqueadoEl = document.getElementById('sistema-bloqueado');
+    if (!bloqueadoEl) {
+        bloqueadoEl = document.createElement('div');
+        bloqueadoEl.id = 'sistema-bloqueado';
+        Object.assign(bloqueadoEl.style, {
+            display:        'flex',
+            flexDirection:  'column',
+            alignItems:     'center',
+            justifyContent: 'center',
+            minHeight:      '70vh',
+            padding:        '40px 24px',
+            textAlign:      'center',
+            gap:            '16px',
+        });
+        bloqueadoEl.innerHTML = `
+            <div style="font-size:56px;line-height:1;">🔒</div>
+            <h2 style="font-size:20px;font-weight:700;color:#2e4028;margin:0;">
+                Servicio temporalmente suspendido
+            </h2>
+            <p style="font-size:14px;color:#6b7c69;max-width:320px;line-height:1.6;margin:0;">
+                El restaurante ha pausado la toma de pedidos por el momento.<br>
+                Por favor, inténtalo más tarde o consulta con el personal.
+            </p>`;
+        document.body.appendChild(bloqueadoEl);
+    } else {
+        bloqueadoEl.style.display = 'flex';
+    }
+}
+
+/**
+ * Oculta el panel de bloqueo y restaura el menú.
+ */
+function _ocultarSistemaBloqueado() {
+    const bloqueadoEl = document.getElementById('sistema-bloqueado');
+    if (bloqueadoEl) bloqueadoEl.style.display = 'none';
+}
+
+/**
+ * Suscribe cambios en tiempo real de system_settings.
+ * Cuando el admin habilita/deshabilita, menu.html reacciona de inmediato.
+ */
+function _suscribirCambiosSistema() {
+    db.channel('la26-sistema-settings')
+        .on('postgres_changes', {
+            event:  '*',
+            schema: 'public',
+            table:  'system_settings',
+            filter: `key=eq.${ORDERS_SETTING_KEY}`,
+        }, async (payload) => {
+            // El nuevo valor llega en payload.new.value
+            const habilitado = payload.new?.value === 'true';
+            State.sistemaHabilitado = habilitado;
+
+            if (!habilitado) {
+                _mostrarSistemaBloqueado();
+            } else {
+                _ocultarSistemaBloqueado();
+                // Recargar el menú fresco al volver a habilitar
+                await Menu.cargar();
+            }
+        })
+        .subscribe();
+}
 
 // ============================================================
 // TOAST NOTIFICATIONS
@@ -286,13 +402,35 @@ const Menu = {
     },
 
     async _cargarDesdeCatalogo() {
-        const { data, error } = await db.from('menu_items')
-            .select('id,name,price,item_type,is_active,description')
+        // PROBLEMA 2 FIX: intentar primero con el restaurant_id resuelto por slug.
+        // Si no devuelve resultados, intentar con CUALQUIER restaurant_id (por si admin
+        // resolvió el restaurante de forma diferente — limit(1) vs slug).
+        let data, error;
+
+        // Intento 1: filtrado por restaurant_id (el caso normal)
+        ({ data, error } = await db.from('menu_items')
+            .select('id,name,price,item_type,is_active,description,restaurant_id')
             .eq('restaurant_id', State.restaurantId)
             .eq('is_active', true)
             .in('item_type', ITEM_TYPES_VALIDOS)
             .order('item_type', { ascending: true })
-            .order('name',      { ascending: true });
+            .order('name',      { ascending: true }));
+
+        // Intento 2: si no hay resultados con ese restaurant_id, traer todos los activos
+        // (esto resuelve el caso donde admin usó un restaurant_id distinto al del slug)
+        if (!error && (!data || data.length === 0)) {
+            ({ data, error } = await db.from('menu_items')
+                .select('id,name,price,item_type,is_active,description,restaurant_id')
+                .eq('is_active', true)
+                .in('item_type', ITEM_TYPES_VALIDOS)
+                .order('item_type', { ascending: true })
+                .order('name',      { ascending: true }));
+
+            // Si el intento 2 dio resultados, actualizar restaurantId para próximas queries
+            if (!error && data && data.length > 0 && data[0].restaurant_id) {
+                State.restaurantId = data[0].restaurant_id;
+            }
+        }
 
         if (error || !data || data.length === 0) {
             _activarModoDemo();
@@ -312,6 +450,8 @@ const Menu = {
 
         _renderizarMenu();
         _mostrarEstado('menu');
+        // PROBLEMA 2 FIX: suscribir tiempo real en modo catálogo también
+        _suscribirRealtime();
     },
 };
 
@@ -484,6 +624,10 @@ function _refrescarTarjeta(slotId) {
 const Cart = {
 
     agregar(slotId) {
+        if (!State.sistemaHabilitado) {
+            Toast.error('El servicio está temporalmente suspendido. No se pueden agregar productos.');
+            return;
+        }
         const slot = State.slots.find(s => s.id === slotId);
         if (!slot || !slot.disponible) return;
 
@@ -597,6 +741,10 @@ const Order = {
 
     async enviar() {
         if (State.isSubmitting) return;
+        if (!State.sistemaHabilitado) {
+            Toast.error('El servicio está temporalmente suspendido. No se pueden enviar pedidos.', 5000);
+            return;
+        }
         if (State.cart.length === 0) {
             Toast.error('Agrega al menos un plato al pedido.');
             return;
@@ -797,17 +945,21 @@ const Order = {
 // TIEMPO REAL
 // ============================================================
 function _suscribirRealtime() {
-    if (!State.dailyMenuId || !State.restaurantId) return;
+    if (!State.restaurantId) return;
 
     db.channel('la26-mesero-rt')
         .on('postgres_changes', {
             event: '*', schema: 'public', table: 'daily_menu_slots',
-            filter: `daily_menu_id=eq.${State.dailyMenuId}`,
-        }, () => Menu.cargar())
-        .on('postgres_changes', {
-            event: 'UPDATE', schema: 'public', table: 'menu_items',
-            filter: `restaurant_id=eq.${State.restaurantId}`,
+            filter: State.dailyMenuId
+                ? `daily_menu_id=eq.${State.dailyMenuId}`
+                : undefined,
         }, () => { if (State.dailyMenuId) Menu.cargar(); })
+        .on('postgres_changes', {
+            // PROBLEMA 2 FIX: suscribir cambios de menu_items siempre,
+            // no solo cuando hay menú del día. Así admin puede crear/editar
+            // platos y el mesero ve los cambios en tiempo real.
+            event: '*', schema: 'public', table: 'menu_items',
+        }, () => Menu.cargar())
         .subscribe();
 }
 
@@ -816,5 +968,20 @@ function _suscribirRealtime() {
 // ============================================================
 (async function init() {
     await _resolverRestaurant();
-    Menu.cargar();
+
+    // PROBLEMA 1 FIX: verificar estado del sistema ANTES de cargar el menú
+    const habilitado = await _verificarSistemaHabilitado();
+    State.sistemaHabilitado = habilitado;
+
+    if (!habilitado) {
+        // Sistema bloqueado: mostrar pantalla de suspensión
+        _mostrarSistemaBloqueado();
+    } else {
+        // Sistema activo: cargar menú normalmente
+        Menu.cargar();
+    }
+
+    // Suscribir cambios en tiempo real de system_settings
+    // Permite que el menú reaccione inmediatamente al toggle del admin
+    _suscribirCambiosSistema();
 })();
