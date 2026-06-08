@@ -5,854 +5,495 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Panel Mesero · La 26</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-  :root {
-    --bg: #0f1010;
-    --bg2: #141614;
-    --card: #1a1d1a;
-    --card2: #1f231f;
-    --green: #4a5a28;
-    --green-light: #6a8038;
-    --text: #e8e8e2;
-    --text2: #78786e;
-    --text3: #4a4a42;
-    --border: #252820;
-
-    --libre: #2d4a2d;
-    --libre-border: #4a7a4a;
-    --libre-text: #7ab87a;
-
-    --pendiente: #4a3a10;
-    --pendiente-border: #c8941a;
-    --pendiente-text: #e8b840;
-
-    --preparando: #4a2a10;
-    --preparando-border: #e07020;
-    --preparando-text: #f09040;
-
-    --listo: #1a4a2a;
-    --listo-border: #20c860;
-    --listo-text: #40e880;
-
-    --cuenta: #2a2a30;
-    --cuenta-border: #505060;
-    --cuenta-text: #9090a0;
-
-    --alerta-bg: #3a1a08;
-    --alerta-border: #c85010;
-
-    --radius: 16px;
-    --radius-sm: 10px;
-    --transition: 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  html, body {
-    height: 100%;
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 15px;
-    line-height: 1.5;
-    -webkit-font-smoothing: antialiased;
-    overflow-x: hidden;
-  }
-
-  /* ─── SCROLLBAR ─── */
-  ::-webkit-scrollbar { width: 4px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-  /* ─── PANTALLA LOGIN ─── */
-  #login-screen {
-    position: fixed; inset: 0; z-index: 1000;
-    background: var(--bg);
-    display: flex; align-items: center; justify-content: center;
-    flex-direction: column;
-    padding: 24px;
-  }
-
-  .login-logo {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: clamp(38px, 10vw, 56px);
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    color: var(--text);
-    text-align: center;
-    line-height: 1.1;
-    margin-bottom: 6px;
-  }
-
-  .login-sub {
-    font-size: 11px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--text2);
-    text-align: center;
-    margin-bottom: 48px;
-  }
-
-  .login-card {
-    width: 100%;
-    max-width: 360px;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 32px 28px;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-  }
-
-  .field-label {
-    font-size: 11px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text2);
-    margin-bottom: 8px;
-    display: block;
-  }
-
-  .field-input {
-    width: 100%;
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 13px 16px;
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 15px;
-    outline: none;
-    transition: border-color var(--transition);
-    -webkit-appearance: none;
-  }
-
-  .field-input:focus { border-color: var(--green-light); }
-
-  .pin-wrapper {
-    display: flex;
-    gap: 10px;
-  }
-
-  .pin-digit {
-    flex: 1;
-    text-align: center;
-    font-size: 22px;
-    font-weight: 600;
-    letter-spacing: 0;
-    padding: 14px 0;
-    -webkit-text-security: disc;
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text);
-    outline: none;
-    transition: border-color var(--transition);
-    caret-color: var(--green-light);
-    width: 100%;
-  }
-
-  .pin-digit:focus { border-color: var(--green-light); }
-
-  .btn-primary {
-    width: 100%;
-    background: var(--green);
-    border: 1px solid var(--green-light);
-    border-radius: var(--radius-sm);
-    padding: 15px;
-    color: #d8e8b0;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    cursor: pointer;
-    transition: background var(--transition), transform 0.1s;
-    -webkit-tap-highlight-color: transparent;
-    min-height: 44px;
-  }
-
-  .btn-primary:active { transform: scale(0.98); background: var(--green-light); }
-  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  .login-error {
-    text-align: center;
-    font-size: 13px;
-    color: #e07060;
-    min-height: 18px;
-  }
-
-  /* ─── APP PRINCIPAL ─── */
-  #app {
-    display: none;
-    flex-direction: column;
-    min-height: 100vh;
-  }
-
-  /* ─── TOPBAR ─── */
-  .topbar {
-    position: sticky; top: 0; z-index: 100;
-    background: var(--bg2);
-    border-bottom: 1px solid var(--border);
-    padding: 0 16px;
-    height: 56px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .topbar-logo {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 22px;
-    font-weight: 500;
-    color: var(--text);
-    letter-spacing: 0.02em;
-    flex: 1;
-  }
-
-  .topbar-logo span { color: var(--green-light); }
-
-  .topbar-mesero {
-    font-size: 12px;
-    color: var(--text2);
-    text-align: right;
-    line-height: 1.3;
-  }
-
-  .topbar-mesero strong { color: var(--text); display: block; font-size: 13px; }
-
-  .btn-logout {
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 7px 12px;
-    color: var(--text2);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 12px;
-    cursor: pointer;
-    transition: all var(--transition);
-    min-height: 44px;
-    white-space: nowrap;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .btn-logout:hover { border-color: var(--text2); color: var(--text); }
-
-  /* ─── ALERTAS AGOTADOS ─── */
-  #alertas-container {
-    position: sticky; top: 56px; z-index: 90;
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-  }
-
-  .alerta-item {
-    background: var(--alerta-bg);
-    border-bottom: 1px solid var(--alerta-border);
-    padding: 10px 16px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
-    color: #f0a060;
-    animation: slideDown 0.3s ease;
-  }
-
-  .alerta-item .alerta-icon { font-size: 16px; flex-shrink: 0; }
-  .alerta-item .alerta-msg { flex: 1; }
-
-  .alerta-dismiss {
-    background: none; border: none;
-    color: var(--text2); font-size: 18px;
-    cursor: pointer; padding: 4px 8px;
-    min-width: 44px; min-height: 44px;
-    display: flex; align-items: center; justify-content: center;
-    border-radius: 6px;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  @keyframes slideDown {
-    from { transform: translateY(-100%); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-  }
-
-  /* ─── MAIN CONTENT ─── */
-  .main-content {
-    flex: 1;
-    padding: 20px 16px 100px;
-  }
-
-  .section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 16px;
-  }
-
-  .section-title {
-    font-size: 11px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--text2);
-  }
-
-  .mesas-count {
-    font-size: 12px;
-    color: var(--text3);
-  }
-
-  /* ─── GRID DE MESAS ─── */
-  #mesas-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-  }
-
-  @media (min-width: 600px) { #mesas-grid { grid-template-columns: repeat(3, 1fr); } }
-  @media (min-width: 900px) { #mesas-grid { grid-template-columns: repeat(4, 1fr); } }
-
-  /* ─── TARJETA DE MESA ─── */
-  .mesa-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px 14px;
-    cursor: pointer;
-    transition: transform 0.15s, border-color var(--transition);
-    animation: fadeUp 0.4s ease both;
-    -webkit-tap-highlight-color: transparent;
-    position: relative;
-    overflow: hidden;
-    min-height: 120px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    user-select: none;
-  }
-
-  .mesa-card:active { transform: scale(0.97); }
-
-  .mesa-card.estado-libre {
-    background: var(--libre);
-    border-color: var(--libre-border);
-  }
-
-  .mesa-card.estado-pendiente {
-    background: var(--pendiente);
-    border-color: var(--pendiente-border);
-  }
-
-  .mesa-card.estado-preparando {
-    background: var(--preparando);
-    border-color: var(--preparando-border);
-  }
-
-  .mesa-card.estado-listo {
-    background: var(--listo);
-    border-color: var(--listo-border);
-    animation: fadeUp 0.4s ease both, pulsoListo 2s ease-in-out infinite;
-  }
-
-  .mesa-card.estado-cuenta {
-    background: var(--cuenta);
-    border-color: var(--cuenta-border);
-  }
-
-  @keyframes pulsoListo {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(32, 200, 96, 0.0); }
-    50% { box-shadow: 0 0 0 6px rgba(32, 200, 96, 0.15); }
-  }
-
-  @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(16px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .mesa-numero {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 28px;
-    font-weight: 500;
-    color: var(--text);
-    line-height: 1;
-    margin-bottom: 4px;
-  }
-
-  .mesa-nombre {
-    font-size: 11px;
-    color: var(--text2);
-    margin-bottom: 10px;
-    letter-spacing: 0.04em;
-  }
-
-  .mesa-estado-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    padding: 3px 8px;
-    border-radius: 20px;
-    margin-bottom: 8px;
-  }
-
-  .estado-libre .mesa-estado-badge { background: rgba(74,122,74,0.3); color: var(--libre-text); }
-  .estado-pendiente .mesa-estado-badge { background: rgba(200,148,26,0.2); color: var(--pendiente-text); }
-  .estado-preparando .mesa-estado-badge { background: rgba(224,112,32,0.2); color: var(--preparando-text); }
-  .estado-listo .mesa-estado-badge { background: rgba(32,200,96,0.2); color: var(--listo-text); }
-  .estado-cuenta .mesa-estado-badge { background: rgba(80,80,96,0.3); color: var(--cuenta-text); }
-
-  .mesa-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    gap: 4px;
-  }
-
-  .mesa-timer {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--text2);
-    transition: color 0.3s;
-  }
-
-  .mesa-timer.timer-verde { color: #7ab87a; }
-  .mesa-timer.timer-amarillo { color: #e8b840; }
-  .mesa-timer.timer-naranja { color: #f09040; }
-  .mesa-timer.timer-rojo { color: #f06050; animation: timerPulso 1.5s ease-in-out infinite; }
-
-  @keyframes timerPulso {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
-
-  .mesa-items {
-    font-size: 11px;
-    color: var(--text3);
-    text-align: right;
-  }
-
-  .mesa-cliente {
-    font-size: 11px;
-    color: var(--text2);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-    margin-bottom: 2px;
-  }
-
-  /* ─── SKELETON ─── */
-  .mesa-skeleton {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    height: 130px;
-    animation: shimmer 1.6s ease infinite;
-  }
-
-  @keyframes shimmer {
-    0%, 100% { opacity: 0.5; }
-    50% { opacity: 1; }
-  }
-
-  /* ─── OVERLAY / DRAWER ─── */
-  #overlay {
-    position: fixed; inset: 0; z-index: 200;
-    background: rgba(0,0,0,0.65);
-    display: none;
-    align-items: flex-end;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  #overlay.visible { display: flex; }
-
-  /* ─── BOTTOM SHEET / DRAWER ─── */
-  .drawer {
-    width: 100%;
-    max-width: 600px;
-    margin: 0 auto;
-    background: var(--card);
-    border-top: 1px solid var(--border);
-    border-radius: 20px 20px 0 0;
-    max-height: 92vh;
-    overflow-y: auto;
-    transform: translateY(100%);
-    transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
-    overscroll-behavior: contain;
-    padding-bottom: env(safe-area-inset-bottom, 20px);
-  }
-
-  .drawer.open { transform: translateY(0); }
-
-  .drawer-handle {
-    width: 40px; height: 4px;
-    background: var(--border);
-    border-radius: 2px;
-    margin: 12px auto 0;
-  }
-
-  .drawer-header {
-    padding: 16px 20px 12px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .drawer-mesa-num {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 32px;
-    font-weight: 500;
-    color: var(--text);
-    line-height: 1;
-  }
-
-  .drawer-mesa-info { flex: 1; }
-  .drawer-mesa-nombre { font-size: 12px; color: var(--text2); margin-top: 3px; }
-
-  .btn-close-drawer {
-    background: none; border: 1px solid var(--border);
-    border-radius: 8px; padding: 8px 12px;
-    color: var(--text2); font-size: 20px;
-    cursor: pointer; min-width: 44px; min-height: 44px;
-    display: flex; align-items: center; justify-content: center;
-    -webkit-tap-highlight-color: transparent;
-    transition: all var(--transition);
-  }
-
-  .btn-close-drawer:hover { border-color: var(--text2); }
-
-  .drawer-body { padding: 20px; display: flex; flex-direction: column; gap: 20px; }
-
-  /* ─── ACCIONES DE MESA ─── */
-  .drawer-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
-
-  .btn-accion {
-    background: var(--card2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 14px 12px;
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all var(--transition);
-    display: flex; align-items: center; justify-content: center;
-    gap: 7px;
-    min-height: 44px;
-    text-align: center;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .btn-accion:active { transform: scale(0.97); }
-  .btn-accion.primary { background: var(--green); border-color: var(--green-light); color: #d8e8b0; grid-column: 1 / -1; }
-  .btn-accion.danger { border-color: #c84030; color: #f08070; }
-  .btn-accion.warning { border-color: var(--pendiente-border); color: var(--pendiente-text); }
-
-  /* ─── PEDIDOS ACTIVOS ─── */
-  .pedidos-section-title {
-    font-size: 11px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text2);
-    margin-bottom: 12px;
-  }
-
-  .pedido-card {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    margin-bottom: 10px;
-  }
-
-  .pedido-header {
-    padding: 12px 14px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .pedido-num { font-size: 12px; color: var(--text2); font-weight: 500; }
-  .pedido-hora { font-size: 11px; color: var(--text3); }
-
-  .pedido-status-badge {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    padding: 3px 8px;
-    border-radius: 20px;
-  }
-
-  .status-pending { background: rgba(200,148,26,0.15); color: var(--pendiente-text); }
-  .status-preparing { background: rgba(224,112,32,0.15); color: var(--preparando-text); }
-  .status-ready { background: rgba(32,200,96,0.15); color: var(--listo-text); }
-  .status-delivered { background: rgba(80,80,96,0.2); color: var(--text2); }
-
-  .pedido-items { padding: 10px 14px; display: flex; flex-direction: column; gap: 7px; }
-
-  .item-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-  }
-
-  .item-qty {
-    width: 22px; height: 22px;
-    background: var(--card);
-    border-radius: 6px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 11px; font-weight: 600;
-    color: var(--text2);
-    flex-shrink: 0;
-  }
-
-  .item-nombre { flex: 1; color: var(--text); }
-
-  .item-status-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .dot-pending { background: var(--pendiente-border); }
-  .dot-preparing { background: var(--preparando-border); }
-  .dot-ready { background: var(--listo-border); }
-  .dot-delivered { background: var(--text3); }
-
-  .pedido-total {
-    padding: 10px 14px;
-    border-top: 1px solid var(--border);
-    font-size: 13px;
-    display: flex;
-    justify-content: space-between;
-    color: var(--text2);
-  }
-
-  .pedido-total strong { color: var(--text); }
-
-  /* ─── VISTA TOMAR PEDIDO ─── */
-  #vista-pedido {
-    display: none;
-    position: fixed; inset: 0; z-index: 300;
-    background: var(--bg);
-    flex-direction: column;
-  }
-
-  .pedido-topbar {
-    background: var(--bg2);
-    border-bottom: 1px solid var(--border);
-    padding: 0 16px;
-    height: 56px;
-    display: flex; align-items: center; gap: 12px;
-    position: sticky; top: 0; z-index: 10;
-  }
-
-  .btn-back {
-    background: none; border: 1px solid var(--border);
-    border-radius: 8px; padding: 8px 12px;
-    color: var(--text2); font-size: 20px;
-    cursor: pointer; min-width: 44px; min-height: 44px;
-    display: flex; align-items: center; justify-content: center;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .pedido-topbar-title {
-    flex: 1;
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 20px;
-    font-weight: 500;
-    color: var(--text);
-  }
-
-  .pedido-topbar-mesa { font-size: 12px; color: var(--text2); }
-
-  .pedido-content { flex: 1; overflow-y: auto; padding: 16px; padding-bottom: 160px; }
-
-  /* ─── MENÚ EN VISTA PEDIDO ─── */
-  .menu-categoria {
-    margin-bottom: 24px;
-  }
-
-  .cat-titulo {
-    font-size: 10px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--text2);
-    margin-bottom: 10px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .menu-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 0;
-    border-bottom: 1px solid var(--border);
-    gap: 12px;
-  }
-
-  .menu-item:last-child { border-bottom: none; }
-
-  .menu-item-info { flex: 1; }
-  .menu-item-nombre { font-size: 14px; color: var(--text); font-weight: 500; }
-  .menu-item-precio { font-size: 12px; color: var(--text2); margin-top: 2px; }
-  .menu-item-agotado { font-size: 11px; color: #f06050; margin-top: 2px; }
-
-  .qty-control {
-    display: flex; align-items: center; gap: 0;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-
-  .qty-btn {
-    width: 36px; height: 36px;
-    background: none; border: none;
-    color: var(--text);
-    font-size: 18px; font-weight: 300;
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    -webkit-tap-highlight-color: transparent;
-    transition: background 0.12s;
-  }
-
-  .qty-btn:active { background: var(--border); }
-
-  .qty-num {
-    min-width: 30px;
-    text-align: center;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text);
-  }
-
-  /* ─── RESUMEN PEDIDO FLOTANTE ─── */
-  .pedido-footer {
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
-    z-index: 10;
-    background: var(--card);
-    border-top: 1px solid var(--border);
-    padding: 16px;
-    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-  }
-
-  .pedido-resumen {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 12px;
-    padding: 10px 14px;
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    font-size: 13px;
-  }
-
-  .pedido-resumen .total-label { color: var(--text2); }
-  .pedido-resumen .total-valor { font-size: 16px; font-weight: 600; color: var(--text); }
-  .pedido-resumen .items-count { font-size: 11px; color: var(--text3); }
-
-  .cliente-field {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 12px;
-  }
-
-  .cliente-field input {
-    flex: 1;
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 11px 14px;
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    outline: none;
-    transition: border-color var(--transition);
-  }
-
-  .cliente-field input:focus { border-color: var(--green-light); }
-  .cliente-field input::placeholder { color: var(--text3); }
-
-  /* ─── EMPTY STATE ─── */
-  .empty-state {
-    text-align: center;
-    padding: 40px 20px;
-    color: var(--text2);
-    font-size: 13px;
-  }
-
-  .empty-state .empty-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.5; }
-
-  /* ─── TOAST ─── */
-  #toast {
-    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-    z-index: 1000;
-    background: var(--card2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 12px 20px;
-    font-size: 13px;
-    color: var(--text);
-    white-space: nowrap;
-    opacity: 0;
-    transition: opacity 0.3s;
-    pointer-events: none;
-  }
-
-  #toast.visible { opacity: 1; }
-
-  /* ─── LOADING ─── */
-  .loading-state {
-    display: flex; align-items: center; justify-content: center;
-    gap: 10px;
-    padding: 40px;
-    color: var(--text2);
-    font-size: 13px;
-  }
-
-  .spinner {
-    width: 18px; height: 18px;
-    border: 2px solid var(--border);
-    border-top-color: var(--green-light);
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
-  }
-
-  @keyframes spin { to { transform: rotate(360deg); } }
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#f7f6f2;
+  --bg2:#ffffff;
+  --card:#ffffff;
+  --card2:#f0ede8;
+  --border:#e8e4de;
+  --border2:#d4cfc8;
+  --green:#4a6741;
+  --green-lt:#6a8a5a;
+  --green-dim:#e8f0e2;
+  --text:#1a1a16;
+  --text2:#6a6a5e;
+  --text3:#a8a89e;
+  --shadow:0 1px 3px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.06);
+  --shadow-lg:0 8px 40px rgba(0,0,0,.12);
+
+  /* estados */
+  --libre-bg:#f0f7ee; --libre-bd:#9ac88a; --libre-txt:#2d5a20;
+  --pend-bg:#fdf5e2;  --pend-bd:#d4a020;  --pend-txt:#7a5500;
+  --prep-bg:#fef0e4;  --prep-bd:#e07030;  --prep-txt:#7a3a00;
+  --listo-bg:#e4f7ed; --listo-bd:#28b860; --listo-txt:#0a5028;
+  --cuenta-bg:#f0f0f0;--cuenta-bd:#909090;--cuenta-txt:#404040;
+  --alerta-bg:#fff5e6;--alerta-bd:#f09020;
+  --radius:14px; --radius-sm:9px;
+  --tr:0.2s cubic-bezier(.4,0,.2,1);
+}
+
+html,body{height:100%;background:var(--bg);color:var(--text);
+  font-family:'DM Sans',sans-serif;font-size:15px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+
+::-webkit-scrollbar{width:3px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+/* ══ PANTALLA LOGIN ══════════════════════════════════════════════ */
+#login-screen{
+  position:fixed;inset:0;z-index:1000;
+  background:var(--bg);
+  display:flex;align-items:center;justify-content:center;flex-direction:column;
+  padding:24px;
+}
+
+.login-logo{
+  font-family:'Cormorant Garamond',serif;
+  font-size:clamp(40px,10vw,60px);font-weight:400;
+  letter-spacing:.02em;color:var(--text);text-align:center;line-height:1.1;
+  margin-bottom:4px;
+}
+.login-logo em{color:var(--green);font-style:italic}
+
+.login-sub{
+  font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--text2);text-align:center;margin-bottom:44px;
+}
+
+.login-card{
+  width:100%;max-width:360px;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:20px;padding:32px 28px;
+  box-shadow:var(--shadow-lg);
+  display:flex;flex-direction:column;gap:20px;
+}
+
+.field-label{
+  font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--text2);margin-bottom:7px;display:block;font-weight:600;
+}
+
+.field-input{
+  width:100%;background:var(--bg);
+  border:1.5px solid var(--border);
+  border-radius:var(--radius-sm);padding:12px 15px;
+  color:var(--text);font-family:'DM Sans',sans-serif;
+  font-size:15px;outline:none;transition:border-color var(--tr);
+  -webkit-appearance:none;
+}
+.field-input:focus{border-color:var(--green)}
+.field-input::placeholder{color:var(--text3)}
+
+/* PIN de 4 dígitos */
+.pin-wrapper{display:flex;gap:10px}
+.pin-digit{
+  flex:1;text-align:center;font-size:22px;font-weight:600;
+  padding:13px 0;
+  -webkit-text-security:disc;
+  background:var(--bg);border:1.5px solid var(--border);
+  border-radius:var(--radius-sm);color:var(--text);
+  outline:none;transition:border-color var(--tr);width:100%;
+}
+.pin-digit:focus{border-color:var(--green)}
+
+.btn-primary{
+  width:100%;background:var(--green);
+  border:none;border-radius:var(--radius-sm);
+  padding:14px;color:#fff;
+  font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;
+  letter-spacing:.04em;cursor:pointer;
+  transition:background var(--tr),transform .1s;
+  min-height:48px;-webkit-tap-highlight-color:transparent;
+}
+.btn-primary:active{transform:scale(.98);background:var(--green-lt)}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+
+.login-error{text-align:center;font-size:13px;color:#c04030;min-height:18px}
+
+/* ══ APP ══════════════════════════════════════════════════════════ */
+#app{display:none;flex-direction:column;min-height:100vh}
+
+/* ── TOPBAR ─────────────────────────────────────────────────────── */
+.topbar{
+  position:sticky;top:0;z-index:100;
+  background:var(--bg2);border-bottom:1px solid var(--border);
+  padding:0 18px;height:56px;
+  display:flex;align-items:center;gap:12px;
+  box-shadow:0 1px 0 var(--border);
+}
+.topbar-logo{
+  font-family:'Cormorant Garamond',serif;
+  font-size:22px;font-weight:500;color:var(--text);letter-spacing:.02em;flex:1;
+}
+.topbar-logo em{color:var(--green);font-style:italic}
+.topbar-mesero{font-size:12px;color:var(--text2);text-align:right;line-height:1.3}
+.topbar-mesero strong{color:var(--text);display:block;font-size:13px}
+
+.btn-logout{
+  background:none;border:1px solid var(--border);border-radius:8px;
+  padding:7px 12px;color:var(--text2);
+  font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;
+  transition:all var(--tr);min-height:44px;white-space:nowrap;
+  -webkit-tap-highlight-color:transparent;
+}
+.btn-logout:hover{border-color:var(--text2);color:var(--text)}
+
+/* ── ALERTAS AGOTADOS ───────────────────────────────────────────── */
+#alertas-bar{
+  position:sticky;top:56px;z-index:90;
+  display:flex;flex-direction:column;
+}
+.alerta-item{
+  background:var(--alerta-bg);border-bottom:1px solid var(--alerta-bd);
+  padding:10px 18px;display:flex;align-items:center;gap:10px;
+  font-size:13px;color:#7a4a00;
+  animation:slideDown .3s ease;
+}
+.alerta-msg{flex:1}
+.alerta-dismiss{
+  background:none;border:none;color:var(--text3);font-size:16px;
+  cursor:pointer;padding:4px 8px;min-width:44px;min-height:44px;
+  display:flex;align-items:center;justify-content:center;
+  border-radius:6px;-webkit-tap-highlight-color:transparent;
+}
+@keyframes slideDown{from{transform:translateY(-100%);opacity:0}to{transform:translateY(0);opacity:1}}
+
+/* ── CONTENIDO ──────────────────────────────────────────────────── */
+.main-content{flex:1;padding:20px 16px 100px}
+
+.section-header{
+  display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;
+}
+.section-title{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--text2);font-weight:600}
+.mesas-count{font-size:12px;color:var(--text3)}
+
+/* ── GRID DE MESAS ──────────────────────────────────────────────── */
+#mesas-grid{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:12px;
+}
+@media(min-width:600px){#mesas-grid{grid-template-columns:repeat(3,1fr)}}
+@media(min-width:900px){#mesas-grid{grid-template-columns:repeat(4,1fr)}}
+
+/* ── TARJETA DE MESA ────────────────────────────────────────────── */
+.mesa-card{
+  background:var(--card);border:1.5px solid var(--border);
+  border-radius:var(--radius);padding:15px 13px;
+  cursor:pointer;transition:transform .15s,box-shadow .15s;
+  animation:fadeUp .4s ease both;
+  -webkit-tap-highlight-color:transparent;
+  min-height:116px;display:flex;flex-direction:column;
+  justify-content:space-between;user-select:none;
+  box-shadow:var(--shadow);
+}
+.mesa-card:active{transform:scale(.97)}
+
+.mesa-card.libre{background:var(--libre-bg);border-color:var(--libre-bd)}
+.mesa-card.pendiente{background:var(--pend-bg);border-color:var(--pend-bd)}
+.mesa-card.preparando{background:var(--prep-bg);border-color:var(--prep-bd)}
+.mesa-card.listo{
+  background:var(--listo-bg);border-color:var(--listo-bd);
+  animation:fadeUp .4s ease both,pulsoListo 2s ease-in-out infinite;
+}
+.mesa-card.cuenta{background:var(--cuenta-bg);border-color:var(--cuenta-bd)}
+
+@keyframes pulsoListo{
+  0%,100%{box-shadow:var(--shadow)}
+  50%{box-shadow:0 0 0 5px rgba(40,184,96,.18),var(--shadow)}
+}
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+
+.mesa-numero{
+  font-family:'Cormorant Garamond',serif;
+  font-size:26px;font-weight:500;color:var(--text);line-height:1;margin-bottom:3px;
+}
+.mesa-etiqueta{font-size:11px;color:var(--text2);margin-bottom:8px}
+
+.mesa-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:10px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;padding:3px 8px;
+  border-radius:20px;margin-bottom:8px;
+}
+.libre   .mesa-badge{background:rgba(40,140,30,.1);color:var(--libre-txt)}
+.pendiente .mesa-badge{background:rgba(200,140,0,.1);color:var(--pend-txt)}
+.preparando .mesa-badge{background:rgba(200,90,0,.1);color:var(--prep-txt)}
+.listo  .mesa-badge{background:rgba(30,160,80,.12);color:var(--listo-txt)}
+.cuenta .mesa-badge{background:rgba(100,100,100,.1);color:var(--cuenta-txt)}
+
+.mesa-footer{display:flex;justify-content:space-between;align-items:flex-end;gap:4px}
+.mesa-timer{font-size:12px;font-weight:600;color:var(--text2);transition:color .3s}
+.mesa-timer.t-verde{color:#2d7a20}
+.mesa-timer.t-amarillo{color:#8a6000}
+.mesa-timer.t-naranja{color:#8a4000}
+.mesa-timer.t-rojo{color:#c03020;animation:timerBlink 1.5s ease-in-out infinite}
+@keyframes timerBlink{0%,100%{opacity:1}50%{opacity:.45}}
+.mesa-items{font-size:11px;color:var(--text3)}
+.mesa-cliente{font-size:11px;color:var(--text2);margin-bottom:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* skeletons */
+.mesa-skel{
+  background:var(--card);border:1.5px solid var(--border);
+  border-radius:var(--radius);height:120px;
+  animation:skel 1.6s ease infinite;
+}
+@keyframes skel{0%,100%{opacity:.6}50%{opacity:1}}
+
+/* ══ OVERLAY / DRAWER ════════════════════════════════════════════ */
+#overlay{
+  position:fixed;inset:0;z-index:200;
+  background:rgba(20,20,16,.5);
+  display:none;align-items:flex-end;
+  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+}
+#overlay.open{display:flex}
+
+.drawer{
+  width:100%;max-width:600px;margin:0 auto;
+  background:var(--bg2);border-top:1px solid var(--border);
+  border-radius:20px 20px 0 0;
+  max-height:92svh;overflow-y:auto;
+  transform:translateY(100%);
+  transition:transform .34s cubic-bezier(.32,.72,0,1);
+  overscroll-behavior:contain;
+  padding-bottom:env(safe-area-inset-bottom,20px);
+}
+.drawer.open{transform:translateY(0)}
+
+.drawer-handle{display:flex;justify-content:center;padding:12px 0 0}
+.drawer-handle-bar{width:38px;height:4px;background:var(--border2);border-radius:2px}
+
+.drawer-header{
+  padding:14px 20px 12px;border-bottom:1px solid var(--border);
+  display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+}
+.drawer-titulo{
+  font-family:'Cormorant Garamond',serif;
+  font-size:30px;font-weight:500;color:var(--text);line-height:1;
+}
+.drawer-sub{font-size:12px;color:var(--text2);margin-top:3px}
+
+.btn-close{
+  background:none;border:1px solid var(--border);border-radius:8px;
+  padding:8px 12px;color:var(--text2);font-size:18px;
+  cursor:pointer;min-width:44px;min-height:44px;
+  display:flex;align-items:center;justify-content:center;
+  -webkit-tap-highlight-color:transparent;transition:all var(--tr);
+}
+.btn-close:hover{border-color:var(--text2)}
+
+.drawer-body{padding:20px;display:flex;flex-direction:column;gap:20px}
+
+/* acciones del drawer */
+.drawer-acciones{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+
+.btn-accion{
+  background:var(--bg);border:1.5px solid var(--border);
+  border-radius:var(--radius-sm);padding:13px 10px;
+  color:var(--text);font-family:'DM Sans',sans-serif;
+  font-size:13px;font-weight:500;cursor:pointer;
+  transition:all var(--tr);min-height:48px;text-align:center;
+  -webkit-tap-highlight-color:transparent;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.btn-accion:active{transform:scale(.97)}
+.btn-accion.primary{
+  background:var(--green);border-color:var(--green);
+  color:#fff;grid-column:1/-1;
+}
+.btn-accion.primary:hover{background:var(--green-lt)}
+.btn-accion.danger{border-color:#d04030;color:#c03020}
+.btn-accion.warning{border-color:var(--pend-bd);color:var(--pend-txt)}
+
+/* pedidos en drawer */
+.sec-label{
+  font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text2);margin-bottom:11px;font-weight:600;
+}
+.pedido-card{
+  background:var(--bg);border:1px solid var(--border);
+  border-radius:var(--radius-sm);overflow:hidden;margin-bottom:10px;
+}
+.pedido-head{
+  padding:11px 14px;display:flex;align-items:center;
+  justify-content:space-between;border-bottom:1px solid var(--border);
+}
+.pedido-num{font-size:12px;color:var(--text2);font-weight:500}
+.pedido-hora{font-size:11px;color:var(--text3)}
+.pedido-sbadge{
+  font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  padding:3px 8px;border-radius:20px;
+}
+.sbadge-pending{background:rgba(200,140,0,.1);color:var(--pend-txt)}
+.sbadge-preparing{background:rgba(200,90,0,.1);color:var(--prep-txt)}
+.sbadge-ready{background:rgba(30,160,80,.12);color:var(--listo-txt)}
+.sbadge-delivered,.sbadge-cuenta{background:rgba(100,100,100,.08);color:var(--text3)}
+
+.pedido-items{padding:9px 14px;display:flex;flex-direction:column;gap:7px}
+.item-row{display:flex;align-items:center;gap:8px;font-size:13px}
+.item-qty{
+  width:22px;height:22px;background:var(--card2);
+  border-radius:6px;display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:600;color:var(--text2);flex-shrink:0;
+}
+.item-nombre{flex:1;color:var(--text)}
+.item-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot-pending{background:var(--pend-bd)}
+.dot-preparing{background:var(--prep-bd)}
+.dot-ready{background:var(--listo-bd)}
+.dot-delivered{background:var(--text3)}
+
+.pedido-total{
+  padding:9px 14px;border-top:1px solid var(--border);
+  font-size:13px;display:flex;justify-content:space-between;color:var(--text2);
+}
+.pedido-total strong{color:var(--text)}
+
+.empty-state{text-align:center;padding:36px 20px;color:var(--text2);font-size:13px}
+.empty-icon{font-size:30px;margin-bottom:10px;opacity:.5}
+
+/* ══ VISTA TOMAR PEDIDO ══════════════════════════════════════════ */
+#vista-pedido{
+  display:none;position:fixed;inset:0;z-index:300;
+  background:var(--bg);flex-direction:column;
+}
+.vp-topbar{
+  background:var(--bg2);border-bottom:1px solid var(--border);
+  padding:0 16px;height:56px;
+  display:flex;align-items:center;gap:12px;
+  position:sticky;top:0;z-index:10;
+  box-shadow:0 1px 0 var(--border);
+}
+.btn-back{
+  background:none;border:1px solid var(--border);border-radius:8px;
+  padding:8px 12px;color:var(--text2);font-size:18px;
+  cursor:pointer;min-width:44px;min-height:44px;
+  display:flex;align-items:center;justify-content:center;
+  -webkit-tap-highlight-color:transparent;
+}
+.vp-topbar-titulo{
+  flex:1;font-family:'Cormorant Garamond',serif;
+  font-size:19px;font-weight:500;color:var(--text);
+}
+.vp-topbar-sub{font-size:11px;color:var(--text2)}
+
+.vp-content{flex:1;overflow-y:auto;padding:16px;padding-bottom:170px}
+
+/* menú en vista pedido */
+.cat-section{margin-bottom:22px}
+.cat-title{
+  font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--text2);font-weight:600;margin-bottom:9px;
+  padding-bottom:8px;border-bottom:1px solid var(--border);
+}
+.mi-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:11px 0;border-bottom:1px solid var(--border);gap:12px;
+}
+.mi-row:last-child{border-bottom:none}
+.mi-info{flex:1}
+.mi-nombre{font-size:14px;color:var(--text);font-weight:500}
+.mi-precio{font-size:12px;color:var(--text2);margin-top:2px}
+.mi-agotado{font-size:11px;color:#c03020;margin-top:2px}
+
+.qty-ctrl{
+  display:flex;align-items:center;
+  background:var(--bg);border:1.5px solid var(--border);
+  border-radius:9px;overflow:hidden;flex-shrink:0;
+}
+.qty-btn{
+  width:34px;height:34px;background:none;border:none;
+  color:var(--text);font-size:17px;font-weight:300;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  -webkit-tap-highlight-color:transparent;transition:background .12s;
+}
+.qty-btn:active{background:var(--border)}
+.qty-num{min-width:28px;text-align:center;font-size:14px;font-weight:600;color:var(--text)}
+
+/* footer de pedido */
+.vp-footer{
+  position:fixed;bottom:0;left:0;right:0;z-index:10;
+  background:var(--bg2);border-top:1px solid var(--border);
+  padding:14px 16px;
+  padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));
+  box-shadow:0 -4px 20px rgba(0,0,0,.06);
+}
+.cliente-inp{
+  width:100%;background:var(--bg);border:1.5px solid var(--border);
+  border-radius:9px;padding:11px 14px;color:var(--text);
+  font-family:'DM Sans',sans-serif;font-size:14px;
+  outline:none;transition:border-color var(--tr);margin-bottom:11px;
+}
+.cliente-inp:focus{border-color:var(--green)}
+.cliente-inp::placeholder{color:var(--text3)}
+
+.vp-resumen{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:11px;padding:10px 14px;
+  background:var(--bg);border:1px solid var(--border);border-radius:10px;
+  font-size:13px;
+}
+.vp-total-label{color:var(--text2)}
+.vp-items-count{font-size:11px;color:var(--text3)}
+.vp-total-val{font-size:16px;font-weight:600;color:var(--text)}
+
+/* loading */
+.loading-state{
+  display:flex;align-items:center;justify-content:center;
+  gap:10px;padding:40px;color:var(--text2);font-size:13px;
+}
+.spinner{
+  width:18px;height:18px;border:2px solid var(--border);
+  border-top-color:var(--green);border-radius:50%;
+  animation:spin .7s linear infinite;flex-shrink:0;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── TOAST ──────────────────────────────────────────────────────── */
+#toast-wrap{
+  position:fixed;top:20px;left:50%;transform:translateX(-50%);
+  z-index:9999;display:flex;flex-direction:column;gap:8px;align-items:center;
+  pointer-events:none;width:max-content;max-width:calc(100vw - 32px);
+}
+.toast-item{
+  display:flex;align-items:center;gap:9px;
+  background:var(--card);border:1.5px solid var(--border);
+  border-radius:999px;padding:10px 20px 10px 14px;
+  box-shadow:var(--shadow-lg);
+  font-size:13.5px;font-family:'DM Sans',sans-serif;font-weight:500;
+  color:var(--text);pointer-events:auto;
+  opacity:0;transform:translateY(-8px);
+  transition:opacity .28s ease,transform .28s ease;
+  white-space:pre-wrap;max-width:calc(100vw - 32px);
+}
+.toast-item.visible{opacity:1;transform:translateY(0)}
+.toast-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.toast-ok .toast-dot{background:var(--green)}
+.toast-err .toast-dot{background:#c03020}
+.toast-info .toast-dot{background:var(--green)}
 </style>
 </head>
 <body>
 
-<!-- ─── LOGIN ─── -->
+<!-- ══ LOGIN ══════════════════════════════════════════════════════ -->
 <div id="login-screen">
-  <div class="login-logo">La 26</div>
-  <div class="login-sub">Sistema de Mesas · Panel Mesero</div>
+  <div class="login-logo">La <em>26</em></div>
+  <div class="login-sub">Panel del Mesero · Tiempo Real</div>
   <div class="login-card">
     <div>
-      <label class="field-label">Nombre</label>
-      <input id="login-nombre" class="field-input" type="text" placeholder="Tu nombre" autocomplete="off" autocorrect="off" spellcheck="false">
+      <label class="field-label">Tu nombre</label>
+      <input id="login-nombre" class="field-input" type="text"
+        placeholder="Escribe tu nombre" autocomplete="off" autocorrect="off" spellcheck="false">
     </div>
     <div>
-      <label class="field-label">PIN de acceso</label>
+      <label class="field-label">PIN de acceso (4 dígitos)</label>
       <div class="pin-wrapper">
         <input class="pin-digit" type="password" inputmode="numeric" maxlength="1" id="p1">
         <input class="pin-digit" type="password" inputmode="numeric" maxlength="1" id="p2">
@@ -861,15 +502,15 @@
       </div>
     </div>
     <div class="login-error" id="login-error"></div>
-    <button class="btn-primary" id="btn-login">Ingresar al panel</button>
+    <button class="btn-primary" id="btn-login">Ingresar al panel →</button>
   </div>
 </div>
 
-<!-- ─── APP ─── -->
+<!-- ══ APP ════════════════════════════════════════════════════════ -->
 <div id="app">
-  <!-- Topbar -->
+
   <div class="topbar">
-    <div class="topbar-logo">La <span>26</span></div>
+    <div class="topbar-logo">La <em>26</em></div>
     <div class="topbar-mesero">
       <strong id="tb-nombre">—</strong>
       <span id="tb-cargo">Mesero</span>
@@ -877,439 +518,481 @@
     <button class="btn-logout" id="btn-logout">Salir</button>
   </div>
 
-  <!-- Alertas agotados -->
-  <div id="alertas-container"></div>
+  <div id="alertas-bar"></div>
 
-  <!-- Contenido principal -->
   <div class="main-content">
     <div class="section-header">
       <div class="section-title">Mesas del restaurante</div>
       <div class="mesas-count" id="mesas-count"></div>
     </div>
     <div id="mesas-grid">
-      <!-- skeletons -->
-      <div class="mesa-skeleton"></div>
-      <div class="mesa-skeleton"></div>
-      <div class="mesa-skeleton"></div>
-      <div class="mesa-skeleton"></div>
+      <div class="mesa-skel"></div><div class="mesa-skel"></div>
+      <div class="mesa-skel"></div><div class="mesa-skel"></div>
     </div>
   </div>
 </div>
 
-<!-- ─── OVERLAY / DRAWER DETALLE MESA ─── -->
+<!-- ══ OVERLAY + DRAWER DE MESA ══════════════════════════════════ -->
 <div id="overlay">
   <div class="drawer" id="drawer">
-    <div class="drawer-handle"></div>
+    <div class="drawer-handle"><div class="drawer-handle-bar"></div></div>
     <div class="drawer-header">
-      <div class="drawer-mesa-info">
-        <div class="drawer-mesa-num" id="d-mesa-num">Mesa —</div>
-        <div class="drawer-mesa-nombre" id="d-mesa-nombre"></div>
+      <div>
+        <div class="drawer-titulo" id="d-titulo">Mesa —</div>
+        <div class="drawer-sub" id="d-sub"></div>
       </div>
-      <button class="btn-close-drawer" id="btn-close-drawer">✕</button>
+      <button class="btn-close" id="btn-close-drawer">✕</button>
     </div>
     <div class="drawer-body">
-      <!-- Acciones -->
-      <div class="drawer-actions">
+      <div class="drawer-acciones">
         <button class="btn-accion primary" id="btn-nuevo-pedido">➕ Nuevo pedido</button>
         <button class="btn-accion warning" id="btn-pedir-cuenta">🧾 Pedir cuenta</button>
-        <button class="btn-accion danger" id="btn-liberar-mesa">🔓 Liberar mesa</button>
+        <button class="btn-accion danger"  id="btn-liberar">🔓 Liberar mesa</button>
       </div>
-      <!-- Pedidos activos -->
       <div>
-        <div class="pedidos-section-title">Pedidos activos</div>
-        <div id="d-pedidos-container">
-          <div class="empty-state">
-            <div class="empty-icon">🍽️</div>
-            <div>Sin pedidos activos</div>
-          </div>
-        </div>
+        <div class="sec-label">Pedidos activos</div>
+        <div id="d-pedidos"></div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ─── VISTA TOMAR PEDIDO ─── -->
+<!-- ══ VISTA TOMAR PEDIDO ══════════════════════════════════════════ -->
 <div id="vista-pedido">
-  <div class="pedido-topbar">
-    <button class="btn-back" id="btn-back-pedido">←</button>
+  <div class="vp-topbar">
+    <button class="btn-back" id="btn-back">←</button>
     <div style="flex:1">
-      <div class="pedido-topbar-title">Nuevo pedido</div>
-      <div class="pedido-topbar-mesa" id="vp-mesa-label"></div>
+      <div class="vp-topbar-titulo">Nuevo pedido</div>
+      <div class="vp-topbar-sub" id="vp-mesa-sub"></div>
     </div>
   </div>
-  <div class="pedido-content" id="pedido-menu-content">
-    <div class="loading-state"><div class="spinner"></div> Cargando carta…</div>
+  <div class="vp-content" id="vp-content">
+    <div class="loading-state"><div class="spinner"></div>Cargando carta…</div>
   </div>
-  <div class="pedido-footer">
-    <div class="cliente-field">
-      <input type="text" id="vp-cliente-nombre" placeholder="Nombre del cliente (opcional)" autocomplete="off">
-    </div>
-    <div class="pedido-resumen" id="vp-resumen">
+  <div class="vp-footer">
+    <input class="cliente-inp" id="vp-cliente" type="text"
+      placeholder="Nombre del cliente (opcional)" autocomplete="off">
+    <div class="vp-resumen">
       <div>
-        <div class="total-label">Total estimado</div>
-        <div class="items-count" id="vp-items-count">0 ítems</div>
+        <div class="vp-total-label">Total estimado</div>
+        <div class="vp-items-count" id="vp-count">0 ítems</div>
       </div>
-      <div class="total-valor" id="vp-total">$0</div>
+      <div class="vp-total-val" id="vp-total">$0</div>
     </div>
-    <button class="btn-primary" id="btn-confirmar-pedido">Confirmar pedido →</button>
+    <button class="btn-primary" id="btn-confirmar" disabled>Confirmar pedido →</button>
   </div>
 </div>
 
-<!-- ─── TOAST ─── -->
-<div id="toast"></div>
+<!-- ══ TOAST ══════════════════════════════════════════════════════ -->
+<div id="toast-wrap"></div>
 
 <script>
-// ─── SUPABASE CONFIG ───────────────────────────────────────────────────────
-const SUPABASE_URL = "https://hxmodeduckuhvvspnkxd.supabase.co";
+// ═══════════════════════════════════════════════════════════
+// SUPABASE — exactamente igual que menu.js
+// ═══════════════════════════════════════════════════════════
+const SUPABASE_URL      = "https://hxmodeduckuhvvspnkxd.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_ESxhljLgqWkGvrnKhvbeEg_iBqaGciv";
-const RESTAURANT_SLUG = "restaurante-la-26";
+const RESTAURANT_SLUG   = "restaurante-la-26";
 
-const { createClient } = supabase;
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// ─── ESTADO GLOBAL ────────────────────────────────────────────────────────
-const state = {
+// Tipos válidos — igual que menu.js (NUNCA 'protein' ni 'sauce')
+const TIPOS_VALIDOS = ['executive_lunch','a_la_carte','drink','dessert','side'];
+const TIPO_LABEL = {
+  executive_lunch: '🥩 Proteína / Almuerzo',
+  a_la_carte:      '✨ A la Carta',
+  drink:           '🥤 Bebida',
+  dessert:         '🍮 Postre',
+  side:            '🍲 Principio',
+};
+
+// PINes hardcoded
+const PINES = {
+  '1111':{ nombre:'Mesero 1', cargo:'Mesero' },
+  '2222':{ nombre:'Mesero 2', cargo:'Mesero' },
+  '3333':{ nombre:'Mesero 3', cargo:'Mesero' },
+  '0000':{ nombre:'Supervisor', cargo:'Supervisor' },
+};
+
+// ═══════════════════════════════════════════════════════════
+// ESTADO GLOBAL
+// ═══════════════════════════════════════════════════════════
+const S = {
   restaurantId: null,
   meseroNombre: '',
-  meseroCargo: '',
-  mesas: [],          // [{id, table_number, name, capacity, ...}]
-  ordenes: [],        // pedidos activos
-  orderItems: [],     // ítems de pedidos activos
-  menuItems: [],      // items del menú
-  dailyMenuId: null,
-  mesaSeleccionada: null,
-  carrito: {},        // {menuItemId: {nombre, precio, cantidad, itemType, dailyMenuSlotId}}
-  timerInterval: null,
+  meseroCargo:  '',
+  mesas:        [],   // {id, number, label, capacity}
+  pedidos:      [],   // orders activos del turno
+  items:        [],   // order_items de esos pedidos
+  slots:        [],   // menú disponible para tomar pedido
+  dailyMenuId:  null,
+  mesaActiva:   null, // mesa abierta en drawer
+  carrito:      {},   // {slotId: {slot, cantidad}}
+  timerInt:     null,
+  rtChannel:    null,
 };
 
-// ─── PINes ────────────────────────────────────────────────────────────────
-const PINES = {
-  '1111': { nombre: 'Mesero 1', cargo: 'Mesero' },
-  '2222': { nombre: 'Mesero 2', cargo: 'Mesero' },
-  '3333': { nombre: 'Mesero 3', cargo: 'Mesero' },
-  '0000': { nombre: 'Supervisor', cargo: 'Supervisor' },
-};
+// ═══════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════
+function todayISO() {
+  return new Date().toLocaleDateString('en-CA',{timeZone:'America/Bogota'});
+}
+function formatCOP(v) {
+  return '$' + Math.round(v||0).toLocaleString('es-CO');
+}
+function minutosDesde(ts) {
+  return Math.floor((Date.now() - new Date(ts)) / 60000);
+}
+function claseTimer(mins) {
+  if (mins <  5) return 't-verde';
+  if (mins < 15) return 't-amarillo';
+  if (mins < 25) return 't-naranja';
+  return 't-rojo';
+}
+function textoTimer(mins) {
+  if (mins <  1) return 'ahora';
+  return `${mins} min`;
+}
 
-// ─── LOGIN ────────────────────────────────────────────────────────────────
-const pinInputs = [
-  document.getElementById('p1'),
-  document.getElementById('p2'),
-  document.getElementById('p3'),
-  document.getElementById('p4'),
-];
+// ═══════════════════════════════════════════════════════════
+// TOAST — igual a menu.js
+// ═══════════════════════════════════════════════════════════
+function toast(msg, tipo = 'info', ms = 3800) {
+  const wrap = document.getElementById('toast-wrap');
+  const el   = document.createElement('div');
+  el.className = `toast-item toast-${tipo}`;
+  el.innerHTML = `<span class="toast-dot"></span><span>${msg}</span>`;
+  wrap.appendChild(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('visible')));
+  const t = setTimeout(() => {
+    el.classList.remove('visible');
+    setTimeout(() => el.remove(), 300);
+  }, ms);
+  el.onclick = () => { clearTimeout(t); el.remove(); };
+}
 
-pinInputs.forEach((inp, i) => {
+// ═══════════════════════════════════════════════════════════
+// LOGIN
+// ═══════════════════════════════════════════════════════════
+const pins = ['p1','p2','p3','p4'].map(id => document.getElementById(id));
+
+pins.forEach((inp, i) => {
   inp.addEventListener('input', e => {
-    const val = e.target.value.replace(/\D/g, '');
-    e.target.value = val ? val[0] : '';
-    if (val && i < 3) pinInputs[i + 1].focus();
+    const v = e.target.value.replace(/\D/g,'');
+    e.target.value = v ? v[0] : '';
+    if (v && i < 3) pins[i+1].focus();
+    if (v && i === 3) doLogin(); // auto-submit al completar
   });
   inp.addEventListener('keydown', e => {
-    if (e.key === 'Backspace' && !inp.value && i > 0) pinInputs[i - 1].focus();
-    if (e.key === 'Enter') doLogin();
+    if (e.key==='Backspace' && !inp.value && i>0) pins[i-1].focus();
+    if (e.key==='Enter') doLogin();
   });
 });
 
 document.getElementById('login-nombre').addEventListener('keydown', e => {
-  if (e.key === 'Enter') pinInputs[0].focus();
+  if (e.key==='Enter') pins[0].focus();
 });
-
 document.getElementById('btn-login').addEventListener('click', doLogin);
 
 function doLogin() {
   const nombre = document.getElementById('login-nombre').value.trim();
-  const pin = pinInputs.map(i => i.value).join('');
-  const err = document.getElementById('login-error');
+  const pin    = pins.map(p => p.value).join('');
+  const err    = document.getElementById('login-error');
 
   if (!nombre) { err.textContent = 'Escribe tu nombre para continuar.'; return; }
   if (pin.length < 4) { err.textContent = 'Ingresa tu PIN de 4 dígitos.'; return; }
 
   const mesero = PINES[pin];
-  if (!mesero) { err.textContent = 'PIN incorrecto. Intenta de nuevo.'; return; }
+  if (!mesero) { err.textContent = 'PIN incorrecto. Intenta de nuevo.'; pins.forEach(p=>p.value=''); pins[0].focus(); return; }
 
   err.textContent = '';
-  state.meseroNombre = nombre;
-  state.meseroCargo = mesero.cargo;
-  sessionStorage.setItem('mesero', JSON.stringify({ meseroNombre: nombre, meseroCargo: mesero.cargo }));
+  S.meseroNombre = nombre;
+  S.meseroCargo  = mesero.cargo;
+  sessionStorage.setItem('mp_nombre', nombre);
+  sessionStorage.setItem('mp_cargo',  mesero.cargo);
 
+  mostrarApp();
+}
+
+function mostrarApp() {
   document.getElementById('login-screen').style.display = 'none';
   const app = document.getElementById('app');
   app.style.display = 'flex';
-
-  document.getElementById('tb-nombre').textContent = nombre;
-  document.getElementById('tb-cargo').textContent = mesero.cargo;
-
+  document.getElementById('tb-nombre').textContent = S.meseroNombre;
+  document.getElementById('tb-cargo').textContent  = S.meseroCargo;
   iniciarApp();
 }
 
 document.getElementById('btn-logout').addEventListener('click', () => {
-  sessionStorage.removeItem('mesero');
+  sessionStorage.removeItem('mp_nombre');
+  sessionStorage.removeItem('mp_cargo');
+  if (S.timerInt) clearInterval(S.timerInt);
+  if (S.rtChannel) sb.removeChannel(S.rtChannel);
   location.reload();
 });
 
 // Restaurar sesión
 (function() {
-  const saved = sessionStorage.getItem('mesero');
-  if (saved) {
-    try {
-      const { meseroNombre, meseroCargo } = JSON.parse(saved);
-      state.meseroNombre = meseroNombre;
-      state.meseroCargo = meseroCargo;
-      document.getElementById('login-screen').style.display = 'none';
-      const app = document.getElementById('app');
-      app.style.display = 'flex';
-      document.getElementById('tb-nombre').textContent = meseroNombre;
-      document.getElementById('tb-cargo').textContent = meseroCargo;
-      iniciarApp();
-    } catch(e) { /* nada */ }
+  const n = sessionStorage.getItem('mp_nombre');
+  const c = sessionStorage.getItem('mp_cargo');
+  if (n && c) {
+    S.meseroNombre = n;
+    S.meseroCargo  = c;
+    mostrarApp();
   }
 })();
 
-// ─── INICIAR APP ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// INICIO DE APP
+// ═══════════════════════════════════════════════════════════
 async function iniciarApp() {
   await resolverRestaurant();
-  await cargarDatos();
-  renderMesas();
-  suscribirRealtime();
-  iniciarTimer();
+  await recargarTodo();
+  renderGrid();
+  iniciarRealtime();
+  S.timerInt = setInterval(renderGrid, 30000);
 }
 
+// ═══════════════════════════════════════════════════════════
+// RESOLVER RESTAURANT — igual que resolverRestaurantId() en menu.js
+// ═══════════════════════════════════════════════════════════
 async function resolverRestaurant() {
-  const { data } = await sb
-    .from('restaurants')
-    .select('id')
-    .eq('slug', RESTAURANT_SLUG)
-    .maybeSingle();
-  state.restaurantId = data?.id;
+  try {
+    const { data: porSlug } = await sb
+      .from('restaurants').select('id').eq('slug', RESTAURANT_SLUG).maybeSingle();
+    if (porSlug?.id) { S.restaurantId = porSlug.id; return; }
+
+    const { data: cualquiera } = await sb
+      .from('restaurants').select('id').limit(1).maybeSingle();
+    if (cualquiera?.id) { S.restaurantId = cualquiera.id; return; }
+
+    const { data: nuevo } = await sb
+      .from('restaurants')
+      .insert([{ name:'Restaurante la 26', slug: RESTAURANT_SLUG }])
+      .select('id').single();
+    S.restaurantId = nuevo?.id || null;
+  } catch(e) {
+    console.error('[La26-Panel] resolverRestaurant:', e);
+  }
 }
 
-async function cargarDatos() {
-  if (!state.restaurantId) return;
+// ═══════════════════════════════════════════════════════════
+// RECARGAR DATOS — igual que iniciarPanel() + recargarPedidos() en menu.js
+// ═══════════════════════════════════════════════════════════
+async function recargarTodo() {
+  if (!S.restaurantId) return;
+  const hoy = todayISO();
 
-  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
-  const ahora = new Date();
-  const hoyComienzo = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate()).toISOString();
-
-  // Mesas
-  const { data: mesas } = await sb
+  // 1. Mesas (excluir "para llevar" igual que MeseroPanel en menu.js)
+  const { data: tablas } = await sb
     .from('tables')
-    .select('*')
-    .eq('restaurant_id', state.restaurantId)
-    .order('table_number');
-  state.mesas = mesas || [];
+    .select('id, number, label, capacity')
+    .eq('restaurant_id', S.restaurantId)
+    .order('number', { ascending: true });
 
-  // Menú del día
-  const { data: menuDia } = await sb
-    .from('daily_menus')
-    .select('id')
-    .eq('restaurant_id', state.restaurantId)
-    .eq('menu_date', hoy)
-    .eq('is_published', true)
-    .maybeSingle();
-  state.dailyMenuId = menuDia?.id || null;
+  S.mesas = (tablas || []).filter(t =>
+    !String(t.label||'').toLowerCase().includes('para llevar') &&
+    !String(t.label||'').toLowerCase().includes('domicilio')
+  );
 
-  // Menu items
-  if (state.dailyMenuId) {
-    const { data: slots } = await sb
-      .from('daily_menu_slots')
-      .select(`
-        id,
-        item_type,
-        menu_item:menu_items(id, name, base_price, is_active, description, item_type)
-      `)
-      .eq('daily_menu_id', state.dailyMenuId)
-      .eq('is_available', true);
-    state.menuItems = (slots || []).map(s => ({
-      id: s.menu_item?.id,
-      name: s.menu_item?.name,
-      base_price: s.menu_item?.base_price,
-      is_active: s.menu_item?.is_active,
-      item_type: s.item_type || s.menu_item?.item_type,
-      daily_menu_slot_id: s.id,
-    })).filter(x => x.id);
+  // 2. Pedidos activos del turno
+  await recargarPedidos();
+
+  // 3. Menú para tomar pedido (daily_menu_slots_availability o catalogo)
+  await cargarMenuMesero();
+}
+
+async function recargarPedidos() {
+  const hoy = todayISO();
+  const { data: ords } = await sb
+    .from('orders')
+    .select('id, table_id, status, customer_name, order_number, created_at, total_amount, notes')
+    .eq('restaurant_id', S.restaurantId)
+    .not('status', 'in', '("delivered","cancelled")')
+    .gte('created_at', `${hoy}T00:00:00`)
+    .order('created_at', { ascending: false });
+
+  S.pedidos = ords || [];
+
+  if (S.pedidos.length) {
+    const ids = S.pedidos.map(o => o.id);
+    const { data: oi } = await sb
+      .from('order_items')
+      .select('id, order_id, menu_item_id, quantity, item_status, notes, unit_price')
+      .in('order_id', ids);
+    S.items = oi || [];
   } else {
+    S.items = [];
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// CARGAR MENÚ — idéntico a cargarMenuMesero() en menu.js
+// ═══════════════════════════════════════════════════════════
+async function cargarMenuMesero() {
+  const hoy = todayISO();
+  const { data: dm } = await sb
+    .from('daily_menus').select('id')
+    .eq('restaurant_id', S.restaurantId)
+    .eq('menu_date', hoy).eq('is_published', true).maybeSingle();
+
+  if (dm?.id) {
+    S.dailyMenuId = dm.id;
+    // Usar la vista daily_menu_slots_availability igual que menu.js
+    const { data: raw } = await sb
+      .from('daily_menu_slots_availability')
+      .select('id,menu_item_id,item_name,price,item_type,is_truly_available,portions_available,portions_sold')
+      .eq('daily_menu_id', dm.id)
+      .in('item_type', TIPOS_VALIDOS)
+      .order('category_order', { ascending: true })
+      .order('display_order',  { ascending: true });
+
+    S.slots = (raw||[]).map(s => ({
+      id:         s.id,
+      menuItemId: s.menu_item_id,
+      nombre:     s.item_name,
+      precio:     Number(s.price)||0,
+      itemType:   s.item_type,
+      disponible: Boolean(s.is_truly_available),
+      porciones:  Math.max(0,(s.portions_available||0)-(s.portions_sold||0)),
+    }));
+  } else {
+    S.dailyMenuId = null;
     const { data: items } = await sb
       .from('menu_items')
-      .select('*')
-      .eq('restaurant_id', state.restaurantId)
-      .eq('is_active', true);
-    state.menuItems = (items || []).map(i => ({ ...i, daily_menu_slot_id: null }));
-  }
+      .select('id,name,price,item_type,description')
+      .eq('restaurant_id', S.restaurantId)
+      .eq('is_active', true)
+      .in('item_type', TIPOS_VALIDOS)
+      .order('name', { ascending: true });
 
-  // Pedidos activos del día
-  const { data: ordenes } = await sb
-    .from('orders')
-    .select('*')
-    .eq('restaurant_id', state.restaurantId)
-    .not('status', 'in', '("delivered","cancelled")')
-    .gte('created_at', hoyComienzo);
-  state.ordenes = ordenes || [];
-
-  // Items de esos pedidos
-  if (state.ordenes.length > 0) {
-    const orderIds = state.ordenes.map(o => o.id);
-    const { data: items } = await sb
-      .from('order_items')
-      .select('*')
-      .in('order_id', orderIds);
-    state.orderItems = items || [];
-  } else {
-    state.orderItems = [];
+    S.slots = (items||[]).map(i => ({
+      id:         i.id,
+      menuItemId: i.id,
+      nombre:     i.name,
+      precio:     Number(i.price)||0,
+      itemType:   i.item_type,
+      disponible: true,
+      porciones:  999,
+    }));
   }
 }
 
-// ─── RENDER MESAS ─────────────────────────────────────────────────────────
-function renderMesas() {
-  const grid = document.getElementById('mesas-grid');
-  const count = document.getElementById('mesas-count');
+// ═══════════════════════════════════════════════════════════
+// LÓGICA DE ESTADO DE MESA — idéntica a menu.js
+// ═══════════════════════════════════════════════════════════
+function calcularEstado(tableId) {
+  const peds = S.pedidos.filter(o => o.table_id === tableId);
+  if (!peds.length) return 'libre';
 
-  if (!state.mesas.length) {
-    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🍽️</div><div>No se encontraron mesas</div></div>`;
+  if (peds.some(o => o.status === 'cuenta' || o.status === 'waiting_payment'))
+    return 'cuenta';
+
+  const ois = S.items.filter(i => peds.some(o => o.id === i.order_id));
+  if (!ois.length) {
+    return peds.every(o => o.status === 'pending') ? 'pendiente' : 'preparando';
+  }
+
+  const sts = ois.map(i => i.item_status || 'pending');
+  if (sts.every(s => s==='ready'||s==='delivered')) return 'listo';
+  if (sts.some(s => s==='preparing'||s==='ready'))  return 'preparando';
+  return 'pendiente';
+}
+
+function labelEstado(e) {
+  return {libre:'Libre',pendiente:'Esperando cocina',
+          preparando:'En preparación',listo:'Listo para servir',
+          cuenta:'Esperando cuenta'}[e]||e;
+}
+
+function emojEstado(e) {
+  return {libre:'🟢',pendiente:'🟡',preparando:'🟠',listo:'🔴',cuenta:'⚫'}[e]||'';
+}
+
+function ultimoPedido(tableId) {
+  const peds = S.pedidos.filter(o => o.table_id === tableId);
+  return peds.sort((a,b) => new Date(b.created_at)-new Date(a.created_at))[0] || null;
+}
+
+function itemsDeMesa(tableId) {
+  const peds = S.pedidos.filter(o => o.table_id === tableId);
+  return S.items.filter(i => peds.some(o => o.id === i.order_id));
+}
+
+// ═══════════════════════════════════════════════════════════
+// RENDER GRID — igual que renderGrid() en menu.js
+// ═══════════════════════════════════════════════════════════
+function renderGrid() {
+  const grid = document.getElementById('mesas-grid');
+  const cnt  = document.getElementById('mesas-count');
+  if (!grid) return;
+
+  if (!S.mesas.length) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+      <div class="empty-icon">🍽️</div>
+      <div>No hay mesas registradas en Supabase.</div></div>`;
+    cnt.textContent = '';
     return;
   }
 
-  count.textContent = `${state.mesas.length} mesas`;
-  grid.innerHTML = '';
+  cnt.textContent = `${S.mesas.length} mesas`;
+  grid.innerHTML  = '';
 
-  state.mesas.forEach((mesa, idx) => {
-    const card = crearTarjetaMesa(mesa, idx);
+  S.mesas.forEach((mesa, idx) => {
+    const estado  = calcularEstado(mesa.id);
+    const ultimo  = ultimoPedido(mesa.id);
+    const misItems = itemsDeMesa(mesa.id);
+    const mins    = ultimo ? minutosDesde(ultimo.created_at) : 0;
+    const label   = mesa.label || `Mesa ${mesa.number}`;
+
+    const card = document.createElement('div');
+    card.className = `mesa-card ${estado}`;
+    card.style.animationDelay = `${idx * 0.05}s`;
+    card.dataset.mesaId = mesa.id;
+    card.onclick = () => abrirDrawer(mesa);
+
+    const timerHTML = ultimo
+      ? `<span class="mesa-timer ${claseTimer(mins)}">${textoTimer(mins)}</span>`
+      : `<span class="mesa-timer">—</span>`;
+
+    const clienteHTML = ultimo?.customer_name
+      ? `<div class="mesa-cliente">👤 ${ultimo.customer_name}</div>`
+      : '';
+
+    const itemsN = misItems.length;
+    const itemsHTML = itemsN
+      ? `<span class="mesa-items">${itemsN} ítem${itemsN!==1?'s':''}</span>`
+      : '';
+
+    card.innerHTML = `
+      <div>
+        <div class="mesa-numero">${label}</div>
+        <div class="mesa-badge">${emojEstado(estado)} ${labelEstado(estado)}</div>
+        ${clienteHTML}
+      </div>
+      <div class="mesa-footer">${timerHTML}${itemsHTML}</div>`;
+
     grid.appendChild(card);
   });
 }
 
-function crearTarjetaMesa(mesa, idx) {
-  const { estado, emoji, label } = calcularEstadoMesa(mesa.id);
-  const ultimoPedido = getUltimoPedidoMesa(mesa.id);
-  const itemsCount = contarItemsMesa(mesa.id);
-  const clienteNombre = ultimoPedido?.customer_name || '';
-  const timerInfo = ultimoPedido ? calcularTimer(ultimoPedido.created_at) : null;
-
-  const card = document.createElement('div');
-  card.className = `mesa-card estado-${estado}`;
-  card.style.animationDelay = `${idx * 0.06}s`;
-  card.dataset.mesaId = mesa.id;
-
-  const nombreMesa = mesa.name
-    ? `<div class="mesa-nombre">${mesa.name}</div>`
-    : '';
-
-  const clienteHtml = clienteNombre
-    ? `<div class="mesa-cliente">👤 ${clienteNombre}</div>`
-    : '';
-
-  const timerHtml = timerInfo
-    ? `<div class="mesa-timer ${timerInfo.clase}">${timerInfo.texto}</div>`
-    : `<div class="mesa-timer">—</div>`;
-
-  const itemsHtml = itemsCount > 0
-    ? `<div class="mesa-items">${itemsCount} ítem${itemsCount > 1 ? 's' : ''}</div>`
-    : '';
-
-  card.innerHTML = `
-    <div>
-      <div class="mesa-numero">${mesa.table_number}</div>
-      ${nombreMesa}
-      <div class="mesa-estado-badge">${emoji} ${label}</div>
-      ${clienteHtml}
-    </div>
-    <div class="mesa-footer">
-      ${timerHtml}
-      ${itemsHtml}
-    </div>
-  `;
-
-  card.addEventListener('click', () => abrirDetalleMesa(mesa));
-  return card;
-}
-
-function calcularEstadoMesa(mesaId) {
-  const ordenes = state.ordenes.filter(o => o.table_id === mesaId);
-  if (!ordenes.length) return { estado: 'libre', emoji: '🟢', label: 'Libre' };
-
-  // Buscar orden en espera de cuenta
-  if (ordenes.some(o => o.status === 'waiting_payment')) {
-    return { estado: 'cuenta', emoji: '⚫', label: 'Cuenta' };
-  }
-
-  const allItems = state.orderItems.filter(i => ordenes.map(o => o.id).includes(i.order_id));
-
-  if (!allItems.length) return { estado: 'pendiente', emoji: '🟡', label: 'Pendiente' };
-
-  const statuses = allItems.map(i => i.item_status);
-  const allReady = statuses.every(s => s === 'ready' || s === 'delivered');
-  const anyPreparing = statuses.some(s => s === 'preparing');
-  const allPending = statuses.every(s => s === 'pending');
-
-  if (allReady) return { estado: 'listo', emoji: '🔴', label: 'Listo' };
-  if (anyPreparing) return { estado: 'preparando', emoji: '🟠', label: 'Preparando' };
-  if (allPending) return { estado: 'pendiente', emoji: '🟡', label: 'Pendiente' };
-  return { estado: 'preparando', emoji: '🟠', label: 'Preparando' };
-}
-
-function getUltimoPedidoMesa(mesaId) {
-  const ordenes = state.ordenes
-    .filter(o => o.table_id === mesaId)
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  return ordenes[0] || null;
-}
-
-function contarItemsMesa(mesaId) {
-  const ordenIds = state.ordenes.filter(o => o.table_id === mesaId).map(o => o.id);
-  return state.orderItems
-    .filter(i => ordenIds.includes(i.order_id))
-    .reduce((sum, i) => sum + (i.quantity || 1), 0);
-}
-
-function calcularTimer(createdAt) {
-  if (!createdAt) return null;
-  const mins = Math.floor((Date.now() - new Date(createdAt)) / 60000);
-  let texto = mins < 1 ? 'Ahora' : `${mins} min`;
-  let clase = 'timer-verde';
-  if (mins >= 5 && mins < 15) clase = 'timer-amarillo';
-  else if (mins >= 15 && mins < 25) clase = 'timer-naranja';
-  else if (mins >= 25) { clase = 'timer-rojo'; texto = `⚠️ ${mins} min`; }
-  return { texto, clase };
-}
-
-// ─── TIMER AUTOMÁTICO ────────────────────────────────────────────────────
-function iniciarTimer() {
-  if (state.timerInterval) clearInterval(state.timerInterval);
-  state.timerInterval = setInterval(() => {
-    document.querySelectorAll('.mesa-card').forEach(card => {
-      const mesaId = card.dataset.mesaId;
-      const ultimoPedido = getUltimoPedidoMesa(mesaId);
-      const timerEl = card.querySelector('.mesa-timer');
-      if (timerEl && ultimoPedido) {
-        const info = calcularTimer(ultimoPedido.created_at);
-        if (info) {
-          timerEl.textContent = info.texto;
-          timerEl.className = `mesa-timer ${info.clase}`;
-        }
-      }
-    });
-  }, 30000);
-}
-
-// ─── DETALLE MESA ─────────────────────────────────────────────────────────
-function abrirDetalleMesa(mesa) {
-  state.mesaSeleccionada = mesa;
-
-  document.getElementById('d-mesa-num').textContent = `Mesa ${mesa.table_number}`;
-  document.getElementById('d-mesa-nombre').textContent = mesa.name || '';
-
-  renderDetallePedidos(mesa.id);
-
-  const overlay = document.getElementById('overlay');
-  const drawer = document.getElementById('drawer');
-  overlay.classList.add('visible');
-  requestAnimationFrame(() => drawer.classList.add('open'));
+// ═══════════════════════════════════════════════════════════
+// DRAWER DE MESA
+// ═══════════════════════════════════════════════════════════
+function abrirDrawer(mesa) {
+  S.mesaActiva = mesa;
+  renderDrawer(mesa);
+  document.getElementById('overlay').classList.add('open');
+  setTimeout(() => document.getElementById('drawer').classList.add('open'), 10);
 }
 
 function cerrarDrawer() {
-  const overlay = document.getElementById('overlay');
-  const drawer = document.getElementById('drawer');
-  drawer.classList.remove('open');
-  setTimeout(() => overlay.classList.remove('visible'), 320);
+  document.getElementById('drawer').classList.remove('open');
+  setTimeout(() => {
+    document.getElementById('overlay').classList.remove('open');
+    S.mesaActiva = null;
+  }, 360);
 }
 
 document.getElementById('overlay').addEventListener('click', e => {
@@ -1317,407 +1000,323 @@ document.getElementById('overlay').addEventListener('click', e => {
 });
 document.getElementById('btn-close-drawer').addEventListener('click', cerrarDrawer);
 
-function renderDetallePedidos(mesaId) {
-  const container = document.getElementById('d-pedidos-container');
-  const ordenes = state.ordenes
-    .filter(o => o.table_id === mesaId)
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+function renderDrawer(mesa) {
+  const estado  = calcularEstado(mesa.id);
+  const peds    = S.pedidos.filter(o => o.table_id === mesa.id)
+                           .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  const misItems = itemsDeMesa(mesa.id);
+  const label   = mesa.label || `Mesa ${mesa.number}`;
 
-  if (!ordenes.length) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">🍽️</div><div>Sin pedidos activos en esta mesa</div></div>`;
+  document.getElementById('d-titulo').textContent = label;
+  document.getElementById('d-sub').textContent =
+    `${labelEstado(estado)} · ${peds.length} pedido${peds.length!==1?'s':''} activos`;
+
+  // Pedidos
+  const cont = document.getElementById('d-pedidos');
+  if (!peds.length) {
+    cont.innerHTML = `<div class="empty-state"><div class="empty-icon">🍽️</div><div>Mesa libre — sin pedidos activos</div></div>`;
     return;
   }
 
-  container.innerHTML = ordenes.map(orden => {
-    const items = state.orderItems.filter(i => i.order_id === orden.id);
-    const statusLabel = {
-      pending: 'Pendiente', preparing: 'Preparando',
-      ready: 'Listo', delivered: 'Entregado',
-    }[orden.status] || orden.status;
+  cont.innerHTML = peds.map(ped => {
+    const ois = S.items.filter(i => i.order_id === ped.id);
+    const hora = new Date(ped.created_at).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/Bogota'});
+    const sBadge = {pending:'sbadge-pending',preparing:'sbadge-preparing',
+      ready:'sbadge-ready',delivered:'sbadge-delivered',
+      cuenta:'sbadge-cuenta',waiting_payment:'sbadge-cuenta'}[ped.status]||'sbadge-pending';
+    const sLabel = {pending:'Pendiente',preparing:'Preparando',ready:'Listo ✓',
+      delivered:'Entregado',cuenta:'Cuenta',waiting_payment:'Cuenta'}[ped.status]||ped.status;
+    const total = ped.total_amount
+      ? formatCOP(ped.total_amount)
+      : formatCOP(ois.reduce((s,i)=>s+(i.unit_price||0)*(i.quantity||1),0));
 
-    const hora = new Date(orden.created_at).toLocaleTimeString('es-CO', {
-      hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota'
-    });
-
-    const itemsHtml = items.map(item => {
-      const nombre = item.notes?.match(/\[nombre\](.*)/)?.[1] || `Ítem #${item.menu_item_id?.slice(-4)}`;
-      const dotClass = { pending: 'dot-pending', preparing: 'dot-preparing', ready: 'dot-ready', delivered: 'dot-delivered' }[item.item_status] || 'dot-pending';
+    const itemsHTML = ois.map(it => {
+      const nombre = (it.notes||'').replace('[nombre]','') || `Ítem ${it.menu_item_id?.slice(-4)||''}`;
+      const dotC = {pending:'dot-pending',preparing:'dot-preparing',
+        ready:'dot-ready',delivered:'dot-delivered'}[it.item_status||'pending']||'dot-pending';
       return `<div class="item-row">
-        <div class="item-qty">${item.quantity}</div>
+        <div class="item-qty">${it.quantity}</div>
         <div class="item-nombre">${nombre}</div>
-        <div class="item-status-dot ${dotClass}"></div>
+        <div class="item-dot ${dotC}"></div>
       </div>`;
     }).join('');
 
-    const total = orden.total_amount
-      ? `$${Number(orden.total_amount).toLocaleString('es-CO')}`
-      : items.reduce((s, i) => s + (i.unit_price * i.quantity), 0) > 0
-        ? `$${items.reduce((s, i) => s + (i.unit_price * i.quantity), 0).toLocaleString('es-CO')}`
-        : '—';
-
     return `<div class="pedido-card">
-      <div class="pedido-header">
-        <div>
-          <div class="pedido-num">${orden.order_number || 'Pedido'}</div>
-          <div class="pedido-hora">${hora}</div>
-        </div>
-        <div class="pedido-status-badge status-${orden.status}">${statusLabel}</div>
+      <div class="pedido-head">
+        <div><div class="pedido-num">${ped.order_number||'Pedido'}</div><div class="pedido-hora">${hora}</div></div>
+        <span class="pedido-sbadge ${sBadge}">${sLabel}</span>
       </div>
-      ${itemsHtml ? `<div class="pedido-items">${itemsHtml}</div>` : ''}
+      ${itemsHTML?`<div class="pedido-items">${itemsHTML}</div>`:''}
       <div class="pedido-total"><span>Total</span><strong>${total}</strong></div>
     </div>`;
   }).join('');
 }
 
-// ─── ACCIONES MESA ────────────────────────────────────────────────────────
+// Acciones del drawer
 document.getElementById('btn-nuevo-pedido').addEventListener('click', () => {
   cerrarDrawer();
-  setTimeout(() => abrirVistaPedido(state.mesaSeleccionada), 350);
+  setTimeout(() => abrirVistaPedido(S.mesaActiva || {}), 370);
 });
 
 document.getElementById('btn-pedir-cuenta').addEventListener('click', async () => {
-  const mesa = state.mesaSeleccionada;
+  const mesa = S.mesaActiva;
   if (!mesa) return;
-  const ordenes = state.ordenes.filter(o => o.table_id === mesa.id && o.status !== 'delivered');
-  if (!ordenes.length) { mostrarToast('No hay pedidos activos en esta mesa'); return; }
+  const peds = S.pedidos.filter(o => o.table_id === mesa.id &&
+    !['delivered','cancelled','waiting_payment','cuenta'].includes(o.status));
+  if (!peds.length) { toast('No hay pedidos activos en esta mesa','info'); return; }
 
-  for (const orden of ordenes) {
-    await sb.from('orders').update({ status: 'waiting_payment' }).eq('id', orden.id);
-    const o = state.ordenes.find(x => x.id === orden.id);
-    if (o) o.status = 'waiting_payment';
+  for (const ped of peds) {
+    await sb.from('orders').update({status:'waiting_payment'}).eq('id', ped.id);
+    const p = S.pedidos.find(x => x.id===ped.id);
+    if (p) p.status = 'waiting_payment';
   }
   cerrarDrawer();
-  actualizarTarjetaMesa(mesa.id);
-  mostrarToast('Cuenta solicitada ✓');
+  renderGrid();
+  toast('🧾 Cuenta solicitada','ok');
 });
 
-document.getElementById('btn-liberar-mesa').addEventListener('click', async () => {
-  const mesa = state.mesaSeleccionada;
+document.getElementById('btn-liberar').addEventListener('click', async () => {
+  const mesa = S.mesaActiva;
   if (!mesa) return;
-  const ordenes = state.ordenes.filter(o => o.table_id === mesa.id);
-  for (const orden of ordenes) {
-    await sb.from('orders').update({ status: 'delivered' }).eq('id', orden.id);
+  const peds = S.pedidos.filter(o => o.table_id === mesa.id);
+  if (peds.length) {
+    const ids = peds.map(o=>o.id);
+    await sb.from('orders').update({status:'delivered'}).in('id', ids);
+    S.pedidos = S.pedidos.filter(o => o.table_id !== mesa.id);
+    S.items   = S.items.filter(i => !ids.includes(i.order_id));
   }
-  state.ordenes = state.ordenes.filter(o => o.table_id !== mesa.id);
-  state.orderItems = state.orderItems.filter(i =>
-    !ordenes.map(o => o.id).includes(i.order_id)
-  );
   cerrarDrawer();
-  actualizarTarjetaMesa(mesa.id);
-  mostrarToast('Mesa liberada ✓');
+  renderGrid();
+  toast('✅ Mesa liberada','ok');
 });
 
-// ─── VISTA TOMAR PEDIDO ───────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// VISTA TOMAR PEDIDO
+// ═══════════════════════════════════════════════════════════
 function abrirVistaPedido(mesa) {
-  state.carrito = {};
-  document.getElementById('vp-mesa-label').textContent = `Mesa ${mesa.table_number}${mesa.name ? ' · ' + mesa.name : ''}`;
-  document.getElementById('vp-cliente-nombre').value = '';
+  S.carrito = {};
+  document.getElementById('vp-mesa-sub').textContent =
+    mesa.label || (mesa.number ? `Mesa ${mesa.number}` : 'Mesa');
+  document.getElementById('vp-cliente').value = '';
   renderMenuPedido();
-  actualizarResumenCarrito();
+  actualizarResumen();
 
   const vp = document.getElementById('vista-pedido');
   vp.style.display = 'flex';
-  requestAnimationFrame(() => vp.style.opacity = '1');
 }
 
 function cerrarVistaPedido() {
   document.getElementById('vista-pedido').style.display = 'none';
 }
 
-document.getElementById('btn-back-pedido').addEventListener('click', () => {
+document.getElementById('btn-back').addEventListener('click', () => {
   cerrarVistaPedido();
-  if (state.mesaSeleccionada) abrirDetalleMesa(state.mesaSeleccionada);
+  if (S.mesaActiva) setTimeout(() => abrirDrawer(S.mesaActiva), 100);
 });
 
 function renderMenuPedido() {
-  const content = document.getElementById('pedido-menu-content');
-
-  if (!state.menuItems.length) {
-    content.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><div>No hay menú disponible hoy</div></div>`;
+  const cont = document.getElementById('vp-content');
+  if (!S.slots.length) {
+    cont.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><div>No hay carta disponible hoy</div></div>`;
     return;
   }
 
-  const categorias = {};
-  const catLabels = {
-    executive_lunch: '🍱 Almuerzo ejecutivo',
-    a_la_carte: '🍽️ A la carta',
-    drink: '🥤 Bebidas',
-    dessert: '🍮 Postres',
-    side: '🥗 Acompañamientos',
-  };
-
-  state.menuItems.forEach(item => {
-    const cat = item.item_type || 'a_la_carte';
-    if (!categorias[cat]) categorias[cat] = [];
-    categorias[cat].push(item);
+  // Agrupar por tipo — orden igual que CATEGORIAS en menu.js
+  const ordenTipos = ['executive_lunch','a_la_carte','drink','dessert','side'];
+  const grupos = {};
+  S.slots.forEach(sl => {
+    const t = TIPOS_VALIDOS.includes(sl.itemType) ? sl.itemType : 'a_la_carte';
+    if (!grupos[t]) grupos[t] = [];
+    grupos[t].push(sl);
   });
 
-  const orden = ['executive_lunch', 'a_la_carte', 'drink', 'dessert', 'side'];
-  const cats = Object.keys(categorias).sort((a, b) => {
-    const ia = orden.indexOf(a), ib = orden.indexOf(b);
-    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-  });
+  const tiposOrdenados = Object.keys(grupos).sort(
+    (a,b) => (ordenTipos.indexOf(a)||99) - (ordenTipos.indexOf(b)||99)
+  );
 
-  content.innerHTML = cats.map(cat => {
-    const items = categorias[cat];
-    const label = catLabels[cat] || cat;
-    const itemsHtml = items.map(item => {
-      const agotado = !item.is_active;
-      const precio = item.base_price ? `$${Number(item.base_price).toLocaleString('es-CO')}` : '';
-      return `<div class="menu-item" data-item-id="${item.id}">
-        <div class="menu-item-info">
-          <div class="menu-item-nombre">${item.name || '—'}${agotado ? ' <span style="color:#f06050;font-size:10px">AGOTADO</span>' : ''}</div>
-          ${precio ? `<div class="menu-item-precio">${precio}</div>` : ''}
+  cont.innerHTML = tiposOrdenados.map(tipo => {
+    const lista = grupos[tipo];
+    const rows = lista.map(sl => {
+      const agotado  = !sl.disponible;
+      const precio   = sl.precio > 0 ? formatCOP(sl.precio) : 'Incluido';
+      return `<div class="mi-row">
+        <div class="mi-info">
+          <div class="mi-nombre" style="${agotado?'opacity:.45;text-decoration:line-through':''}">${sl.nombre}</div>
+          <div class="${agotado?'mi-agotado':'mi-precio'}">${agotado?'Agotado':precio}</div>
         </div>
-        <div class="qty-control">
-          <button class="qty-btn btn-menos" data-id="${item.id}" ${agotado ? 'disabled' : ''}>−</button>
-          <div class="qty-num" id="qty-${item.id}">0</div>
-          <button class="qty-btn btn-mas" data-id="${item.id}" ${agotado ? 'disabled' : ''}>+</button>
-        </div>
+        ${agotado?'':`<div class="qty-ctrl">
+          <button class="qty-btn btn-menos" data-id="${sl.id}">−</button>
+          <div class="qty-num" id="qn-${sl.id}">0</div>
+          <button class="qty-btn btn-mas"   data-id="${sl.id}">+</button>
+        </div>`}
       </div>`;
     }).join('');
-    return `<div class="menu-categoria">
-      <div class="cat-titulo">${label}</div>
-      ${itemsHtml}
+    return `<div class="cat-section">
+      <div class="cat-title">${TIPO_LABEL[tipo]||tipo}</div>
+      ${rows}
     </div>`;
   }).join('');
 
   // Eventos
-  content.querySelectorAll('.btn-mas').forEach(btn => {
-    btn.addEventListener('click', () => cambiarCantidad(btn.dataset.id, 1));
-  });
-  content.querySelectorAll('.btn-menos').forEach(btn => {
-    btn.addEventListener('click', () => cambiarCantidad(btn.dataset.id, -1));
-  });
+  cont.querySelectorAll('.btn-mas').forEach(b =>
+    b.addEventListener('click', () => cambiarQty(b.dataset.id, +1)));
+  cont.querySelectorAll('.btn-menos').forEach(b =>
+    b.addEventListener('click', () => cambiarQty(b.dataset.id, -1)));
 }
 
-function cambiarCantidad(itemId, delta) {
-  const item = state.menuItems.find(x => x.id === itemId);
-  if (!item) return;
-  const actual = state.carrito[itemId]?.cantidad || 0;
-  const nueva = Math.max(0, actual + delta);
-
+function cambiarQty(slotId, delta) {
+  const sl = S.slots.find(s => s.id === slotId);
+  if (!sl || !sl.disponible) return;
+  const actual = S.carrito[slotId]?.cantidad || 0;
+  const nueva  = Math.max(0, actual + delta);
   if (nueva === 0) {
-    delete state.carrito[itemId];
+    delete S.carrito[slotId];
   } else {
-    state.carrito[itemId] = {
-      nombre: item.name,
-      precio: item.base_price || 0,
-      cantidad: nueva,
-      itemType: item.item_type,
-      dailyMenuSlotId: item.daily_menu_slot_id,
-    };
+    S.carrito[slotId] = { slot: sl, cantidad: nueva };
   }
-
-  const qtyEl = document.getElementById(`qty-${itemId}`);
-  if (qtyEl) qtyEl.textContent = nueva;
-  actualizarResumenCarrito();
+  const el = document.getElementById(`qn-${slotId}`);
+  if (el) el.textContent = nueva;
+  actualizarResumen();
 }
 
-function actualizarResumenCarrito() {
-  const items = Object.values(state.carrito);
-  const totalItems = items.reduce((s, i) => s + i.cantidad, 0);
-  const totalPrecio = items.reduce((s, i) => s + i.precio * i.cantidad, 0);
-
-  document.getElementById('vp-items-count').textContent = `${totalItems} ítem${totalItems !== 1 ? 's' : ''}`;
-  document.getElementById('vp-total').textContent = `$${totalPrecio.toLocaleString('es-CO')}`;
-
-  const btn = document.getElementById('btn-confirmar-pedido');
-  btn.disabled = totalItems === 0;
+function actualizarResumen() {
+  const entries = Object.values(S.carrito);
+  const totalUds = entries.reduce((s,e) => s+e.cantidad, 0);
+  const totalPes = entries.reduce((s,e) => s+e.slot.precio*e.cantidad, 0);
+  document.getElementById('vp-count').textContent = `${totalUds} ítem${totalUds!==1?'s':''}`;
+  document.getElementById('vp-total').textContent = formatCOP(totalPes);
+  document.getElementById('btn-confirmar').disabled = totalUds === 0;
 }
 
-document.getElementById('btn-confirmar-pedido').addEventListener('click', confirmarPedido);
+document.getElementById('btn-confirmar').addEventListener('click', confirmarPedido);
 
+// ═══════════════════════════════════════════════════════════
+// ENVIAR PEDIDO — idéntico a enviarPedido() en menu.js
+// ═══════════════════════════════════════════════════════════
 async function confirmarPedido() {
-  const mesa = state.mesaSeleccionada;
+  const mesa = S.mesaActiva;
   if (!mesa) return;
+  const entries = Object.entries(S.carrito);
+  if (!entries.length) return;
 
-  const items = Object.entries(state.carrito);
-  if (!items.length) { mostrarToast('Agrega al menos un ítem'); return; }
+  const btn = document.getElementById('btn-confirmar');
+  btn.disabled = true; btn.textContent = 'Enviando…';
 
-  const btn = document.getElementById('btn-confirmar-pedido');
-  btn.disabled = true;
-  btn.textContent = 'Enviando…';
-
-  const clienteNombre = document.getElementById('vp-cliente-nombre').value.trim() || state.meseroNombre;
-  const total = items.reduce((s, [, v]) => s + v.precio * v.cantidad, 0);
+  const cliente     = document.getElementById('vp-cliente').value.trim() || null;
+  const mesaLabel   = mesa.label || `Mesa ${mesa.number}`;
+  const orderNumber = `MES-LA26-${Date.now()}`;
+  const total       = entries.reduce((s,[,e]) => s + e.slot.precio*e.cantidad, 0);
 
   try {
-    const { data: orden, error: errOrden } = await sb
+    const { data: orden, error: errOrd } = await sb
       .from('orders')
       .insert([{
-        restaurant_id: state.restaurantId,
-        table_id: mesa.id,
-        order_number: `MES-LA26-${Date.now()}`,
-        status: 'pending',
-        customer_name: clienteNombre,
-        notes: `[Mesa ${mesa.table_number}] [Mesero: ${state.meseroNombre}]`,
-        total_amount: total,
-        daily_menu_id: state.dailyMenuId || null,
+        restaurant_id: S.restaurantId,
+        table_id:      mesa.id,
+        order_number:  orderNumber,
+        status:        'pending',
+        customer_name: cliente,
+        notes:         `[${mesaLabel}] [Mesero: ${S.meseroNombre}]`,
+        total_amount:  total,
+        daily_menu_id: S.dailyMenuId || null,
       }])
-      .select('id')
-      .single();
+      .select('id').single();
 
-    if (errOrden) throw errOrden;
+    if (errOrd) throw errOrd;
 
-    const orderItemsData = items.map(([menuItemId, v]) => ({
-      order_id: orden.id,
-      menu_item_id: menuItemId,
-      quantity: v.cantidad,
-      unit_price: v.precio,
-      item_status: 'pending',
-      notes: `[nombre]${v.nombre}`,
+    // order_items — igual que en menu.js
+    const ois = entries.map(([slotId, e]) => ({
+      order_id:           orden.id,
+      menu_item_id:       e.slot.menuItemId || e.slot.id,
+      daily_menu_slot_id: S.dailyMenuId ? slotId : null,
+      quantity:           e.cantidad,
+      unit_price:         e.slot.precio,
+      item_status:        'pending',
+      notes:              `[nombre]${e.slot.nombre}`,
     }));
 
-    const { error: errItems } = await sb.from('order_items').insert(orderItemsData);
-    if (errItems) throw errItems;
+    const { error: errOI } = await sb.from('order_items').insert(ois);
+    if (errOI) console.warn('[La26-Panel] order_items:', errOI);
 
-    mostrarToast('✅ Pedido enviado a cocina');
+    toast(`✅ Pedido enviado — ${orderNumber}`, 'ok', 4000);
     cerrarVistaPedido();
 
-    // Actualizar estado local
-    await cargarDatos();
-    renderMesas();
+    // Recargar y actualizar grid
+    await recargarPedidos();
+    renderGrid();
+    if (S.mesaActiva) setTimeout(() => abrirDrawer(S.mesaActiva), 150);
 
-    if (state.mesaSeleccionada) {
-      abrirDetalleMesa(state.mesaSeleccionada);
-    }
-  } catch (err) {
-    console.error(err);
-    mostrarToast('⚠️ Error al enviar el pedido');
+  } catch(e) {
+    console.error('[La26-Panel] confirmarPedido:', e);
+    toast(`⚠️ Error: ${e?.message||'Inténtalo de nuevo.'}`, 'err', 5000);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Confirmar pedido →';
+    btn.disabled = false; btn.textContent = 'Confirmar pedido →';
   }
 }
 
-// ─── REALTIME ─────────────────────────────────────────────────────────────
-function suscribirRealtime() {
-  sb.channel('panel-mesero')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, async (payload) => {
-      await sincronizarOrden(payload);
+// ═══════════════════════════════════════════════════════════
+// REALTIME — igual que iniciarRealtime() en menu.js
+// ═══════════════════════════════════════════════════════════
+function iniciarRealtime() {
+  if (S.rtChannel) sb.removeChannel(S.rtChannel);
+
+  S.rtChannel = sb.channel('panel-mesero-v3')
+    .on('postgres_changes',{event:'*',schema:'public',table:'orders'}, async (payload) => {
+      await recargarPedidos();
+      renderGrid();
+      if (S.mesaActiva) renderDrawer(S.mesaActiva);
+
+      // Vibrar si alguna mesa quedó en "listo"
+      const tid = payload.new?.table_id || payload.old?.table_id;
+      if (tid && calcularEstado(tid)==='listo' && navigator.vibrate) {
+        navigator.vibrate([200,100,200]);
+      }
     })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, async (payload) => {
-      await sincronizarOrderItem(payload);
+    .on('postgres_changes',{event:'*',schema:'public',table:'order_items'}, async (payload) => {
+      await recargarPedidos();
+      renderGrid();
+      if (S.mesaActiva) renderDrawer(S.mesaActiva);
+
+      // Revisar si todos los ítems de una orden pasaron a ready
+      const ordId = payload.new?.order_id;
+      if (ordId) {
+        const ord   = S.pedidos.find(o => o.id===ordId);
+        const todos = S.items.filter(i => i.order_id===ordId);
+        const listo = todos.length && todos.every(i=>i.item_status==='ready'||i.item_status==='delivered');
+        if (listo && ord) {
+          if (navigator.vibrate) navigator.vibrate([200,100,200]);
+          const mesa = S.mesas.find(m=>m.id===ord.table_id);
+          toast(`🔔 ${mesa?.label||'Mesa'} — pedido listo para servir`, 'ok', 5000);
+        }
+      }
     })
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'menu_items' }, (payload) => {
-      manejarMenuItemActualizado(payload.new);
+    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'menu_items'}, (payload) => {
+      if (payload.new?.is_active === false) {
+        mostrarAlertaAgotado(payload.new?.name || 'Un plato');
+      }
     })
     .subscribe();
 }
 
-async function sincronizarOrden(payload) {
-  const { eventType, new: nueva, old } = payload;
-  if (eventType === 'INSERT') {
-    if (nueva.restaurant_id === state.restaurantId) {
-      state.ordenes = state.ordenes.filter(o => o.id !== nueva.id);
-      state.ordenes.push(nueva);
-    }
-  } else if (eventType === 'UPDATE') {
-    const idx = state.ordenes.findIndex(o => o.id === nueva.id);
-    if (idx >= 0) state.ordenes[idx] = nueva;
-    else if (nueva.restaurant_id === state.restaurantId) state.ordenes.push(nueva);
-  } else if (eventType === 'DELETE') {
-    state.ordenes = state.ordenes.filter(o => o.id !== old.id);
-  }
-
-  if (nueva?.table_id) actualizarTarjetaMesa(nueva.table_id);
-  else if (old?.table_id) actualizarTarjetaMesa(old.table_id);
-}
-
-async function sincronizarOrderItem(payload) {
-  const { eventType, new: nuevo, old } = payload;
-  if (eventType === 'INSERT') {
-    state.orderItems = state.orderItems.filter(i => i.id !== nuevo.id);
-    state.orderItems.push(nuevo);
-  } else if (eventType === 'UPDATE') {
-    const idx = state.orderItems.findIndex(i => i.id === nuevo.id);
-    if (idx >= 0) state.orderItems[idx] = nuevo;
-    else state.orderItems.push(nuevo);
-
-    // Revisar si todos los items de la orden están listos
-    const orden = state.ordenes.find(o => o.id === nuevo.order_id);
-    if (orden) {
-      const todosItems = state.orderItems.filter(i => i.order_id === orden.id);
-      const todosListos = todosItems.every(i => i.item_status === 'ready' || i.item_status === 'delivered');
-      if (todosListos && todosItems.length > 0) {
-        // Vibrar en móvil
-        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-        const mesa = state.mesas.find(m => m.id === orden.table_id);
-        const numMesa = mesa ? `Mesa ${mesa.table_number}` : 'Una mesa';
-        mostrarToast(`🔔 ${numMesa} — pedido listo para servir`);
-      }
-      actualizarTarjetaMesa(orden.table_id);
-    }
-  } else if (eventType === 'DELETE') {
-    state.orderItems = state.orderItems.filter(i => i.id !== old.id);
-  }
-}
-
-function manejarMenuItemActualizado(item) {
-  if (!item.is_active) {
-    mostrarAlertaAgotado(item.name || 'Un plato');
-    // Actualizar en state
-    const idx = state.menuItems.findIndex(m => m.id === item.id);
-    if (idx >= 0) state.menuItems[idx].is_active = false;
-  }
-}
-
-// ─── ACTUALIZAR TARJETA ───────────────────────────────────────────────────
-function actualizarTarjetaMesa(mesaId) {
-  const mesa = state.mesas.find(m => m.id === mesaId);
-  if (!mesa) return;
-
-  const grid = document.getElementById('mesas-grid');
-  const cardActual = grid.querySelector(`[data-mesa-id="${mesaId}"]`);
-  if (!cardActual) return;
-
-  const idx = Array.from(grid.children).indexOf(cardActual);
-  const nuevaCard = crearTarjetaMesa(mesa, idx);
-  // Preservar animación original
-  nuevaCard.style.animation = 'none';
-  grid.replaceChild(nuevaCard, cardActual);
-
-  // Si el drawer está abierto con esta mesa, actualizar también
-  if (state.mesaSeleccionada?.id === mesaId) {
-    renderDetallePedidos(mesaId);
-  }
-}
-
-// ─── ALERTAS AGOTADOS ────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// ALERTAS DE AGOTADOS — igual que mostrarAlertaAgotado() en menu.js
+// ═══════════════════════════════════════════════════════════
 function mostrarAlertaAgotado(nombre) {
-  const container = document.getElementById('alertas-container');
-  const el = document.createElement('div');
+  const bar = document.getElementById('alertas-bar');
+  const el  = document.createElement('div');
   el.className = 'alerta-item';
   el.innerHTML = `
-    <div class="alerta-icon">⚠️</div>
-    <div class="alerta-msg">"${nombre}" se agotó — no disponible</div>
-    <button class="alerta-dismiss" aria-label="Descartar">✕</button>
-  `;
+    <span>⚠️</span>
+    <span class="alerta-msg"><strong>${nombre}</strong> se agotó — ya no está disponible</span>
+    <button class="alerta-dismiss" title="Descartar">✕</button>`;
   el.querySelector('.alerta-dismiss').addEventListener('click', () => {
-    el.style.opacity = '0';
-    el.style.transition = 'opacity 0.3s';
-    setTimeout(() => el.remove(), 300);
+    el.style.opacity='0';el.style.transition='opacity .3s';
+    setTimeout(()=>el.remove(),300);
   });
-  container.prepend(el);
-  // Auto-dismiss en 8 seg
-  setTimeout(() => {
-    if (el.parentNode) {
-      el.style.opacity = '0';
-      el.style.transition = 'opacity 0.3s';
-      setTimeout(() => el.remove(), 300);
-    }
+  bar.prepend(el);
+  setTimeout(()=>{
+    if(el.parentNode){el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(()=>el.remove(),300);}
   }, 8000);
-}
-
-// ─── TOAST ───────────────────────────────────────────────────────────────
-let toastTimeout;
-function mostrarToast(msg) {
-  const toast = document.getElementById('toast');
-  toast.textContent = msg;
-  toast.classList.add('visible');
-  clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => toast.classList.remove('visible'), 3000);
 }
 </script>
 </body>
