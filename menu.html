@@ -4,23 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#ffffff">
-    <title>Restaurante la 26 — Mesero</title>
+    <title>Restaurante la 26 — Carta</title>
 
     <link rel="icon" type="image/png" href="logo.png">
     <link rel="shortcut icon" href="logo.png">
     <link rel="apple-touch-icon" href="logo.png">
 
-    <!-- Supabase JS v2 — debe cargar ANTES que menu.js -->
+    <!-- Supabase JS v2 -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-    <!-- Tipografía editorial -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
 
     <style>
         /* ═══════════════════════════════════════════
-           VARIABLES DE DISEÑO — Restaurante la 26
+           VARIABLES DE DISEÑO
         ═══════════════════════════════════════════ */
         :root {
             --oliva:        #4a5a28;
@@ -40,7 +39,6 @@
             --red:          #b83232;
             --amber:        #b45309;
             --safe-bottom:  env(safe-area-inset-bottom, 0px);
-            --header-h:     112px;
         }
 
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -52,17 +50,12 @@
             color: var(--ink);
             min-height: 100svh;
             -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
         }
 
-        /* Textura grain ultra-sutil */
         body::before {
             content: '';
-            position: fixed;
-            inset: 0;
-            pointer-events: none;
-            z-index: 0;
-            opacity: 0.018;
+            position: fixed; inset: 0;
+            pointer-events: none; z-index: 0; opacity: 0.018;
             background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.78' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
         }
 
@@ -76,7 +69,6 @@
         @keyframes slideUp { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
         @keyframes scaleIn { from { transform:scale(0.90); opacity:0; } to { transform:scale(1); opacity:1; } }
         @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.25} }
-        @keyframes shake   { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
 
         .spinner {
             width: 40px; height: 40px;
@@ -88,334 +80,17 @@
         .fade-up        { animation: fadeUp  0.50s cubic-bezier(.22,.68,0,1.2) both; }
         .slide-up-modal { animation: slideUp 0.38s cubic-bezier(0.16, 1, 0.3, 1) both; }
         .scale-in       { animation: scaleIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
-        .shake          { animation: shake 0.35s ease; }
 
         /* ═══════════════════════════════════════════
-           PANTALLA DE LOGIN
-        ═══════════════════════════════════════════ */
-        #screen-login {
-            position: fixed;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 24px;
-            z-index: 100;
-            background: var(--crema-bg);
-        }
-
-        .login-card {
-            width: 100%;
-            max-width: 380px;
-            background: #fff;
-            border: 1px solid var(--border);
-            border-radius: 24px;
-            padding: 36px 28px 30px;
-            box-shadow: 0 8px 40px rgba(0,0,0,0.08);
-            animation: scaleIn 0.35s cubic-bezier(0.16,1,0.3,1) both;
-        }
-
-        .login-logo {
-            text-align: center;
-            margin-bottom: 24px;
-        }
-        .login-logo img {
-            width: 54px; height: 54px;
-            object-fit: contain;
-            border-radius: 14px;
-            margin-bottom: 12px;
-            display: block;
-            margin-left: auto;
-            margin-right: auto;
-        }
-        .login-logo h1 {
-            font-family: 'Cormorant Garamond', serif;
-            font-size: 1.55rem;
-            font-weight: 400;
-            color: var(--ink);
-            letter-spacing: -0.015em;
-            line-height: 1.1;
-        }
-        .login-logo h1 em { font-style: italic; color: var(--oliva); }
-        .login-logo p {
-            font-size: 11px;
-            color: var(--ink-ghost);
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            margin-top: 5px;
-            font-weight: 400;
-        }
-
-        .login-divider {
-            height: 1px;
-            background: var(--border);
-            margin: 0 0 22px;
-        }
-
-        .login-label {
-            display: block;
-            font-size: 10.5px;
-            font-weight: 500;
-            color: var(--ink-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            margin-bottom: 6px;
-        }
-
-        .login-input {
-            width: 100%;
-            padding: 13px 15px;
-            border-radius: 12px;
-            border: 1.5px solid var(--border);
-            background: var(--crema-bg);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 14px;
-            color: var(--ink);
-            outline: none;
-            transition: border-color 0.22s, box-shadow 0.22s;
-            margin-bottom: 14px;
-        }
-        .login-input:focus {
-            border-color: var(--oliva);
-            box-shadow: 0 0 0 3px rgba(74,90,40,0.08);
-            background: #fff;
-        }
-        .login-input.error {
-            border-color: var(--red);
-            box-shadow: 0 0 0 3px rgba(184,50,50,0.08);
-        }
-        .login-input::placeholder { color: var(--ink-ghost); }
-
-        .login-pass-wrap {
-            position: relative;
-        }
-        .login-pass-wrap .login-input {
-            padding-right: 46px;
-        }
-        .login-eye {
-            position: absolute;
-            right: 12px; top: 50%;
-            transform: translateY(-55%);
-            background: none;
-            border: none;
-            cursor: pointer;
-            color: var(--ink-ghost);
-            font-size: 16px;
-            padding: 4px;
-            line-height: 1;
-            transition: color 0.2s;
-        }
-        .login-eye:hover { color: var(--ink-muted); }
-
-        .login-error {
-            background: rgba(184,50,50,0.06);
-            border: 1px solid rgba(184,50,50,0.22);
-            border-radius: 10px;
-            padding: 10px 14px;
-            font-size: 12.5px;
-            color: var(--red);
-            margin-bottom: 14px;
-            display: none;
-        }
-
-        .btn-login {
-            width: 100%;
-            padding: 15px 24px;
-            border-radius: 9999px;
-            background: var(--oliva);
-            color: #fff;
-            font-family: 'DM Sans', sans-serif;
-            font-size: 14px;
-            font-weight: 500;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            border: none;
-            cursor: pointer;
-            transition: background 0.22s, transform 0.16s, box-shadow 0.22s;
-            box-shadow: 0 4px 16px rgba(74,90,40,0.20);
-            margin-top: 4px;
-        }
-        .btn-login:hover   { background: var(--oliva-lt); box-shadow: 0 6px 22px rgba(74,90,40,0.28); }
-        .btn-login:active  { transform: scale(0.975); }
-        .btn-login:disabled { opacity: 0.48; cursor: not-allowed; transform: none; box-shadow: none; }
-
-        /* ═══════════════════════════════════════════
-           SELECTOR DE ORIGEN (Paso 2)
-        ═══════════════════════════════════════════ */
-        #screen-origen {
-            position: fixed;
-            inset: 0;
-            display: none;
-            align-items: flex-end;
-            justify-content: center;
-            z-index: 99;
-            padding-bottom: calc(env(safe-area-inset-bottom, 0px));
-        }
-        #screen-origen.visible { display: flex; }
-
-        #screen-origen-overlay {
-            position: absolute;
-            inset: 0;
-            background: rgba(18,18,12,0.55);
-            backdrop-filter: blur(6px);
-            -webkit-backdrop-filter: blur(6px);
-        }
-
-        .origen-panel {
-            position: relative;
-            z-index: 1;
-            background: #fff;
-            border-radius: 24px 24px 0 0;
-            width: 100%;
-            max-width: 520px;
-            padding: 0 0 calc(24px + env(safe-area-inset-bottom, 0px));
-            animation: slideUp 0.38s cubic-bezier(0.16,1,0.3,1) both;
-        }
-
-        .origen-handle {
-            display: flex;
-            justify-content: center;
-            padding: 14px 0 4px;
-        }
-        .origen-handle-bar {
-            width: 36px; height: 4px;
-            background: var(--border);
-            border-radius: 9999px;
-        }
-
-        .origen-header {
-            text-align: center;
-            padding: 16px 28px 20px;
-            border-bottom: 1px solid var(--border-lt);
-        }
-        .origen-header img {
-            width: 40px; height: 40px;
-            object-fit: contain;
-            border-radius: 10px;
-            margin-bottom: 10px;
-        }
-        .origen-header h2 {
-            font-family: 'Cormorant Garamond', serif;
-            font-size: 1.35rem;
-            font-weight: 400;
-            color: var(--ink);
-        }
-        .origen-header h2 em { font-style: italic; color: var(--oliva); }
-        .origen-header p {
-            font-size: 11px;
-            color: var(--ink-ghost);
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            margin-top: 3px;
-        }
-
-        .origen-body {
-            padding: 20px 20px 0;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        /* Tabs origen */
-        .origen-tabs {
-            display: flex;
-            gap: 10px;
-        }
-        .origen-tab {
-            flex: 1;
-            padding: 14px 8px;
-            border-radius: 16px;
-            border: 1.5px solid var(--border);
-            background: var(--crema-bg);
-            color: var(--ink-muted);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 13px;
-            font-weight: 400;
-            cursor: pointer;
-            text-align: center;
-            transition: all 0.22s ease;
-            line-height: 1.35;
-        }
-        .origen-tab .tab-icon { display: block; font-size: 22px; margin-bottom: 5px; }
-        .origen-tab.active {
-            background: var(--oliva-pale);
-            border-color: var(--oliva);
-            color: var(--oliva);
-            font-weight: 500;
-            box-shadow: 0 0 0 2px rgba(74,90,40,0.10);
-        }
-
-        /* Panel de campos */
-        .origen-fields {
-            display: none;
-            flex-direction: column;
-            gap: 12px;
-        }
-        .origen-fields.visible { display: flex; }
-
-        .field-label {
-            display: block;
-            font-size: 10.5px;
-            font-weight: 500;
-            color: var(--ink-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            margin-bottom: 6px;
-        }
-
-        .input-field {
-            width: 100%;
-            padding: 12px 15px;
-            border-radius: 12px;
-            border: 1.5px solid var(--border);
-            background: var(--crema-bg);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 14px;
-            color: var(--ink);
-            outline: none;
-            transition: border-color 0.22s, box-shadow 0.22s;
-        }
-        .input-field:focus {
-            border-color: var(--oliva);
-            box-shadow: 0 0 0 3px rgba(74,90,40,0.08);
-            background: #fff;
-        }
-        .input-field.error { border-color: var(--red); }
-        .input-field::placeholder { color: var(--ink-ghost); }
-
-        .btn-ver-carta {
-            width: 100%;
-            padding: 16px 24px;
-            border-radius: 9999px;
-            background: var(--oliva);
-            color: #fff;
-            font-family: 'DM Sans', sans-serif;
-            font-size: 14px;
-            font-weight: 500;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            border: none;
-            cursor: pointer;
-            transition: background 0.22s, transform 0.16s, box-shadow 0.22s;
-            box-shadow: 0 4px 16px rgba(74,90,40,0.20);
-        }
-        .btn-ver-carta:hover  { background: var(--oliva-lt); }
-        .btn-ver-carta:active { transform: scale(0.975); }
-
-        /* ═══════════════════════════════════════════
-           APP PRINCIPAL (Paso 3+)
+           APP PRINCIPAL
         ═══════════════════════════════════════════ */
         #app-main {
-            display: none;
             padding-bottom: calc(7.5rem + var(--safe-bottom));
         }
-        #app-main.visible { display: block; }
 
         /* ── HEADER ── */
         .app-header {
-            position: sticky;
-            top: 0;
-            z-index: 40;
+            position: sticky; top: 0; z-index: 40;
             background: rgba(255,255,255,0.97);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
@@ -432,513 +107,292 @@
         .logo-lockup { display: flex; align-items: center; gap: 10px; }
         .logo-lockup img {
             width: 40px; height: 40px;
-            object-fit: contain;
-            border-radius: 8px;
-            flex-shrink: 0;
+            object-fit: contain; border-radius: 8px; flex-shrink: 0;
         }
         .logo-wordmark h1 {
             font-family: 'Cormorant Garamond', serif;
-            font-size: 1.35rem;
-            font-weight: 400;
-            color: var(--ink);
-            letter-spacing: -0.015em;
-            line-height: 1.1;
+            font-size: 1.35rem; font-weight: 400; color: var(--ink);
+            letter-spacing: -0.015em; line-height: 1.1;
         }
         .logo-wordmark h1 em { font-style: italic; color: var(--oliva); }
         .logo-wordmark p {
-            font-size: 10px;
-            color: var(--ink-ghost);
-            letter-spacing: 0.10em;
-            text-transform: uppercase;
-            margin-top: 2px;
-            font-weight: 400;
+            font-size: 10px; color: var(--ink-ghost);
+            letter-spacing: 0.10em; text-transform: uppercase;
+            margin-top: 2px; font-weight: 400;
         }
-
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .badge-mesa {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            background: var(--oliva-pale);
-            border: 1px solid var(--oliva-bd);
-            color: var(--oliva);
-            font-size: 11px;
-            font-weight: 500;
-            letter-spacing: 0.03em;
-            padding: 5px 12px;
-            border-radius: 9999px;
-            white-space: nowrap;
-        }
-
-        .btn-cambiar-mesa {
-            background: none;
-            border: 1px solid var(--border);
-            color: var(--ink-muted);
-            border-radius: 9999px;
-            padding: 5px 12px;
-            font-size: 11px;
-            font-family: 'DM Sans', sans-serif;
-            cursor: pointer;
-            transition: all 0.2s;
-            white-space: nowrap;
-        }
-        .btn-cambiar-mesa:hover { border-color: var(--oliva-bd); color: var(--oliva); }
 
         /* ── BARRA DE CATEGORÍAS ── */
         .cats-bar {
-            display: flex;
-            gap: 7px;
-            overflow-x: auto;
-            scroll-snap-type: x mandatory;
+            display: flex; gap: 7px;
+            overflow-x: auto; scroll-snap-type: x mandatory;
             -webkit-overflow-scrolling: touch;
-            padding: 10px 18px 14px;
-            scrollbar-width: none;
+            padding: 10px 18px 14px; scrollbar-width: none;
         }
         .cats-bar::-webkit-scrollbar { display: none; }
 
         .cat-btn {
-            flex-shrink: 0;
-            scroll-snap-align: start;
-            padding: 7px 16px;
-            border-radius: 9999px;
-            border: 1.5px solid var(--border);
-            background: #fff;
-            color: var(--ink-muted);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 12.5px;
-            font-weight: 400;
-            white-space: nowrap;
-            cursor: pointer;
-            transition: all 0.25s ease;
+            flex-shrink: 0; scroll-snap-align: start;
+            padding: 7px 16px; border-radius: 9999px;
+            border: 1.5px solid var(--border); background: #fff;
+            color: var(--ink-muted); font-family: 'DM Sans', sans-serif;
+            font-size: 12.5px; font-weight: 400; white-space: nowrap;
+            cursor: pointer; transition: all 0.25s ease;
         }
         .cat-btn:active { transform: scale(0.95); }
         .cat-btn.active {
-            background: var(--oliva);
-            border-color: var(--oliva);
-            color: #fff;
-            font-weight: 500;
+            background: var(--oliva); border-color: var(--oliva);
+            color: #fff; font-weight: 500;
             box-shadow: 0 2px 12px rgba(74,90,40,0.22);
         }
 
         /* ── ENCABEZADO DE SECCIÓN ── */
         .section-label {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 0 18px;
-            margin: 26px 0 10px;
+            display: flex; align-items: center; gap: 10px;
+            padding: 0 18px; margin: 26px 0 10px;
         }
         .section-label h2 {
             font-family: 'Cormorant Garamond', serif;
-            font-size: 1.25rem;
-            font-weight: 400;
-            color: var(--ink);
-            white-space: nowrap;
-            line-height: 1.2;
+            font-size: 1.25rem; font-weight: 400; color: var(--ink);
+            white-space: nowrap; line-height: 1.2;
         }
         .section-label::after {
-            content: '';
-            flex: 1;
-            height: 1px;
-            background: var(--border);
+            content: ''; flex: 1; height: 1px; background: var(--border);
         }
 
         /* ── TARJETA DE PLATO ── */
         .plate-card {
-            margin: 0 18px 9px;
-            background: #ffffff;
-            border: 1px solid var(--border);
-            border-radius: 16px;
+            margin: 0 18px 9px; background: #ffffff;
+            border: 1px solid var(--border); border-radius: 16px;
             padding: 15px 15px 15px 16px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
+            display: flex; align-items: center;
+            justify-content: space-between; gap: 12px;
             box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 3px 10px rgba(0,0,0,0.025);
             transition: box-shadow 0.22s ease, transform 0.18s ease;
             animation: fadeUp 0.45s cubic-bezier(.22,.68,0,1.2) both;
         }
         .plate-card:active { transform: scale(0.987); }
         .plate-info { flex: 1; min-width: 0; }
-        .plate-name {
-            font-size: 14px;
-            font-weight: 500;
-            color: var(--ink);
-            line-height: 1.35;
-            margin-bottom: 3px;
-        }
+        .plate-name { font-size: 14px; font-weight: 500; color: var(--ink); line-height: 1.35; margin-bottom: 3px; }
         .plate-desc {
-            font-size: 11.5px;
-            color: var(--ink-muted);
-            line-height: 1.55;
-            margin-bottom: 7px;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
+            font-size: 11.5px; color: var(--ink-muted); line-height: 1.55; margin-bottom: 7px;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
         }
         .plate-price {
             font-family: 'Cormorant Garamond', serif;
-            font-size: 1.1rem;
-            font-weight: 500;
-            color: var(--oliva);
+            font-size: 1.1rem; font-weight: 500; color: var(--oliva);
         }
         .plate-price.incluido {
-            font-family: 'DM Sans', sans-serif;
-            font-size: 11px;
-            font-weight: 500;
-            color: var(--oliva);
-            background: var(--oliva-pale);
-            border: 1px solid var(--oliva-bd);
-            padding: 2px 9px;
-            border-radius: 9999px;
+            font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 500;
+            color: var(--oliva); background: var(--oliva-pale);
+            border: 1px solid var(--oliva-bd); padding: 2px 9px; border-radius: 9999px;
         }
         .plate-card.agotado {
-            opacity: 0.50;
-            pointer-events: none;
-            background: var(--crema-dk);
+            opacity: 0.50; pointer-events: none; background: var(--crema-dk);
         }
         .plate-card.agotado .plate-name { text-decoration: line-through; color: var(--ink-muted); }
 
         .badge-agotado {
-            display: inline-block;
-            font-size: 10px;
-            font-weight: 500;
-            color: var(--red);
-            background: rgba(184,50,50,0.07);
-            border: 1px solid rgba(184,50,50,0.16);
-            padding: 2px 8px;
-            border-radius: 9999px;
+            display: inline-block; font-size: 10px; font-weight: 500;
+            color: var(--red); background: rgba(184,50,50,0.07);
+            border: 1px solid rgba(184,50,50,0.16); padding: 2px 8px; border-radius: 9999px;
         }
         .badge-pocas {
-            display: inline-block;
-            font-size: 10px;
-            font-weight: 500;
-            color: var(--amber);
-            background: rgba(180,83,9,0.07);
-            border: 1px solid rgba(180,83,9,0.18);
-            padding: 2px 8px;
-            border-radius: 9999px;
+            display: inline-block; font-size: 10px; font-weight: 500;
+            color: var(--amber); background: rgba(180,83,9,0.07);
+            border: 1px solid rgba(180,83,9,0.18); padding: 2px 8px; border-radius: 9999px;
             animation: pulse 2s ease-in-out infinite;
         }
 
         /* ── CONTROL DE CANTIDAD ── */
         .qty-chip {
-            display: flex;
-            align-items: center;
-            background: var(--oliva-pale);
-            border: 1.5px solid var(--oliva-bd);
-            border-radius: 9999px;
-            padding: 2px;
-            flex-shrink: 0;
+            display: flex; align-items: center;
+            background: var(--oliva-pale); border: 1.5px solid var(--oliva-bd);
+            border-radius: 9999px; padding: 2px; flex-shrink: 0;
         }
         .qty-chip button {
-            width: 30px; height: 30px;
-            border-radius: 50%;
-            border: none;
-            background: transparent;
-            color: var(--oliva);
-            font-size: 18px;
-            font-weight: 300;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.15s;
-            line-height: 1;
+            width: 30px; height: 30px; border-radius: 50%; border: none;
+            background: transparent; color: var(--oliva);
+            font-size: 18px; font-weight: 300; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.15s; line-height: 1;
         }
         .qty-chip button:active { background: var(--oliva-pale2); }
         .qty-chip span {
-            min-width: 26px;
-            text-align: center;
-            font-size: 13.5px;
-            font-weight: 600;
-            color: var(--oliva);
+            min-width: 26px; text-align: center;
+            font-size: 13.5px; font-weight: 600; color: var(--oliva);
         }
         .btn-add {
-            width: 36px; height: 36px;
-            border-radius: 50%;
-            border: 1.5px solid var(--oliva-bd);
-            background: var(--oliva-pale);
-            color: var(--oliva);
-            font-size: 22px;
-            font-weight: 300;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.18s;
-            line-height: 1;
-            flex-shrink: 0;
+            width: 36px; height: 36px; border-radius: 50%;
+            border: 1.5px solid var(--oliva-bd); background: var(--oliva-pale);
+            color: var(--oliva); font-size: 22px; font-weight: 300; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.18s; line-height: 1; flex-shrink: 0;
         }
         .btn-add:active { transform: scale(0.90); background: var(--oliva-pale2); }
 
         /* ── BARRA DE CARRITO ── */
         #cart-bar {
             position: fixed;
-            bottom: calc(20px + var(--safe-bottom));
-            left: 50%;
+            bottom: calc(20px + var(--safe-bottom)); left: 50%;
             transform: translateX(-50%) translateY(115%);
-            z-index: 50;
-            width: calc(100% - 32px);
-            max-width: 460px;
-            background: var(--oliva);
-            border-radius: 9999px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
+            z-index: 50; width: calc(100% - 32px); max-width: 460px;
+            background: var(--oliva); border-radius: 9999px;
+            display: flex; align-items: center; justify-content: space-between;
             padding: 14px 16px 14px 20px;
             box-shadow: 0 8px 32px rgba(74,90,40,0.32);
             cursor: pointer;
             transition: transform 0.40s cubic-bezier(0.16,1,0.3,1), opacity 0.40s ease;
-            opacity: 0;
-            pointer-events: none;
+            opacity: 0; pointer-events: none;
         }
         #cart-bar.visible {
             transform: translateX(-50%) translateY(0);
-            opacity: 1;
-            pointer-events: auto;
+            opacity: 1; pointer-events: auto;
         }
-        .cart-bar-left {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
+        .cart-bar-left { display: flex; align-items: center; gap: 10px; }
         .cart-count-bubble {
-            width: 28px; height: 28px;
-            border-radius: 50%;
+            width: 28px; height: 28px; border-radius: 50%;
             background: rgba(255,255,255,0.2);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 13px;
-            font-weight: 700;
-            color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px; font-weight: 700; color: #fff;
         }
-        .cart-bar-label {
-            font-size: 13.5px;
-            font-weight: 500;
-            color: #fff;
-            letter-spacing: 0.02em;
-        }
+        .cart-bar-label { font-size: 13.5px; font-weight: 500; color: #fff; letter-spacing: 0.02em; }
         .cart-bar-total {
             font-family: 'Cormorant Garamond', serif;
-            font-size: 1.2rem;
-            font-weight: 500;
-            color: rgba(255,255,255,0.92);
+            font-size: 1.2rem; font-weight: 500; color: rgba(255,255,255,0.92);
         }
 
         /* ── ESTADO VACÍO ── */
-        .empty-state {
-            text-align: center;
-            padding: 56px 28px;
-        }
+        .empty-state { text-align: center; padding: 56px 28px; }
         .empty-state .icon { font-size: 36px; margin-bottom: 14px; }
         .empty-state p { font-size: 13.5px; color: var(--ink-muted); line-height: 1.6; }
 
-        /* ── LOADER ── */
+        /* ── LOADER / ERROR ── */
         #app-loader {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 16px;
-            padding: 80px 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            gap: 16px; padding: 80px 0;
         }
         #app-loader p { font-size: 13px; color: var(--ink-ghost); }
 
-        /* ── PANTALLA DE ERROR ── */
         #app-error {
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 16px;
-            padding: 80px 28px;
-            text-align: center;
+            display: none; flex-direction: column;
+            align-items: center; justify-content: center;
+            gap: 16px; padding: 80px 28px; text-align: center;
         }
         #app-error .err-icon { font-size: 36px; }
         #app-error p { font-size: 13.5px; color: var(--ink-muted); line-height: 1.6; max-width: 280px; }
         #app-error button {
-            margin-top: 8px;
-            padding: 12px 24px;
-            border-radius: 9999px;
-            background: var(--oliva);
-            color: #fff;
-            border: none;
-            font-family: 'DM Sans', sans-serif;
-            font-size: 13.5px;
-            font-weight: 500;
-            cursor: pointer;
+            margin-top: 8px; padding: 12px 24px; border-radius: 9999px;
+            background: var(--oliva); color: #fff; border: none;
+            font-family: 'DM Sans', sans-serif; font-size: 13.5px; font-weight: 500; cursor: pointer;
         }
 
         /* ═══════════════════════════════════════════
-           MODAL DE PEDIDO (DRAWER INFERIOR)
+           MODAL DE PEDIDO
         ═══════════════════════════════════════════ */
-        #order-modal {
-            position: fixed;
-            inset: 0;
-            display: none;
-            z-index: 80;
-        }
+        #order-modal { position: fixed; inset: 0; display: none; z-index: 80; }
         #order-modal.open { display: block; }
 
         .modal-overlay {
-            position: absolute;
-            inset: 0;
+            position: absolute; inset: 0;
             background: rgba(18,18,12,0.55);
-            backdrop-filter: blur(6px);
-            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
         }
 
         .modal-panel {
-            position: absolute;
-            bottom: 0; left: 0; right: 0;
-            background: #fff;
-            border-radius: 24px 24px 0 0;
-            max-height: 90svh;
-            display: flex;
-            flex-direction: column;
+            position: absolute; bottom: 0; left: 0; right: 0;
+            background: #fff; border-radius: 24px 24px 0 0;
+            max-height: 92svh; display: flex; flex-direction: column;
             overflow: hidden;
             animation: slideUp 0.38s cubic-bezier(0.16,1,0.3,1) both;
         }
 
         .modal-handle {
-            display: flex;
-            justify-content: center;
-            padding: 12px 0 4px;
-            flex-shrink: 0;
+            display: flex; justify-content: center; padding: 12px 0 4px; flex-shrink: 0;
         }
-        .modal-handle-bar {
-            width: 36px; height: 4px;
-            background: var(--border);
-            border-radius: 9999px;
-        }
+        .modal-handle-bar { width: 36px; height: 4px; background: var(--border); border-radius: 9999px; }
 
-        .modal-header {
-            padding: 4px 20px 14px;
-            border-bottom: 1px solid var(--border-lt);
-            flex-shrink: 0;
-        }
+        .modal-header { padding: 4px 20px 14px; border-bottom: 1px solid var(--border-lt); flex-shrink: 0; }
         .modal-header h3 {
             font-family: 'Cormorant Garamond', serif;
-            font-size: 1.5rem;
-            font-weight: 400;
-            color: var(--ink);
-            margin-bottom: 2px;
+            font-size: 1.5rem; font-weight: 400; color: var(--ink); margin-bottom: 2px;
         }
-        .modal-header p {
-            font-size: 12px;
-            color: var(--ink-ghost);
-        }
+        .modal-header p { font-size: 12px; color: var(--ink-ghost); }
 
-        .modal-body {
-            flex: 1;
-            overflow-y: auto;
-            padding: 16px 20px;
-        }
+        .modal-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
 
-        /* Filas de resumen */
+        /* Resumen de ítems */
         .summary-row {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 10px;
-            padding: 13px 0;
-            border-bottom: 1px solid var(--border-lt);
+            display: flex; align-items: flex-start; justify-content: space-between;
+            gap: 10px; padding: 13px 0; border-bottom: 1px solid var(--border-lt);
         }
         .summary-row:last-child { border-bottom: none; }
-        .summary-name {
-            font-size: 13.5px; font-weight: 500; color: var(--ink); line-height: 1.3; margin-bottom: 2px;
-        }
-        .summary-qty { font-size: 11.5px; color: var(--ink-ghost); }
+        .summary-name { font-size: 13.5px; font-weight: 500; color: var(--ink); line-height: 1.3; margin-bottom: 2px; }
+        .summary-qty  { font-size: 11.5px; color: var(--ink-ghost); }
         .summary-price {
             font-family: 'Cormorant Garamond', serif;
             font-size: 1.05rem; font-weight: 500; color: var(--oliva); white-space: nowrap; flex-shrink: 0;
         }
 
-        /* Total */
         .modal-total-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 14px 20px;
-            border-top: 1px solid var(--border);
-            flex-shrink: 0;
-            background: var(--oliva-pale);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 20px; border-top: 1px solid var(--border);
+            flex-shrink: 0; background: var(--oliva-pale);
         }
-        .modal-total-label {
-            font-size: 12px; font-weight: 500; color: var(--oliva); text-transform: uppercase; letter-spacing: 0.06em;
-        }
-        .modal-total-monto {
-            font-family: 'Cormorant Garamond', serif;
-            font-size: 1.45rem; font-weight: 500; color: var(--oliva);
-        }
+        .modal-total-label { font-size: 12px; font-weight: 500; color: var(--oliva); text-transform: uppercase; letter-spacing: 0.06em; }
+        .modal-total-monto { font-family: 'Cormorant Garamond', serif; font-size: 1.45rem; font-weight: 500; color: var(--oliva); }
 
-        /* Sección del formulario en el modal */
+        /* Formulario del modal */
         .modal-form-section {
-            padding: 16px 20px;
-            border-top: 1px solid var(--border-lt);
-            flex-shrink: 0;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
+            padding: 16px 20px; border-top: 1px solid var(--border-lt);
+            flex-shrink: 0; display: flex; flex-direction: column; gap: 14px;
         }
 
         .form-label {
-            display: block;
-            font-size: 10.5px;
-            font-weight: 500;
-            color: var(--ink-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            margin-bottom: 6px;
+            display: block; font-size: 10.5px; font-weight: 500; color: var(--ink-muted);
+            text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;
         }
 
         .form-input {
-            width: 100%;
-            padding: 12px 15px;
-            border-radius: 12px;
-            border: 1.5px solid var(--border);
-            background: var(--crema-bg);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 14px;
-            color: var(--ink);
-            outline: none;
-            transition: border-color 0.22s, box-shadow 0.22s;
+            width: 100%; padding: 12px 15px; border-radius: 12px;
+            border: 1.5px solid var(--border); background: var(--crema-bg);
+            font-family: 'DM Sans', sans-serif; font-size: 14px; color: var(--ink);
+            outline: none; transition: border-color 0.22s, box-shadow 0.22s;
         }
         .form-input:focus { border-color: var(--oliva); box-shadow: 0 0 0 3px rgba(74,90,40,0.08); background: #fff; }
         .form-input::placeholder { color: var(--ink-ghost); }
+        .form-input.error { border-color: var(--red); box-shadow: 0 0 0 3px rgba(184,50,50,0.08); }
         textarea.form-input { resize: none; min-height: 72px; line-height: 1.5; }
+
+        /* Selector de modalidad */
+        .modalidad-tabs {
+            display: flex; gap: 8px;
+        }
+        .modalidad-tab {
+            flex: 1; padding: 10px 6px; border-radius: 12px;
+            border: 1.5px solid var(--border); background: var(--crema-bg);
+            color: var(--ink-muted); font-family: 'DM Sans', sans-serif;
+            font-size: 12px; font-weight: 400; cursor: pointer;
+            text-align: center; transition: all 0.2s ease; line-height: 1.3;
+        }
+        .modalidad-tab .tab-icon { display: block; font-size: 18px; margin-bottom: 3px; }
+        .modalidad-tab.active {
+            background: var(--oliva-pale); border-color: var(--oliva);
+            color: var(--oliva); font-weight: 500;
+        }
 
         /* Botones del modal */
         .modal-footer {
             padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px));
-            border-top: 1px solid var(--border-lt);
-            flex-shrink: 0;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
+            border-top: 1px solid var(--border-lt); flex-shrink: 0;
+            display: flex; flex-direction: column; gap: 8px;
         }
 
         .btn-confirmar {
-            width: 100%;
-            padding: 16px 24px;
-            border-radius: 9999px;
-            background: var(--oliva);
-            color: #fff;
-            font-family: 'DM Sans', sans-serif;
-            font-size: 14px;
-            font-weight: 500;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            border: none;
-            cursor: pointer;
+            width: 100%; padding: 16px 24px; border-radius: 9999px;
+            background: var(--oliva); color: #fff;
+            font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500;
+            letter-spacing: 0.05em; text-transform: uppercase; border: none; cursor: pointer;
             transition: background 0.22s, transform 0.16s, box-shadow 0.22s;
             box-shadow: 0 4px 16px rgba(74,90,40,0.20);
         }
@@ -947,17 +401,10 @@
         .btn-confirmar:disabled { opacity: 0.48; cursor: not-allowed; transform: none; box-shadow: none; }
 
         .btn-secundario {
-            width: 100%;
-            padding: 14px 24px;
-            border-radius: 9999px;
-            background: transparent;
-            border: 1.5px solid var(--border);
-            color: var(--ink-muted);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 13.5px;
-            font-weight: 400;
-            cursor: pointer;
-            transition: all 0.2s;
+            width: 100%; padding: 14px 24px; border-radius: 9999px;
+            background: transparent; border: 1.5px solid var(--border);
+            color: var(--ink-muted); font-family: 'DM Sans', sans-serif;
+            font-size: 13.5px; font-weight: 400; cursor: pointer; transition: all 0.2s;
         }
         .btn-secundario:hover { border-color: var(--ink-muted); color: var(--ink); }
 
@@ -965,189 +412,43 @@
            MODAL DE ÉXITO
         ═══════════════════════════════════════════ */
         #success-modal {
-            position: fixed;
-            inset: 0;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            padding: 24px;
-            z-index: 90;
+            position: fixed; inset: 0; display: none;
+            align-items: center; justify-content: center;
+            padding: 24px; z-index: 90;
             background: rgba(18,18,12,0.55);
-            backdrop-filter: blur(6px);
-            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
         }
         #success-modal.open { display: flex; }
 
         .success-card {
-            position: relative;
-            background: #fff;
-            border-radius: 24px;
-            padding: 36px 28px 30px;
-            max-width: 320px;
-            width: 100%;
-            text-align: center;
-            border: 1px solid var(--border);
+            position: relative; background: #fff; border-radius: 24px;
+            padding: 36px 28px 30px; max-width: 320px; width: 100%;
+            text-align: center; border: 1px solid var(--border);
             box-shadow: 0 24px 64px rgba(0,0,0,0.12);
             animation: scaleIn 0.32s cubic-bezier(0.16,1,0.3,1) both;
         }
 
         .rule-oliva {
-            display: block;
-            width: 28px; height: 2px;
-            background: var(--oliva);
-            border-radius: 2px;
-            margin: 0 auto 18px;
+            display: block; width: 28px; height: 2px;
+            background: var(--oliva); border-radius: 2px; margin: 0 auto 18px;
         }
 
         .check-path {
-            stroke-dasharray: 100;
-            stroke-dashoffset: 100;
+            stroke-dasharray: 100; stroke-dashoffset: 100;
             transition: stroke-dashoffset 0.65s 0.25s cubic-bezier(0.65,0,0.35,1);
         }
         .check-path.drawn { stroke-dashoffset: 0; }
 
-        /* ═══════════════════════════════════════════
-           UTILIDADES
-        ═══════════════════════════════════════════ */
         .z-content { position: relative; z-index: 1; }
     </style>
 </head>
 <body>
 
 <!-- ═══════════════════════════════════════════════════════
-     PASO 1: PANTALLA DE LOGIN
-════════════════════════════════════════════════════════ -->
-<div id="screen-login">
-    <div class="login-card">
-        <div class="login-logo">
-            <img src="logo.png" alt="Logo la 26">
-            <h1>Restaurante <em>la 26</em></h1>
-            <p>Acceso de mesero</p>
-        </div>
-
-        <div class="login-divider"></div>
-
-        <div id="login-error" class="login-error"></div>
-
-        <label class="login-label" for="login-email">Correo o usuario</label>
-        <input
-            id="login-email"
-            class="login-input"
-            type="email"
-            inputmode="email"
-            autocomplete="email"
-            placeholder="mesero@la26.co"
-            onkeydown="if(event.key==='Enter') document.getElementById('login-pass').focus()">
-
-        <label class="login-label" for="login-pass">Contraseña</label>
-        <div class="login-pass-wrap">
-            <input
-                id="login-pass"
-                class="login-input"
-                type="password"
-                autocomplete="current-password"
-                placeholder="••••••••"
-                onkeydown="if(event.key==='Enter') Auth.login()">
-            <button class="login-eye" onclick="Auth.togglePass()" type="button" title="Mostrar contraseña">👁</button>
-        </div>
-
-        <button id="btn-login" class="btn-login" onclick="Auth.login()">
-            Entrar
-        </button>
-    </div>
-</div>
-
-
-<!-- ═══════════════════════════════════════════════════════
-     PASO 2: SELECTOR DE ORIGEN
-     Aparece sobre un overlay tras el login.
-════════════════════════════════════════════════════════ -->
-<div id="screen-origen">
-    <div id="screen-origen-overlay"></div>
-
-    <div class="origen-panel">
-        <div class="origen-handle"><div class="origen-handle-bar"></div></div>
-
-        <div class="origen-header">
-            <img src="logo.png" alt="Logo la 26">
-            <h2>Restaurante <em>la 26</em></h2>
-            <p>¿Dónde va este pedido?</p>
-        </div>
-
-        <div class="origen-body">
-            <!-- Tabs -->
-            <div class="origen-tabs">
-                <button id="tab-mesa" class="origen-tab active" onclick="Origen.setTab('mesa')">
-                    <span class="tab-icon">🍽️</span>
-                    Mesa
-                </button>
-                <button id="tab-llevar" class="origen-tab" onclick="Origen.setTab('llevar')">
-                    <span class="tab-icon">🛵</span>
-                    Para llevar
-                </button>
-                <button id="tab-domicilio" class="origen-tab" onclick="Origen.setTab('domicilio')">
-                    <span class="tab-icon">📦</span>
-                    Domicilio
-                </button>
-            </div>
-
-            <!-- Panel Mesa -->
-            <div id="panel-mesa" class="origen-fields visible">
-                <div>
-                    <label class="field-label" for="inp-mesa">Número de mesa <span style="color:var(--red);">*</span></label>
-                    <input id="inp-mesa" class="input-field" type="text" inputmode="numeric"
-                        placeholder="Ej: 5, 12, Barra…"
-                        autocomplete="off"
-                        onkeydown="if(event.key==='Enter') Origen.confirmar()">
-                </div>
-                <div>
-                    <label class="field-label" for="inp-nombre-mesa">Nombre del cliente (opcional)</label>
-                    <input id="inp-nombre-mesa" class="input-field" type="text"
-                        placeholder="Para avisarle cuando esté listo…"
-                        onkeydown="if(event.key==='Enter') Origen.confirmar()">
-                </div>
-            </div>
-
-            <!-- Panel Para Llevar -->
-            <div id="panel-llevar" class="origen-fields">
-                <div>
-                    <label class="field-label" for="inp-nombre-llevar">Nombre del cliente <span style="color:var(--red);">*</span></label>
-                    <input id="inp-nombre-llevar" class="input-field" type="text"
-                        placeholder="¿A nombre de quién?"
-                        onkeydown="if(event.key==='Enter') Origen.confirmar()">
-                </div>
-            </div>
-
-            <!-- Panel Domicilio -->
-            <div id="panel-domicilio" class="origen-fields">
-                <div>
-                    <label class="field-label" for="inp-nombre-dom">Nombre del cliente <span style="color:var(--red);">*</span></label>
-                    <input id="inp-nombre-dom" class="input-field" type="text"
-                        placeholder="¿A nombre de quién?"
-                        onkeydown="if(event.key==='Enter') document.getElementById('inp-direccion').focus()">
-                </div>
-                <div>
-                    <label class="field-label" for="inp-direccion">Dirección de entrega <span style="color:var(--red);">*</span></label>
-                    <input id="inp-direccion" class="input-field" type="text"
-                        placeholder="Cra 27 #45-12, Apto 301…"
-                        onkeydown="if(event.key==='Enter') Origen.confirmar()">
-                </div>
-            </div>
-
-            <button class="btn-ver-carta" onclick="Origen.confirmar()">
-                Ver la carta →
-            </button>
-        </div>
-    </div>
-</div>
-
-
-<!-- ═══════════════════════════════════════════════════════
-     PASO 3+: APP PRINCIPAL — MENÚ
+     APP PRINCIPAL — CARTA DIRECTA
 ════════════════════════════════════════════════════════ -->
 <div id="app-main">
 
-    <!-- Header fijo -->
     <header class="app-header z-content">
         <div class="header-top">
             <div class="logo-lockup">
@@ -1157,19 +458,10 @@
                     <p>Carta del día</p>
                 </div>
             </div>
-            <div class="header-right">
-                <span id="badge-mesa" class="badge-mesa" style="display:none;"></span>
-                <button class="btn-cambiar-mesa" onclick="Origen.mostrar()" title="Cambiar mesa o modalidad">
-                    ↺ Cambiar
-                </button>
-            </div>
         </div>
-
-        <!-- Barra de categorías -->
         <div id="cats-bar" class="cats-bar z-content"></div>
     </header>
 
-    <!-- Contenido del menú -->
     <main id="app-content" class="z-content">
         <div id="app-loader">
             <div class="spinner"></div>
@@ -1187,7 +479,7 @@
 
 
 <!-- ═══════════════════════════════════════════════════════
-     PASO 4: MODAL DE PEDIDO (Drawer inferior)
+     MODAL DE PEDIDO
 ════════════════════════════════════════════════════════ -->
 <div id="order-modal">
     <div class="modal-overlay" onclick="Cart.cerrar()"></div>
@@ -1196,8 +488,8 @@
         <div class="modal-handle"><div class="modal-handle-bar"></div></div>
 
         <div class="modal-header">
-            <h3>Resumen del pedido</h3>
-            <p id="modal-subtitulo">Mesa —</p>
+            <h3>Registrar Pedido</h3>
+            <p>Revisa el pedido y completa los datos</p>
         </div>
 
         <!-- Lista de ítems -->
@@ -1209,22 +501,52 @@
             <span id="summary-total" class="modal-total-monto">$0</span>
         </div>
 
-        <!-- Formulario de datos adicionales -->
+        <!-- Formulario -->
         <div class="modal-form-section">
-            <div id="campo-nombre-wrapper">
-                <label class="form-label" for="form-nombre">Nombre del cliente</label>
-                <input id="form-nombre" class="form-input" type="text"
-                    placeholder="Para identificar el pedido en cocina…">
+
+            <!-- Tipo de pedido -->
+            <div>
+                <label class="form-label">Tipo de pedido</label>
+                <div class="modalidad-tabs">
+                    <button class="modalidad-tab active" onclick="UI.setModalidad('mesa', this)">
+                        <span class="tab-icon">🍽️</span>Mesa
+                        <input type="radio" name="form-modalidad" value="mesa" checked style="display:none;">
+                    </button>
+                    <button class="modalidad-tab" onclick="UI.setModalidad('llevar', this)">
+                        <span class="tab-icon">🛵</span>Para Llevar
+                        <input type="radio" name="form-modalidad" value="llevar" style="display:none;">
+                    </button>
+                    <button class="modalidad-tab" onclick="UI.setModalidad('domicilio', this)">
+                        <span class="tab-icon">📦</span>Domicilio
+                        <input type="radio" name="form-modalidad" value="domicilio" style="display:none;">
+                    </button>
+                </div>
             </div>
 
-            <div id="campo-notas-wrapper">
+            <!-- Número de mesa (visible solo en modo mesa) -->
+            <div id="campo-mesa-wrapper">
+                <label class="form-label" for="form-mesa">
+                    Número de mesa <span style="color:var(--red);">*</span>
+                </label>
+                <input id="form-mesa" class="form-input" type="text" inputmode="numeric"
+                    placeholder="Ej: 5, 12, Barra…" autocomplete="off">
+            </div>
+
+            <!-- Nombre del cliente -->
+            <div>
+                <label class="form-label" for="form-nombre">Nombre del cliente</label>
+                <input id="form-nombre" class="form-input" type="text"
+                    placeholder="Para identificar el pedido…">
+            </div>
+
+            <!-- Notas -->
+            <div>
                 <label class="form-label" for="form-notas">Notas / instrucciones</label>
                 <textarea id="form-notas" class="form-input"
-                    placeholder="Sin picante, alergia a… sin cebolla…" rows="2"></textarea>
+                    placeholder="Sin picante, sin cebolla, alergia a…" rows="2"></textarea>
             </div>
         </div>
 
-        <!-- Botones -->
         <div class="modal-footer">
             <button id="btn-enviar" class="btn-confirmar" onclick="Order.enviar()">
                 Enviar a cocina
@@ -1238,7 +560,7 @@
 
 
 <!-- ═══════════════════════════════════════════════════════
-     PASO 5: MODAL DE ÉXITO
+     MODAL DE ÉXITO
 ════════════════════════════════════════════════════════ -->
 <div id="success-modal">
     <div class="success-card">
@@ -1287,26 +609,41 @@
 </div>
 
 
-<!-- ═══════════════════════════════════════════════════════
-     SCRIPTS
-════════════════════════════════════════════════════════ -->
 <script src="menu.js"></script>
 
 <script>
-    // Animación del check al mostrar el modal de éxito
+    // ── Animación del check de éxito ──
     (function() {
         const m = document.getElementById('success-modal');
         const c = document.getElementById('success-check');
         if (!m || !c) return;
         new MutationObserver(function() {
-            const visible = m.classList.contains('open');
-            if (visible) {
+            if (m.classList.contains('open')) {
                 setTimeout(function() { c.classList.add('drawn'); }, 180);
             } else {
                 c.classList.remove('drawn');
             }
         }).observe(m, { attributes: true, attributeFilter: ['class'] });
     })();
+
+    // ── Control de pestañas de modalidad ──
+    const UI = {
+        setModalidad(valor, btnClicado) {
+            // Activar tab
+            document.querySelectorAll('.modalidad-tab').forEach(b => b.classList.remove('active'));
+            btnClicado.classList.add('active');
+
+            // Marcar el radio oculto dentro del botón
+            const radio = btnClicado.querySelector('input[type="radio"]');
+            if (radio) radio.checked = true;
+
+            // Mostrar / ocultar campo de mesa
+            const campoMesa = document.getElementById('campo-mesa-wrapper');
+            if (campoMesa) {
+                campoMesa.style.display = valor === 'mesa' ? 'block' : 'none';
+            }
+        }
+    };
 </script>
 
 </body>
