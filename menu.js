@@ -663,19 +663,36 @@ const Order = {
 
             // Insertar ítems
             if (itemsResueltos.length > 0) {
-                const { error: errItems } = await db.from('order_items').insert(
-                    itemsResueltos.map(item => ({
-                        order_id:           orden.id,
-                        menu_item_id:       item.menuItemId,
-                        daily_menu_slot_id: item.slotId,   // null si es mock o sin daily_menu
-                        quantity:           item.cantidad,
-                        unit_price:         item.precio,
-                        item_status:        'pending',
-                        notes:              `[nombre]${item.nombre}`,  // prefijo que lee la cocina
-                    }))
-                );
+                const payload = itemsResueltos.map(item => ({
+                    order_id:           orden.id,
+                    menu_item_id:       item.menuItemId,   // puede ser null si no se resolvió
+                    daily_menu_slot_id: item.slotId,       // null si es mock o sin daily_menu
+                    quantity:           item.cantidad,
+                    unit_price:         item.precio,
+                    item_status:        'pending',
+                    notes:              `[nombre]${item.nombre}`, // prefijo que lee la cocina
+                }));
+
+                const { error: errItems } = await db.from('order_items').insert(payload);
+
                 if (errItems) {
-                    console.error('[La 26] order_items error:', errItems);
+                    console.warn('[La 26] order_items primer intento falló:', errItems.message);
+                    // Segundo intento: forzar menu_item_id con el primer item_id disponible
+                    // y daily_menu_slot_id en null para evitar cualquier FK inválida
+                    const { data: primerItem } = await db.from('menu_items')
+                        .select('id').eq('restaurant_id', State.restaurantId)
+                        .eq('is_active', true).limit(1).maybeSingle();
+
+                    const payloadSeguro = payload.map(item => ({
+                        ...item,
+                        menu_item_id:       item.menu_item_id || primerItem?.id || null,
+                        daily_menu_slot_id: null,
+                    }));
+
+                    const { error: errItems2 } = await db.from('order_items').insert(payloadSeguro);
+                    if (errItems2) {
+                        console.error('[La 26] order_items segundo intento falló:', errItems2.message);
+                    }
                 }
             }
 
@@ -719,7 +736,7 @@ const Order = {
                     m.name.toLowerCase().includes(nombreBuscar.split(' ')[0]) ||
                     nombreBuscar.includes(m.name.toLowerCase().split(' ')[0])
                 );
-                // 3. Mismo item_type como último recurso antes del fallback
+                // 3. Mismo item_type
                 const mismoCat = !exacto && !parcial && lista.find(m =>
                     m.item_type === slot.itemType
                 );
@@ -727,10 +744,10 @@ const Order = {
                 menuItemId = exacto?.id || parcial?.id || mismoCat?.id || fallbackId;
             }
 
-            // Si no hay menuItemId, omitir — mejor que insertar con null
+            // NUNCA omitir el ítem — si no hay menuItemId, se inserta con null.
+            // La cocina lee el nombre desde notes con prefijo [nombre], no desde el join.
             if (!menuItemId) {
-                console.warn(`[La 26] Sin menu_item_id para "${slot.nombre}". Ítem omitido.`);
-                continue;
+                console.warn(`[La 26] Sin menu_item_id para "${slot.nombre}". Insertando con null.`);
             }
 
             // daily_menu_slot_id: null si es slot mock o si no hay menú del día
@@ -738,11 +755,11 @@ const Order = {
             const dailySlotId = (esSlotMock || !State.dailyMenuId) ? null : item.slotId;
 
             resultado.push({
-                slotId:   dailySlotId,
-                menuItemId,
-                cantidad: item.cantidad,
-                precio:   slot.precio,
-                nombre:   slot.nombre,
+                slotId:    dailySlotId,
+                menuItemId: menuItemId || null,
+                cantidad:  item.cantidad,
+                precio:    slot.precio,
+                nombre:    slot.nombre,
             });
         }
 
