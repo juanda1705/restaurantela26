@@ -1414,6 +1414,17 @@ async function realizarCierre() {
     // no muestre valores acumulados del ciclo anterior
     globalIngresos = 0; globalEgresos = 0;
 
+    // PROBLEMA 3 FIX — base de caja desaparece:
+    // El panel se ocultó al registrar la base inicial y DOMContentLoaded no se
+    // vuelve a ejecutar. Hay que mostrarlo explícitamente después de cada cierre
+    // para que el administrador pueda registrar la base del nuevo ciclo.
+    const panelApertura = document.getElementById('panel-apertura-caja');
+    const inputBase     = document.getElementById('input-base-caja');
+    if (panelApertura) {
+        panelApertura.style.display = '';   // restaurar visibilidad (valor original del HTML)
+        if (inputBase) inputBase.value = ''; // limpiar el valor anterior
+    }
+
     // Actualizar calendario si está visible
     if (document.getElementById('tab-calendario')?.style.display !== 'none') {
         cargarCalendarioCierres();
