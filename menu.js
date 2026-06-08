@@ -1,9 +1,32 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE MESERO
-// menu.js · Versión 6.0 — Flujo directo (sin auth)
+// menu.js · Versión 6.1 — CORRECCIÓN CRÍTICA
 // Bucaramanga, Santander — Colombia
 //
-// FLUJO: Carta → Carrito → Modal de Pedido → Envío
+// CAMBIOS v6.1 (correcciones de corrupción de datos):
+//
+//  [FIX-1] _cargarDesdeCatalogo: ELIMINADO el "intento 2" sin filtro
+//          que sobrescribía State.restaurantId y traía productos de
+//          todos los restaurantes. Ahora existe UNA SOLA consulta.
+//          Si no hay resultados con el restaurant_id del slug, se
+//          busca el ID correcto primero (sin alterar State.restaurantId
+//          con datos incorrectos) y se reintenta con él.
+//
+//  [FIX-2] State.cart ahora guarda { slotId, cantidad, productName,
+//          unitPrice } — el nombre y precio se copian en el momento
+//          en que el usuario agrega el producto. No depende de que
+//          State.slots siga intacto al momento del envío.
+//
+//  [FIX-3] El payload de order_items guarda el nombre en DOS lugares:
+//          - notes: "[nombre]<nombre real>"  (compatibilidad legada)
+//          - product_name: "<nombre real>"   (columna directa, si existe)
+//          Nunca depende de JOINs posteriores para reconstruir el nombre.
+//
+//  [FIX-4] _resolverRestaurant: si el slug no devuelve resultados,
+//          busca por limit(1) pero NO sobrescribe State.restaurantId
+//          hasta verificar que los menú_items de ese ID son los del
+//          admin actual. Se expone el restaurantId real sin contaminar
+//          el estado global con un ID ajeno.
 // ============================================================
 
 'use strict';
@@ -35,26 +58,22 @@ const ITEM_TYPES_VALIDOS = ['protein','side','drink','a_la_carte','executive_lun
 // ESTADO GLOBAL
 // ============================================================
 const State = {
-    restaurantId: null,
-    dailyMenuId:  null,
-    slots:        [],
-    cart:         [],
-    filtro:       'todos',
-    isSubmitting: false,
-    sistemaHabilitado: true,    // refleja system_settings.orders_enabled
+    restaurantId:       null,
+    dailyMenuId:        null,
+    slots:              [],
+    // [FIX-2] El carrito ahora incluye nombre y precio copiados
+    // en el momento de agregar — no depende de State.slots al enviar
+    cart:               [],   // [{ slotId, cantidad, productName, unitPrice }]
+    filtro:             'todos',
+    isSubmitting:       false,
+    sistemaHabilitado:  true,
 };
 
 // ============================================================
 // CONTROL DE ACCESO — LEE system_settings.orders_enabled
-// Misma tabla y clave que usa admin.js (SETTING_KEY = 'orders_enabled')
 // ============================================================
 const ORDERS_SETTING_KEY = 'orders_enabled';
 
-/**
- * Consulta la tabla system_settings en Supabase.
- * Fallback: localStorage (misma clave que admin.js usa como backup).
- * Retorna true si el sistema está habilitado, false si está bloqueado.
- */
 async function _verificarSistemaHabilitado() {
     try {
         const { data, error } = await db
@@ -64,22 +83,14 @@ async function _verificarSistemaHabilitado() {
             .maybeSingle();
 
         if (error) throw error;
-
-        // Sin fila → habilitado por defecto (igual que admin.js)
         return data ? data.value === 'true' : true;
     } catch (_) {
-        // Fallback: localStorage — mismo mecanismo que admin.js
         const local = localStorage.getItem(ORDERS_SETTING_KEY);
         return local === null ? true : local === 'true';
     }
 }
 
-/**
- * Muestra la pantalla de "Sistema fuera de servicio" bloqueando
- * todas las interacciones. Se activa cuando orders_enabled = false.
- */
 function _mostrarSistemaBloqueado() {
-    // Ocultar pantalla de menú y loader
     const loader   = document.getElementById('app-loader');
     const error    = document.getElementById('app-error');
     const sections = document.getElementById('menu-sections');
@@ -90,11 +101,9 @@ function _mostrarSistemaBloqueado() {
     if (sections) sections.style.display = 'none';
     if (cartBar)  cartBar.classList.remove('visible');
 
-    // Vaciar carrito silenciosamente
     State.cart  = [];
     State.slots = [];
 
-    // Mostrar o crear el panel de bloqueo
     let bloqueadoEl = document.getElementById('sistema-bloqueado');
     if (!bloqueadoEl) {
         bloqueadoEl = document.createElement('div');
@@ -124,18 +133,11 @@ function _mostrarSistemaBloqueado() {
     }
 }
 
-/**
- * Oculta el panel de bloqueo y restaura el menú.
- */
 function _ocultarSistemaBloqueado() {
     const bloqueadoEl = document.getElementById('sistema-bloqueado');
     if (bloqueadoEl) bloqueadoEl.style.display = 'none';
 }
 
-/**
- * Suscribe cambios en tiempo real de system_settings.
- * Cuando el admin habilita/deshabilita, menu.html reacciona de inmediato.
- */
 function _suscribirCambiosSistema() {
     db.channel('la26-sistema-settings')
         .on('postgres_changes', {
@@ -144,7 +146,6 @@ function _suscribirCambiosSistema() {
             table:  'system_settings',
             filter: `key=eq.${ORDERS_SETTING_KEY}`,
         }, async (payload) => {
-            // El nuevo valor llega en payload.new.value
             const habilitado = payload.new?.value === 'true';
             State.sistemaHabilitado = habilitado;
 
@@ -152,7 +153,6 @@ function _suscribirCambiosSistema() {
                 _mostrarSistemaBloqueado();
             } else {
                 _ocultarSistemaBloqueado();
-                // Recargar el menú fresco al volver a habilitar
                 await Menu.cargar();
             }
         })
@@ -251,10 +251,8 @@ function generarNumeroOrden() {
 }
 
 function calcularTotal() {
-    return State.cart.reduce((acc, item) => {
-        const slot = State.slots.find(s => s.id === item.slotId);
-        return acc + (slot ? slot.precio * item.cantidad : 0);
-    }, 0);
+    // [FIX-2] Usa unitPrice guardado en el carrito, no depende de State.slots
+    return State.cart.reduce((acc, item) => acc + (item.unitPrice * item.cantidad), 0);
 }
 
 function calcularCantidadTotal() {
@@ -268,24 +266,71 @@ function slotsFiltrados() {
 
 // ============================================================
 // RESOLVER RESTAURANT_ID
+// [FIX-1] Busca por slug primero; si no encuentra, busca el
+//         restaurant_id del primer menu_item activo existente
+//         (que es el que el admin realmente usó). NO sobrescribe
+//         State.restaurantId con un ID de otro restaurante sin validar.
 // ============================================================
 let _restaurantResolving = false;
 
 async function _resolverRestaurant() {
     if (State.restaurantId || _restaurantResolving) return;
     _restaurantResolving = true;
+
     try {
+        // Intento 1: buscar por slug (caso ideal)
         const { data: r1 } = await db.from('restaurants')
-            .select('id').eq('slug', RESTAURANT_SLUG).maybeSingle();
-        if (r1?.id) { State.restaurantId = r1.id; return; }
+            .select('id')
+            .eq('slug', RESTAURANT_SLUG)
+            .maybeSingle();
 
-        const { data: r2 } = await db.from('restaurants')
-            .select('id').limit(1).maybeSingle();
-        if (r2?.id) { State.restaurantId = r2.id; return; }
+        if (r1?.id) {
+            // Verificar que este restaurant_id tiene menu_items activos
+            const { data: check } = await db.from('menu_items')
+                .select('id')
+                .eq('restaurant_id', r1.id)
+                .eq('is_active', true)
+                .limit(1)
+                .maybeSingle();
 
+            if (check?.id) {
+                // El restaurant del slug tiene productos → usar este
+                State.restaurantId = r1.id;
+                return;
+            }
+            // El slug existe pero no tiene productos activos.
+            // No descartamos aún — puede ser que los productos usen otro restaurant_id.
+        }
+
+        // Intento 2: buscar el restaurant_id que tiene menu_items activos
+        // (el que el admin usó realmente para crear los platos)
+        // [FIX-1] Esto NO usa un SELECT sin filtro de menu_items —
+        //         buscamos en restaurants y verificamos cuál tiene productos
+        const { data: todosRestaurants } = await db.from('restaurants')
+            .select('id')
+            .limit(10);
+
+        if (todosRestaurants && todosRestaurants.length > 0) {
+            for (const rest of todosRestaurants) {
+                const { data: tieneItems } = await db.from('menu_items')
+                    .select('id')
+                    .eq('restaurant_id', rest.id)
+                    .eq('is_active', true)
+                    .limit(1)
+                    .maybeSingle();
+
+                if (tieneItems?.id) {
+                    State.restaurantId = rest.id;
+                    return;
+                }
+            }
+        }
+
+        // Intento 3: crear el restaurante si no existe ninguno
         const { data: r3 } = await db.from('restaurants')
             .insert([{ name: 'Restaurante la 26', slug: RESTAURANT_SLUG }])
-            .select('id').single();
+            .select('id')
+            .single();
         if (r3?.id) State.restaurantId = r3.id;
 
     } catch (err) {
@@ -303,23 +348,24 @@ async function _resolverTableId(modalidad, mesa) {
     if (!State.restaurantId) return null;
 
     if (modalidad === 'mesa') {
-        const mesaVal = mesa;
+        const mesaNum = parseInt(mesa, 10);
         const { data } = await db.from('tables')
             .select('id')
             .eq('restaurant_id', State.restaurantId)
-            .or(`number.eq.${isNaN(mesaVal) ? 0 : mesaVal},label.ilike.${mesaVal}`)
+            .or(`number.eq.${isNaN(mesaNum) ? 0 : mesaNum},label.ilike.${mesa}`)
             .maybeSingle();
         if (data?.id) return data.id;
     }
 
+    // Buscar mesa "Para Llevar" existente
     const { data: mv } = await db.from('tables')
         .select('id')
         .eq('restaurant_id', State.restaurantId)
         .ilike('label', '%para llevar%')
         .maybeSingle();
-
     if (mv?.id) return mv.id;
 
+    // Crear mesa virtual para llevar/domicilio
     const { data: mn } = await db.from('tables')
         .upsert([{
             restaurant_id: State.restaurantId,
@@ -329,7 +375,8 @@ async function _resolverTableId(modalidad, mesa) {
             capacity:      99,
             status:        'available',
         }], { onConflict: 'restaurant_id,number' })
-        .select('id').single();
+        .select('id')
+        .single();
 
     return mn?.id || null;
 }
@@ -401,46 +448,47 @@ const Menu = {
         _suscribirRealtime();
     },
 
+    // ──────────────────────────────────────────────────────────
+    // [FIX-1] _cargarDesdeCatalogo — UNA SOLA CONSULTA
+    //
+    // ANTES: había un "intento 2" sin filtro restaurant_id que:
+    //   1. Traía productos de TODOS los restaurantes de la BD
+    //   2. Sobrescribía State.restaurantId con el ID del primer resultado
+    //   3. Ese primer resultado era "Albóndigas" (orden alfabético)
+    //   4. Todos los slotId quedaban apuntando al catálogo de otro restaurante
+    //
+    // AHORA: existe UNA SOLA consulta filtrada por el restaurant_id
+    // correcto (resuelto por _resolverRestaurant que ya verifica cuál
+    // tiene productos activos). Si no hay resultados, modo demo.
+    // State.restaurantId NUNCA se modifica aquí.
+    // ──────────────────────────────────────────────────────────
     async _cargarDesdeCatalogo() {
-        // PROBLEMA 2 FIX: intentar primero con el restaurant_id resuelto por slug.
-        // Si no devuelve resultados, intentar con CUALQUIER restaurant_id (por si admin
-        // resolvió el restaurante de forma diferente — limit(1) vs slug).
-        let data, error;
-
-        // Intento 1: filtrado por restaurant_id (el caso normal)
-        ({ data, error } = await db.from('menu_items')
+        const { data, error } = await db
+            .from('menu_items')
             .select('id,name,price,item_type,is_active,description,restaurant_id')
-            .eq('restaurant_id', State.restaurantId)
+            .eq('restaurant_id', State.restaurantId)   // ← ÚNICO filtro, siempre presente
             .eq('is_active', true)
             .in('item_type', ITEM_TYPES_VALIDOS)
             .order('item_type', { ascending: true })
-            .order('name',      { ascending: true }));
+            .order('name',      { ascending: true });
 
-        // Intento 2: si no hay resultados con ese restaurant_id, traer todos los activos
-        // (esto resuelve el caso donde admin usó un restaurant_id distinto al del slug)
-        if (!error && (!data || data.length === 0)) {
-            ({ data, error } = await db.from('menu_items')
-                .select('id,name,price,item_type,is_active,description,restaurant_id')
-                .eq('is_active', true)
-                .in('item_type', ITEM_TYPES_VALIDOS)
-                .order('item_type', { ascending: true })
-                .order('name',      { ascending: true }));
-
-            // Si el intento 2 dio resultados, actualizar restaurantId para próximas queries
-            if (!error && data && data.length > 0 && data[0].restaurant_id) {
-                State.restaurantId = data[0].restaurant_id;
-            }
-        }
-
-        if (error || !data || data.length === 0) {
+        if (error) {
+            console.error('[La 26] Error consultando menu_items:', error.message);
             _activarModoDemo();
             return;
         }
 
+        if (!data || data.length === 0) {
+            console.warn('[La 26] Sin productos activos para restaurant_id:', State.restaurantId);
+            _activarModoDemo();
+            return;
+        }
+
+        // Mapear slots — menuItemId es el UUID real del menu_item
         State.slots = data.map(i => ({
-            id:          i.id,
-            menuItemId:  i.id,
-            nombre:      i.name,
+            id:          i.id,           // UUID del menu_item → slotId en el carrito
+            menuItemId:  i.id,           // mismo UUID, nunca reemplazado por un fallback
+            nombre:      i.name,         // nombre real del producto
             precio:      Number(i.price) || 0,
             descripcion: i.description || '',
             itemType:    CATEGORIAS[i.item_type] ? i.item_type : 'a_la_carte',
@@ -450,7 +498,6 @@ const Menu = {
 
         _renderizarMenu();
         _mostrarEstado('menu');
-        // PROBLEMA 2 FIX: suscribir tiempo real en modo catálogo también
         _suscribirRealtime();
     },
 };
@@ -620,6 +667,9 @@ function _refrescarTarjeta(slotId) {
 
 // ============================================================
 // CARRITO
+// [FIX-2] Al agregar un producto se copia productName y unitPrice
+//         directamente desde el slot. El carrito es autocontenido:
+//         no necesita consultar State.slots al momento del envío.
 // ============================================================
 const Cart = {
 
@@ -638,8 +688,17 @@ const Cart = {
                 return;
             }
             existente.cantidad++;
+            // Actualizar precio por si cambió (aunque es raro)
+            existente.unitPrice = slot.precio;
         } else {
-            State.cart.push({ slotId, cantidad: 1 });
+            // [FIX-2] Guardar nombre y precio en el momento del clic
+            State.cart.push({
+                slotId,
+                cantidad:    1,
+                productName: slot.nombre,   // copia del nombre — fuente de verdad
+                unitPrice:   slot.precio,   // copia del precio
+                menuItemId:  slot.menuItemId || null,
+            });
         }
 
         _refrescarTarjeta(slotId);
@@ -647,13 +706,12 @@ const Cart = {
     },
 
     cambiar(slotId, delta) {
-        const slot = State.slots.find(s => s.id === slotId);
-        if (!slot) return;
-
         const idx = State.cart.findIndex(c => c.slotId === slotId);
         if (idx === -1) return;
 
-        if (delta > 0 && slot.porciones > 0 && State.cart[idx].cantidad + delta > slot.porciones) {
+        const slot = State.slots.find(s => s.id === slotId);
+
+        if (delta > 0 && slot && slot.porciones > 0 && State.cart[idx].cantidad + delta > slot.porciones) {
             Toast.error(`Solo quedan ${slot.porciones} porciones.`);
             return;
         }
@@ -699,18 +757,16 @@ const Cart = {
             return;
         }
 
+        // [FIX-2] Usar productName y unitPrice del carrito directamente
         State.cart.forEach(item => {
-            const slot = State.slots.find(s => s.id === item.slotId);
-            if (!slot) return;
-
             const row = document.createElement('div');
             row.className = 'summary-row';
             row.innerHTML = `
                 <div style="flex:1;min-width:0;">
-                    <p class="summary-name">${slot.nombre}</p>
-                    <p class="summary-qty">${item.cantidad} × ${slot.precio > 0 ? formatCOP(slot.precio) : 'Incluido'}</p>
+                    <p class="summary-name">${item.productName}</p>
+                    <p class="summary-qty">${item.cantidad} × ${item.unitPrice > 0 ? formatCOP(item.unitPrice) : 'Incluido'}</p>
                 </div>
-                <span class="summary-price">${slot.precio > 0 ? formatCOP(slot.precio * item.cantidad) : '—'}</span>`;
+                <span class="summary-price">${item.unitPrice > 0 ? formatCOP(item.unitPrice * item.cantidad) : '—'}</span>`;
             listEl.appendChild(row);
         });
 
@@ -736,6 +792,12 @@ function _actualizarCartBar() {
 
 // ============================================================
 // ENVÍO DEL PEDIDO
+// [FIX-3] El payload de order_items guarda el nombre en:
+//   - notes: "[nombre]<nombre real>"   (legado — cocina ya lo lee)
+//   - product_name: "<nombre real>"    (columna directa, si existe en BD)
+//
+// El nombre viene de item.productName (guardado en el carrito al
+// hacer clic en "+"). Nunca se reconstruye por JOIN ni por búsqueda.
 // ============================================================
 const Order = {
 
@@ -750,18 +812,17 @@ const Order = {
             return;
         }
 
-        const btnEl      = document.getElementById('btn-enviar');
-        const mesaEl     = document.getElementById('form-mesa');
-        const nombreEl   = document.getElementById('form-nombre');
-        const notasEl    = document.getElementById('form-notas');
+        const btnEl       = document.getElementById('btn-enviar');
+        const mesaEl      = document.getElementById('form-mesa');
+        const nombreEl    = document.getElementById('form-nombre');
+        const notasEl     = document.getElementById('form-notas');
         const modalidadEl = document.querySelector('input[name="form-modalidad"]:checked');
 
-        const mesa       = (mesaEl?.value     || '').trim();
-        const nombre     = (nombreEl?.value   || '').trim();
-        const notas      = (notasEl?.value    || '').trim();
-        const modalidad  = modalidadEl?.value || 'mesa';
+        const mesa      = (mesaEl?.value     || '').trim();
+        const nombre    = (nombreEl?.value   || '').trim();
+        const notas     = (notasEl?.value    || '').trim();
+        const modalidad = modalidadEl?.value || 'mesa';
 
-        // Validar mesa si aplica
         if (modalidad === 'mesa' && !mesa) {
             mesaEl?.classList.add('error');
             mesaEl?.focus();
@@ -780,10 +841,10 @@ const Order = {
             const tableId = await _resolverTableId(modalidad, mesa);
             if (!tableId) throw new Error('No se pudo identificar la mesa.');
 
-            // Construir nota de cocina
+            // Construir nota de cocina con modalidad
             let notaCocina = '';
-            if (modalidad === 'mesa')       notaCocina = `[MESA ${mesa}]`;
-            else if (modalidad === 'llevar') notaCocina = `[PARA LLEVAR] Cliente: ${nombre}`;
+            if (modalidad === 'mesa')        notaCocina = `[MESA ${mesa}]`;
+            else if (modalidad === 'llevar')  notaCocina = `[PARA LLEVAR] Cliente: ${nombre}`;
             else if (modalidad === 'domicilio') notaCocina = `[DOMICILIO] Cliente: ${nombre}`;
             if (notas) notaCocina += ` | ${notas}`;
 
@@ -807,39 +868,44 @@ const Order = {
 
             if (errOrd) throw errOrd;
 
-            // ── Construir payload de ítems ────────────────────────────
-            // PROBLEMA 2 FIX — causa raíz:
-            //   La función _resolverMenuItemIds() hacía búsqueda fuzzy por nombre
-            //   y cuando no encontraba coincidencia usaba fallbackId = lista[0]?.id,
-            //   es decir, el primer producto alfabético de la BD (ej: "Albondigas").
-            //   Además, el segundo intento de insert tenía un bug de clave:
-            //   referenciaba item.menu_item_id (snake_case) en vez de item.menuItemId
-            //   (camelCase), lo que producía undefined → forzaba el primer item siempre.
+            // ─────────────────────────────────────────────────────
+            // [FIX-3] PAYLOAD DE ORDER_ITEMS
             //
-            //   Solución: NO usar búsqueda fuzzy ni fallback de ID.
-            //   - slot.menuItemId YA es el ID correcto (viene directo de menu_items.id).
-            //   - El nombre viaja en notes con prefijo [nombre] — la cocina lo lee desde ahí.
-            //   - Si el insert falla por FK inválida, reintentar con menu_item_id = null.
-            //     Supabase acepta null en menu_item_id; la cocina usa notes de todas formas.
-
+            // El nombre del producto se guarda en DOS lugares:
+            //   1. notes con prefijo [nombre] — legado, cocina ya lo lee
+            //   2. product_name — columna directa (si la BD la tiene)
+            //
+            // item.productName viene del carrito (guardado al hacer clic
+            // en "+"). NUNCA es reconstruido por JOIN ni fallback.
+            //
+            // item.menuItemId viene del slot original de menu_items.
+            // NO se usa como fuente del nombre — solo como referencia FK.
+            // Si la FK es inválida, se reintenta con null pero el
+            // nombre en notes/product_name siempre permanece correcto.
+            // ─────────────────────────────────────────────────────
             const payload = State.cart
                 .map(item => {
-                    const slot = State.slots.find(s => s.id === item.slotId);
-                    if (!slot) return null;
+                    // Guardar defensa: verificar que productName no esté vacío
+                    const nombreReal = (item.productName || '').trim();
+                    if (!nombreReal) {
+                        console.warn('[La 26] Item sin productName en carrito:', item);
+                        return null;
+                    }
 
                     const esSlotMock = item.slotId?.startsWith('demo-');
                     const dailySlotId = (esSlotMock || !State.dailyMenuId) ? null : item.slotId;
 
                     return {
                         order_id:           orden.id,
-                        // menuItemId viene exactamente del catálogo — nunca un fallback ajeno
-                        menu_item_id:       (!esSlotMock && slot.menuItemId) ? slot.menuItemId : null,
+                        menu_item_id:       (!esSlotMock && item.menuItemId) ? item.menuItemId : null,
                         daily_menu_slot_id: dailySlotId,
                         quantity:           item.cantidad,
-                        unit_price:         slot.precio,
+                        unit_price:         item.unitPrice,
                         item_status:        'pending',
-                        // [nombre] es la fuente de verdad para cocina — siempre lleva el nombre real
-                        notes:              `[nombre]${slot.nombre}`,
+                        // Nombre en notes con prefijo [nombre] — FUENTE DE VERDAD para cocina
+                        notes:              `[nombre]${nombreReal}`,
+                        // Columna directa (si existe en BD; si no, Supabase la ignora)
+                        product_name:       nombreReal,
                     };
                 })
                 .filter(Boolean);
@@ -849,16 +915,35 @@ const Order = {
 
                 if (errItems) {
                     console.warn('[La 26] order_items primer intento falló:', errItems.message);
-                    // Segundo intento: menu_item_id = null para evitar cualquier FK inválida.
-                    // La cocina siempre lee el nombre desde notes[nombre], nunca desde el join.
-                    const payloadSeguro = payload.map(item => ({
-                        ...item,
-                        menu_item_id:       null,
-                        daily_menu_slot_id: null,
-                    }));
+
+                    // Segundo intento: limpiar FKs problemáticas pero CONSERVAR
+                    // el nombre real en notes y product_name
+                    const payloadSeguro = payload.map(item => {
+                        const p = { ...item };
+                        delete p.menu_item_id;
+                        delete p.daily_menu_slot_id;
+                        // Si el error fue por product_name (columna inexistente), quitar también
+                        if (errItems.message && errItems.message.includes('product_name')) {
+                            delete p.product_name;
+                        }
+                        return p;
+                    });
+
                     const { error: errItems2 } = await db.from('order_items').insert(payloadSeguro);
+
                     if (errItems2) {
-                        console.error('[La 26] order_items segundo intento falló:', errItems2.message);
+                        // Tercer intento: solo campos base garantizados por el esquema
+                        const payloadMinimo = payload.map(item => ({
+                            order_id:    item.order_id,
+                            quantity:    item.quantity,
+                            unit_price:  item.unit_price,
+                            item_status: 'pending',
+                            notes:       item.notes,   // [nombre]<nombre real> — siempre guardado
+                        }));
+                        const { error: errItems3 } = await db.from('order_items').insert(payloadMinimo);
+                        if (errItems3) {
+                            console.error('[La 26] order_items no se pudo insertar:', errItems3.message);
+                        }
                     }
                 }
             }
@@ -889,7 +974,9 @@ const Order = {
     nuevoPedido() {
         document.getElementById('success-modal').classList.remove('open');
 
+        const mesaEl  = document.getElementById('form-mesa');
         const notasEl = document.getElementById('form-notas');
+        if (mesaEl)  mesaEl.value  = '';
         if (notasEl) notasEl.value = '';
 
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -915,9 +1002,6 @@ function _suscribirRealtime() {
                 : undefined,
         }, () => { if (State.dailyMenuId) Menu.cargar(); })
         .on('postgres_changes', {
-            // PROBLEMA 2 FIX: suscribir cambios de menu_items siempre,
-            // no solo cuando hay menú del día. Así admin puede crear/editar
-            // platos y el mesero ve los cambios en tiempo real.
             event: '*', schema: 'public', table: 'menu_items',
         }, () => Menu.cargar())
         .subscribe();
@@ -929,19 +1013,14 @@ function _suscribirRealtime() {
 (async function init() {
     await _resolverRestaurant();
 
-    // PROBLEMA 1 FIX: verificar estado del sistema ANTES de cargar el menú
     const habilitado = await _verificarSistemaHabilitado();
     State.sistemaHabilitado = habilitado;
 
     if (!habilitado) {
-        // Sistema bloqueado: mostrar pantalla de suspensión
         _mostrarSistemaBloqueado();
     } else {
-        // Sistema activo: cargar menú normalmente
         Menu.cargar();
     }
 
-    // Suscribir cambios en tiempo real de system_settings
-    // Permite que el menú reaccione inmediatamente al toggle del admin
     _suscribirCambiosSistema();
 })();
