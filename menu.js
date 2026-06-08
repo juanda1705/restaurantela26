@@ -661,28 +661,21 @@ const Order = {
 
             if (errOrd) throw errOrd;
 
-            // Insertar ítems uno por uno para aislar errores de FK
-            for (const item of itemsResueltos) {
-                const payload = {
-                    order_id:           orden.id,
-                    menu_item_id:       item.menuItemId || null,
-                    daily_menu_slot_id: null,        // siempre null — evita FK inválida
-                    quantity:           item.cantidad,
-                    unit_price:         item.precio,
-                    item_status:        'pending',
-                    notes:              item.nombre,  // nombre limpio, sin prefijos
-                };
-
-                const { error: errItem } = await db.from('order_items').insert([payload]);
-                if (errItem) {
-                    // Si falla con menu_item_id, reintentar sin él
-                    const { error: errItem2 } = await db.from('order_items').insert([{
-                        ...payload,
-                        menu_item_id: null,
-                    }]);
-                    if (errItem2) {
-                        console.error('[La 26] order_item error (fallback):', errItem2, item.nombre);
-                    }
+            // Insertar ítems
+            if (itemsResueltos.length > 0) {
+                const { error: errItems } = await db.from('order_items').insert(
+                    itemsResueltos.map(item => ({
+                        order_id:           orden.id,
+                        menu_item_id:       item.menuItemId,
+                        daily_menu_slot_id: item.slotId,   // null si es mock o sin daily_menu
+                        quantity:           item.cantidad,
+                        unit_price:         item.precio,
+                        item_status:        'pending',
+                        notes:              `[nombre]${item.nombre}`,  // prefijo que lee la cocina
+                    }))
+                );
+                if (errItems) {
+                    console.error('[La 26] order_items error:', errItems);
                 }
             }
 
@@ -702,20 +695,11 @@ const Order = {
             .select('id,name,price,item_type')
             .eq('is_active', true)
             .eq('restaurant_id', State.restaurantId)
-            .in('item_type', ITEM_TYPES_VALIDOS);
+            .in('item_type', ['executive_lunch','a_la_carte','drink','dessert','side','protein']);
 
-        const lista     = items || [];
-        const resultado = [];
-
-        // Verificar si los IDs de los slots son UUIDs reales de daily_menu_slots
-        // (la vista puede devolver IDs de menu_items, no de daily_menu_slots)
-        let slotIdsValidos = new Set();
-        if (State.dailyMenuId) {
-            const { data: slotsReales } = await db.from('daily_menu_slots')
-                .select('id')
-                .eq('daily_menu_id', State.dailyMenuId);
-            if (slotsReales) slotsReales.forEach(s => slotIdsValidos.add(s.id));
-        }
+        const lista      = items || [];
+        const fallbackId = lista[0]?.id || null;
+        const resultado  = [];
 
         for (const item of State.cart) {
             const slot = State.slots.find(s => s.id === item.slotId);
@@ -723,26 +707,42 @@ const Order = {
 
             let menuItemId = slot.menuItemId;
 
-            // Si no tenemos menuItemId, buscar por nombre exacto primero
             if (!menuItemId && lista.length > 0) {
                 const nombreBuscar = (slot.nombre || '').toLowerCase().trim();
-                const exacto = lista.find(m => m.name.toLowerCase().trim() === nombreBuscar);
-                menuItemId   = exacto?.id
-                    ?? lista.find(m => m.name.toLowerCase().includes(nombreBuscar.slice(0, 8)))?.id
-                    ?? null;
-                // No usar lista[0] como fallback — mejor null que un plato equivocado
+
+                // 1. Coincidencia exacta
+                const exacto = lista.find(m =>
+                    m.name.toLowerCase().trim() === nombreBuscar
+                );
+                // 2. Coincidencia parcial (primera palabra)
+                const parcial = !exacto && lista.find(m =>
+                    m.name.toLowerCase().includes(nombreBuscar.split(' ')[0]) ||
+                    nombreBuscar.includes(m.name.toLowerCase().split(' ')[0])
+                );
+                // 3. Mismo item_type como último recurso antes del fallback
+                const mismoCat = !exacto && !parcial && lista.find(m =>
+                    m.item_type === slot.itemType
+                );
+
+                menuItemId = exacto?.id || parcial?.id || mismoCat?.id || fallbackId;
             }
 
-            // daily_menu_slot_id: solo si el ID existe como slot real en BD
-            const dailySlotId = slotIdsValidos.has(item.slotId) ? item.slotId : null;
+            // Si no hay menuItemId, omitir — mejor que insertar con null
+            if (!menuItemId) {
+                console.warn(`[La 26] Sin menu_item_id para "${slot.nombre}". Ítem omitido.`);
+                continue;
+            }
+
+            // daily_menu_slot_id: null si es slot mock o si no hay menú del día
+            const esSlotMock = item.slotId && item.slotId.startsWith('demo-');
+            const dailySlotId = (esSlotMock || !State.dailyMenuId) ? null : item.slotId;
 
             resultado.push({
-                slotId:       dailySlotId,
+                slotId:   dailySlotId,
                 menuItemId,
-                cantidad:     item.cantidad,
-                precio:       slot.precio,
-                nombre:       slot.nombre,
-                itemType:     slot.itemType,
+                cantidad: item.cantidad,
+                precio:   slot.precio,
+                nombre:   slot.nombre,
             });
         }
 
