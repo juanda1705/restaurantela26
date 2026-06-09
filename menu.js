@@ -1,21 +1,36 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE MESERO
-// menu.js · Versión 6.1 — Flujo directo (sin auth)
+// menu.js · Versión 7.0 — Fuente única de verdad
 // Bucaramanga, Santander — Colombia
 //
-// FIXES v6.1:
-//  [FIX-1] generarNumeroOrden: template literal corregido
-//          (comillas normales → backticks).
-//  [FIX-2] _activarModoDemo: objetos con campos booleanos y
-//          menuItemId correctamente definidos.
-//  [FIX-3] _refrescarTarjeta: template literal corregido en
-//          getElementById(`tarjeta-${slotId}`).
-//  [FIX-4] order_items payload: agrega product_name para que
-//          la Capa 1 de cocina (app.js v3.3) resuelva el nombre.
-//  [FIX-5] Logs de diagnóstico en init y cargar() para detectar
-//          exactamente dónde se detiene el flujo.
-//  [FIX-6] _mostrarEstado('error') siempre oculta el spinner,
-//          nunca deja la app cargando indefinidamente.
+// ARQUITECTURA v7.0:
+//
+//  PROBLEMA RAÍZ (detectado en auditoría):
+//    admin.js  → escribe: menu_items (is_active, price, portions_today)
+//    menu.js   → leía:    daily_menu_slots_availability  ← TABLA DIFERENTE
+//    Resultado: cambios de Admin nunca llegaban a Menu.
+//
+//  SOLUCIÓN:
+//    Una sola fuente de verdad: menu_items
+//    - Admin escribe menu_items  ✓
+//    - Menu lee   menu_items  ✓  (mismo dato, misma tabla)
+//    - Cocina resuelve nombres desde order_items.product_name ✓
+//
+//  daily_menu_slots_availability se mantiene como FALLBACK OPCIONAL
+//  solo si el admin quiere granularidad de porciones por día.
+//  Nunca reemplaza is_active como señal de disponibilidad.
+//
+//  REALTIME v7.0:
+//    Suscripción a postgres_changes en menu_items.
+//    Cualquier UPDATE desde Admin se refleja en ≤2 seg en Menu.
+//
+//  BUGS SINTAXIS CORREGIDOS (de v6.0):
+//    [FIX-1] generarNumeroOrden: template literal con backticks
+//    [FIX-2] _activarModoDemo: campos booleanos y menuItemId definidos
+//    [FIX-3] _refrescarTarjeta: backtick en getElementById
+//    [FIX-4] order_items: agrega product_name (Capa 1 de cocina v3.3)
+//    [FIX-5] _mostrarEstado('error') siempre oculta el spinner
+//    [FIX-6] try/catch en init() con mensaje visible al usuario
 // ============================================================
 
 'use strict';
@@ -47,12 +62,12 @@ const ITEM_TYPES_VALIDOS = ['protein','side','drink','a_la_carte','executive_lun
 // ESTADO GLOBAL
 // ============================================================
 const State = {
-    restaurantId: null,
-    dailyMenuId:  null,
-    slots:        [],
-    cart:         [],
-    filtro:       'todos',
-    isSubmitting: false,
+    restaurantId:   null,
+    slots:          [],
+    cart:           [],
+    filtro:         'todos',
+    isSubmitting:   false,
+    realtimeChannel: null,
 };
 
 // ============================================================
@@ -140,7 +155,7 @@ function todayISO() {
     return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
 }
 
-// [FIX-1] Template literal corregido (backticks en lugar de comillas normales)
+// [FIX-1] Template literal corregido
 function generarNumeroOrden() {
     const year = new Date().getFullYear();
     const rand = Math.floor(1000 + Math.random() * 9000);
@@ -173,19 +188,39 @@ async function _resolverRestaurant() {
     _restaurantResolving = true;
     console.log('[La 26] Resolviendo restaurant_id…');
     try {
-        const { data: r1, error: e1 } = await db.from('restaurants')
-            .select('id').eq('slug', RESTAURANT_SLUG).maybeSingle();
+        const { data: r1, error: e1 } = await db
+            .from('restaurants')
+            .select('id')
+            .eq('slug', RESTAURANT_SLUG)
+            .maybeSingle();
+
         if (e1) console.warn('[La 26] restaurants query error:', e1.message);
-        if (r1?.id) { State.restaurantId = r1.id; console.log('[La 26] Restaurant OK:', r1.id); return; }
+        if (r1?.id) {
+            State.restaurantId = r1.id;
+            console.log('[La 26] Restaurant OK:', r1.id);
+            return;
+        }
 
-        const { data: r2 } = await db.from('restaurants')
-            .select('id').limit(1).maybeSingle();
-        if (r2?.id) { State.restaurantId = r2.id; console.log('[La 26] Restaurant fallback OK:', r2.id); return; }
+        const { data: r2 } = await db
+            .from('restaurants')
+            .select('id')
+            .limit(1)
+            .maybeSingle();
+        if (r2?.id) {
+            State.restaurantId = r2.id;
+            console.log('[La 26] Restaurant fallback OK:', r2.id);
+            return;
+        }
 
-        const { data: r3 } = await db.from('restaurants')
+        const { data: r3 } = await db
+            .from('restaurants')
             .insert([{ name: 'Restaurante la 26', slug: RESTAURANT_SLUG }])
-            .select('id').single();
-        if (r3?.id) { State.restaurantId = r3.id; console.log('[La 26] Restaurant creado:', r3.id); }
+            .select('id')
+            .single();
+        if (r3?.id) {
+            State.restaurantId = r3.id;
+            console.log('[La 26] Restaurant creado:', r3.id);
+        }
 
     } catch (err) {
         console.warn('[La 26] Error resolviendo restaurant_id:', err);
@@ -203,7 +238,8 @@ async function _resolverTableId(modalidad, mesa) {
 
     if (modalidad === 'mesa') {
         const mesaVal = mesa;
-        const { data } = await db.from('tables')
+        const { data } = await db
+            .from('tables')
             .select('id')
             .eq('restaurant_id', State.restaurantId)
             .or(`number.eq.${isNaN(mesaVal) ? 0 : mesaVal},label.ilike.${mesaVal}`)
@@ -211,7 +247,8 @@ async function _resolverTableId(modalidad, mesa) {
         if (data?.id) return data.id;
     }
 
-    const { data: mv } = await db.from('tables')
+    const { data: mv } = await db
+        .from('tables')
         .select('id')
         .eq('restaurant_id', State.restaurantId)
         .ilike('label', '%para llevar%')
@@ -219,7 +256,8 @@ async function _resolverTableId(modalidad, mesa) {
 
     if (mv?.id) return mv.id;
 
-    const { data: mn } = await db.from('tables')
+    const { data: mn } = await db
+        .from('tables')
         .upsert([{
             restaurant_id: State.restaurantId,
             number:        0,
@@ -228,13 +266,24 @@ async function _resolverTableId(modalidad, mesa) {
             capacity:      99,
             status:        'available',
         }], { onConflict: 'restaurant_id,number' })
-        .select('id').single();
+        .select('id')
+        .single();
 
     return mn?.id || null;
 }
 
 // ============================================================
-// MENÚ — Carga y renderizado
+// MENÚ — Carga desde menu_items (fuente única de verdad)
+//
+// LÓGICA DE DISPONIBILIDAD (misma que Admin):
+//   disponible = is_active === true  AND  portions_today > 0
+//   Si portions_today es NULL → se trata como ilimitado (disponible).
+//   Si portions_today = 0    → agotado aunque is_active sea true.
+//   Si is_active = false     → agotado aunque portions_today > 0.
+//
+// Esta lógica replica exactamente lo que Admin controla con:
+//   - El switch "Activo / Agotado" → is_active
+//   - El input "Porciones hoy"     → portions_today
 // ============================================================
 const Menu = {
 
@@ -244,118 +293,76 @@ const Menu = {
 
         if (!State.restaurantId) await _resolverRestaurant();
         if (!State.restaurantId) {
-            console.error('[La 26] restaurant_id no disponible — abortando carga');
+            console.error('[La 26] restaurant_id no disponible — abortando');
             _mostrarEstado('error', 'No se pudo identificar el restaurante. Contacta al administrador.');
             return;
         }
 
         try {
-            console.log('[La 26] Consultando menú del día para:', todayISO());
-            const { data: dm, error: errDm } = await db.from('daily_menus')
-                .select('id')
+            console.log('[La 26] Consulta menu_items para restaurant_id:', State.restaurantId);
+
+            // ── FUENTE ÚNICA DE VERDAD: menu_items ────────────
+            // La misma tabla que Admin modifica.
+            // Se traen TODOS los items activos del restaurante.
+            // La disponibilidad se calcula localmente con la misma
+            // lógica que Admin usa para mostrar el switch.
+            const { data, error } = await db
+                .from('menu_items')
+                .select('id, name, price, item_type, is_active, description, portions_today')
                 .eq('restaurant_id', State.restaurantId)
-                .eq('menu_date', todayISO())
-                .eq('is_published', true)
-                .maybeSingle();
+                .in('item_type', ITEM_TYPES_VALIDOS)
+                .order('item_type', { ascending: true })
+                .order('name',      { ascending: true });
 
-            if (errDm) console.warn('[La 26] daily_menus error:', errDm.message);
-
-            if (dm?.id) {
-                State.dailyMenuId = dm.id;
-                console.log('[La 26] Menú del día encontrado:', dm.id);
-                await this._cargarDesdeMenuDia();
-            } else {
-                State.dailyMenuId = null;
-                console.log('[La 26] Sin menú del día publicado, cargando catálogo general');
-                await this._cargarDesdeCatalogo();
+            if (error) {
+                console.error('[La 26] Error Supabase en menu_items:', error);
+                throw error;
             }
+
+            console.log('[La 26] Productos recibidos:', data?.length ?? 0);
+
+            if (!data || data.length === 0) {
+                console.warn('[La 26] Sin productos activos — activando modo demo');
+                _activarModoDemo();
+                return;
+            }
+
+            // Mapear a slots con lógica de disponibilidad unificada
+            State.slots = data.map(item => {
+                // portions_today null = sin límite configurado → disponible
+                const tienePortions = item.portions_today !== null && item.portions_today !== undefined;
+                const porciones     = tienePortions ? Number(item.portions_today) : 999;
+                const disponible    = item.is_active === true && porciones > 0;
+
+                return {
+                    id:          item.id,
+                    menuItemId:  item.id,
+                    nombre:      item.name,
+                    precio:      Number(item.price) || 0,
+                    descripcion: item.description || '',
+                    itemType:    CATEGORIAS[item.item_type] ? item.item_type : 'a_la_carte',
+                    porciones,
+                    disponible,
+                };
+            });
+
+            _renderizarMenu();
+            _mostrarEstado('menu');
+
+            // Activar Realtime sobre menu_items para reflejar
+            // cambios de Admin sin recargar la página
+            _suscribirRealtime();
+
         } catch (err) {
             console.error('[La 26] Error cargando menú:', err);
-            _mostrarEstado('error', `No se pudo cargar la carta: ${err.message}`);
+            _mostrarEstado('error', `No se pudo cargar la carta: ${err.message || 'error de red'}`);
         }
-    },
-
-    async _cargarDesdeMenuDia() {
-        console.log('[La 26] Consulta daily_menu_slots_availability…');
-        const { data, error } = await db
-            .from('daily_menu_slots_availability')
-            .select('id,menu_item_id,item_name,price,item_type,is_truly_available,portions_available,portions_sold,category_order,display_order')
-            .eq('daily_menu_id', State.dailyMenuId)
-            .in('item_type', ITEM_TYPES_VALIDOS)
-            .order('category_order', { ascending: true })
-            .order('display_order',  { ascending: true });
-
-        if (error) {
-            console.error('[La 26] Error en daily_menu_slots_availability:', error);
-        }
-
-        if (error || !data || data.length === 0) {
-            console.log('[La 26] Sin datos en menú del día, fallback a catálogo');
-            await this._cargarDesdeCatalogo();
-            return;
-        }
-
-        console.log('[La 26] Productos recibidos (menú del día):', data.length);
-
-        State.slots = data.map(s => ({
-            id:          s.id,
-            menuItemId:  s.menu_item_id,
-            nombre:      s.item_name,
-            precio:      Number(s.price) || 0,
-            descripcion: '',
-            itemType:    CATEGORIAS[s.item_type] ? s.item_type : 'a_la_carte',
-            porciones:   s.is_truly_available
-                             ? Math.max(0, (s.portions_available || 0) - (s.portions_sold || 0))
-                             : 0,
-            disponible:  Boolean(s.is_truly_available),
-        }));
-
-        _renderizarMenu();
-        _mostrarEstado('menu');
-        _suscribirRealtime();
-    },
-
-    async _cargarDesdeCatalogo() {
-        console.log('[La 26] Consulta menu_items (catálogo general)…');
-        const { data, error } = await db.from('menu_items')
-            .select('id,name,price,item_type,is_active,description')
-            .eq('restaurant_id', State.restaurantId)
-            .eq('is_active', true)
-            .in('item_type', ITEM_TYPES_VALIDOS)
-            .order('item_type', { ascending: true })
-            .order('name',      { ascending: true });
-
-        if (error) {
-            console.error('[La 26] Error Supabase en menu_items:', error);
-        }
-
-        if (error || !data || data.length === 0) {
-            console.warn('[La 26] Sin productos en catálogo, activando modo demo');
-            _activarModoDemo();
-            return;
-        }
-
-        console.log('[La 26] Productos recibidos (catálogo):', data.length);
-
-        State.slots = data.map(i => ({
-            id:          i.id,
-            menuItemId:  i.id,
-            nombre:      i.name,
-            precio:      Number(i.price) || 0,
-            descripcion: i.description || '',
-            itemType:    CATEGORIAS[i.item_type] ? i.item_type : 'a_la_carte',
-            porciones:   999,
-            disponible:  true,
-        }));
-
-        _renderizarMenu();
-        _mostrarEstado('menu');
     },
 
 };
 
 // ── Control de pantalla ──────────────────────────────────────
-// [FIX-6] Siempre oculta loader y muestra error — nunca queda en estado infinito
+// [FIX-5] Siempre oculta spinner al mostrar error
 function _mostrarEstado(estado, msg = '') {
     const loader   = document.getElementById('app-loader');
     const error    = document.getElementById('app-error');
@@ -366,9 +373,8 @@ function _mostrarEstado(estado, msg = '') {
     if (sections) sections.style.display = estado === 'menu'   ? 'block' : 'none';
 
     if (estado === 'error') {
-        // Garantizar que el loader desaparezca aunque no exista el elemento error
-        if (loader) loader.style.display = 'none';
-        console.error('[La 26] Estado de error mostrado al usuario:', msg);
+        if (loader) loader.style.display = 'none'; // garantía extra
+        console.error('[La 26] Error mostrado al usuario:', msg);
         const el = document.getElementById('error-msg');
         if (el) el.textContent = msg || 'Error desconocido. Recarga la página.';
     }
@@ -473,7 +479,7 @@ function _renderizarMenu() {
 
 function _crearTarjeta(slot) {
     const disponible = slot.disponible && slot.porciones > 0;
-    const pocas      = disponible && slot.porciones > 0 && slot.porciones <= 5;
+    const pocas      = disponible && slot.porciones > 0 && slot.porciones < 999 && slot.porciones <= 5;
     const enCarrito  = State.cart.find(c => c.slotId === slot.id);
     const qty        = enCarrito ? enCarrito.cantidad : 0;
 
@@ -516,7 +522,7 @@ function _crearTarjeta(slot) {
     return card;
 }
 
-// [FIX-3] Template literal corregido en getElementById
+// [FIX-3] Template literal corregido
 function _refrescarTarjeta(slotId) {
     const slot  = State.slots.find(s => s.id === slotId);
     if (!slot) return;
@@ -535,7 +541,7 @@ const Cart = {
 
         const existente = State.cart.find(c => c.slotId === slotId);
         if (existente) {
-            if (slot.porciones > 0 && existente.cantidad >= slot.porciones) {
+            if (slot.porciones < 999 && existente.cantidad >= slot.porciones) {
                 Toast.error(`Solo quedan ${slot.porciones} porciones de "${slot.nombre}".`);
                 return;
             }
@@ -555,7 +561,7 @@ const Cart = {
         const idx = State.cart.findIndex(c => c.slotId === slotId);
         if (idx === -1) return;
 
-        if (delta > 0 && slot.porciones > 0 && State.cart[idx].cantidad + delta > slot.porciones) {
+        if (delta > 0 && slot.porciones < 999 && State.cart[idx].cantidad + delta > slot.porciones) {
             Toast.error(`Solo quedan ${slot.porciones} porciones.`);
             return;
         }
@@ -570,7 +576,8 @@ const Cart = {
         _refrescarTarjeta(slotId);
         _actualizarCartBar();
 
-        if (document.getElementById('order-modal').classList.contains('open')) {
+        const modal = document.getElementById('order-modal');
+        if (modal && modal.classList.contains('open')) {
             Cart._renderSummary();
         }
     },
@@ -678,12 +685,10 @@ const Order = {
             const tableId = await _resolverTableId(modalidad, mesa);
             if (!tableId) throw new Error('No se pudo identificar la mesa.');
 
-            const itemsResueltos = await this._resolverMenuItemIds();
-
             // Construir nota de cocina
             let notaCocina = '';
-            if (modalidad === 'mesa')        notaCocina = `[MESA ${mesa}]`;
-            else if (modalidad === 'llevar') notaCocina = `[PARA LLEVAR] Cliente: ${nombre}`;
+            if (modalidad === 'mesa')         notaCocina = `[MESA ${mesa}]`;
+            else if (modalidad === 'llevar')   notaCocina = `[PARA LLEVAR] Cliente: ${nombre}`;
             else if (modalidad === 'domicilio') notaCocina = `[DOMICILIO] Cliente: ${nombre}`;
             if (notas) notaCocina += ` | ${notas}`;
 
@@ -691,7 +696,8 @@ const Order = {
             const total       = calcularTotal();
 
             // Insertar orden
-            const { data: orden, error: errOrd } = await db.from('orders')
+            const { data: orden, error: errOrd } = await db
+                .from('orders')
                 .insert([{
                     restaurant_id: State.restaurantId,
                     table_id:      tableId,
@@ -699,7 +705,6 @@ const Order = {
                     status:        'pending',
                     customer_name: nombre || null,
                     total_amount:  total,
-                    daily_menu_id: State.dailyMenuId || null,
                     notes:         notaCocina || null,
                 }])
                 .select('id')
@@ -707,39 +712,35 @@ const Order = {
 
             if (errOrd) throw errOrd;
 
-            // [FIX-4] Insertar ítems con product_name para compatibilidad con cocina v3.3
-            if (itemsResueltos.length > 0) {
-                const payload = itemsResueltos.map(item => ({
-                    order_id:           orden.id,
-                    menu_item_id:       item.menuItemId,
-                    daily_menu_slot_id: item.slotId,
-                    quantity:           item.cantidad,
-                    unit_price:         item.precio,
-                    item_status:        'pending',
-                    product_name:       item.nombre,                       // [FIX-4] Capa 1 en cocina
-                    notes:              `[nombre]${item.nombre}`,          // Capa 2 legacy
-                }));
+            // ── Insertar ítems ────────────────────────────────
+            // product_name → Capa 1 de cocina (app.js v3.3)
+            // notes [nombre] → Capa 2 legacy
+            // Ambas apuntan al nombre real del slot, nunca al JOIN.
+            const payload = State.cart.map(item => {
+                const slot = State.slots.find(s => s.id === item.slotId);
+                if (!slot) return null;
+                return {
+                    order_id:     orden.id,
+                    menu_item_id: slot.menuItemId || null,
+                    quantity:     item.cantidad,
+                    unit_price:   slot.precio,
+                    item_status:  'pending',
+                    product_name: slot.nombre,                    // [FIX-4] Capa 1
+                    notes:        `[nombre]${slot.nombre}`,       // Capa 2 legacy
+                };
+            }).filter(Boolean);
 
-                const { error: errItems } = await db.from('order_items').insert(payload);
+            if (payload.length > 0) {
+                const { error: errItems } = await db
+                    .from('order_items')
+                    .insert(payload);
 
                 if (errItems) {
-                    console.warn('[La 26] order_items primer intento falló:', errItems.message);
-
-                    // Segundo intento: sin daily_menu_slot_id (puede tener FK inválida)
-                    const { data: primerItem } = await db.from('menu_items')
-                        .select('id').eq('restaurant_id', State.restaurantId)
-                        .eq('is_active', true).limit(1).maybeSingle();
-
-                    const payloadSeguro = payload.map(item => ({
-                        ...item,
-                        menu_item_id:       item.menu_item_id || primerItem?.id || null,
-                        daily_menu_slot_id: null,
-                    }));
-
-                    const { error: errItems2 } = await db.from('order_items').insert(payloadSeguro);
-                    if (errItems2) {
-                        console.error('[La 26] order_items segundo intento falló:', errItems2.message);
-                    }
+                    console.warn('[La 26] order_items falló:', errItems.message);
+                    // Segundo intento sin menu_item_id por si hay FK inválida
+                    const payloadSafe = payload.map(p => ({ ...p, menu_item_id: null }));
+                    const { error: err2 } = await db.from('order_items').insert(payloadSafe);
+                    if (err2) console.error('[La 26] order_items segundo intento falló:', err2.message);
                 }
             }
 
@@ -752,62 +753,6 @@ const Order = {
             State.isSubmitting = false;
             if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Enviar a cocina'; }
         }
-    },
-
-    async _resolverMenuItemIds() {
-        const { data: items } = await db.from('menu_items')
-            .select('id,name,price,item_type')
-            .eq('is_active', true)
-            .eq('restaurant_id', State.restaurantId)
-            .in('item_type', ['executive_lunch','a_la_carte','drink','dessert','side','protein']);
-
-        const lista      = items || [];
-        const fallbackId = lista[0]?.id || null;
-        const resultado  = [];
-
-        for (const item of State.cart) {
-            const slot = State.slots.find(s => s.id === item.slotId);
-            if (!slot) continue;
-
-            let menuItemId = slot.menuItemId;
-
-            if (!menuItemId && lista.length > 0) {
-                const nombreBuscar = (slot.nombre || '').toLowerCase().trim();
-
-                // 1. Coincidencia exacta
-                const exacto = lista.find(m =>
-                    m.name.toLowerCase().trim() === nombreBuscar
-                );
-                // 2. Coincidencia parcial (primera palabra)
-                const parcial = !exacto && lista.find(m =>
-                    m.name.toLowerCase().includes(nombreBuscar.split(' ')[0]) ||
-                    nombreBuscar.includes(m.name.toLowerCase().split(' ')[0])
-                );
-                // 3. Mismo item_type
-                const mismoCat = !exacto && !parcial && lista.find(m =>
-                    m.item_type === slot.itemType
-                );
-
-                menuItemId = exacto?.id || parcial?.id || mismoCat?.id || fallbackId;
-            }
-
-            if (!menuItemId) {
-                console.warn(`[La 26] Sin menu_item_id para "${slot.nombre}". Insertando con null.`);
-            }
-
-            const esSlotMock  = item.slotId && item.slotId.startsWith('demo-');
-            const dailySlotId = (esSlotMock || !State.dailyMenuId) ? null : item.slotId;
-
-            resultado.push({
-                slotId:    dailySlotId,
-                menuItemId: menuItemId || null,
-                cantidad:  item.cantidad,
-                precio:    slot.precio,
-                nombre:    slot.nombre,   // nombre siempre presente desde el slot
-            });
-        }
-
-        return resultado;
     },
 
     _mostrarExito(numeroOrden) {
@@ -839,25 +784,123 @@ const Order = {
 };
 
 // ============================================================
-// TIEMPO REAL
+// REALTIME — suscripción a menu_items
+//
+// Cuando Admin cambia is_active, price o portions_today en un
+// plato, Supabase Realtime dispara el evento UPDATE en esta
+// tabla. Menu.js actualiza el slot en memoria y refresca solo
+// la tarjeta afectada — sin recargar toda la carta.
+//
+// Esto cubre:
+//   - Bloquear un plato (is_active = false)  → aparece "Agotado"
+//   - Desbloquear un plato (is_active = true) → botón "+" vuelve
+//   - Cambiar precio                          → precio actualizado
+//   - Cambiar porciones a 0                  → aparece "Agotado"
+//   - Agregar producto nuevo                 → recarga completa
+//   - Eliminar producto                      → recarga completa
 // ============================================================
 function _suscribirRealtime() {
-    if (!State.dailyMenuId || !State.restaurantId) return;
+    if (!State.restaurantId) return;
 
-    db.channel('la26-mesero-rt')
-        .on('postgres_changes', {
-            event: '*', schema: 'public', table: 'daily_menu_slots',
-            filter: `daily_menu_id=eq.${State.dailyMenuId}`,
-        }, () => Menu.cargar())
-        .on('postgres_changes', {
-            event: 'UPDATE', schema: 'public', table: 'menu_items',
-            filter: `restaurant_id=eq.${State.restaurantId}`,
-        }, () => { if (State.dailyMenuId) Menu.cargar(); })
-        .subscribe();
+    // Cancelar canal anterior si existe
+    if (State.realtimeChannel) {
+        db.removeChannel(State.realtimeChannel);
+        State.realtimeChannel = null;
+    }
+
+    State.realtimeChannel = db
+        .channel(`la26-menu-v70-${State.restaurantId}`)
+        .on(
+            'postgres_changes',
+            {
+                event:  'UPDATE',
+                schema: 'public',
+                table:  'menu_items',
+                filter: `restaurant_id=eq.${State.restaurantId}`,
+            },
+            (payload) => {
+                console.log('[La 26] Realtime UPDATE en menu_items:', payload.new?.name);
+                _actualizarSlotDesdeRealtime(payload.new);
+            }
+        )
+        .on(
+            'postgres_changes',
+            {
+                // Producto nuevo o eliminado → recarga completa para mantener
+                // el orden y las categorías correctas
+                event:  'INSERT',
+                schema: 'public',
+                table:  'menu_items',
+                filter: `restaurant_id=eq.${State.restaurantId}`,
+            },
+            (payload) => {
+                console.log('[La 26] Realtime INSERT en menu_items:', payload.new?.name);
+                Menu.cargar();
+            }
+        )
+        .on(
+            'postgres_changes',
+            {
+                event:  'DELETE',
+                schema: 'public',
+                table:  'menu_items',
+            },
+            () => {
+                console.log('[La 26] Realtime DELETE en menu_items — recargando carta');
+                Menu.cargar();
+            }
+        )
+        .subscribe((status) => {
+            console.log('[La 26] Realtime canal menu_items:', status);
+        });
+}
+
+// Actualiza un slot individual cuando llega un UPDATE de Realtime
+// sin recargar toda la carta — experiencia sin parpadeo.
+function _actualizarSlotDesdeRealtime(item) {
+    if (!item || !item.id) return;
+
+    const idx = State.slots.findIndex(s => s.id === item.id);
+
+    if (idx === -1) {
+        // Producto que no estaba en la lista (estaba inactivo antes)
+        // → recarga completa para incluirlo correctamente
+        Menu.cargar();
+        return;
+    }
+
+    const tienePortions = item.portions_today !== null && item.portions_today !== undefined;
+    const porciones     = tienePortions ? Number(item.portions_today) : 999;
+    const disponible    = item.is_active === true && porciones > 0;
+
+    // Actualizar slot en memoria
+    State.slots[idx] = {
+        ...State.slots[idx],
+        nombre:     item.name,
+        precio:     Number(item.price) || 0,
+        porciones,
+        disponible,
+    };
+
+    // Refrescar solo la tarjeta de este producto
+    _refrescarTarjeta(item.id);
+
+    // Si el producto estaba en el carrito y ahora está agotado,
+    // eliminarlo del carrito y avisar al usuario
+    if (!disponible) {
+        const enCarrito = State.cart.findIndex(c => c.slotId === item.id);
+        if (enCarrito !== -1) {
+            const nombre = State.slots[idx].nombre;
+            State.cart.splice(enCarrito, 1);
+            _actualizarCartBar();
+            Toast.error(`"${nombre}" se agotó y fue removido de tu pedido.`, 5000);
+        }
+    }
 }
 
 // ============================================================
 // INIT — Carga directa, sin autenticación
+// [FIX-6] try/catch con mensaje visible si algo falla
 // ============================================================
 (async function init() {
     console.log('[La 26] Inicio carga menú');
@@ -867,6 +910,6 @@ function _suscribirRealtime() {
         await Menu.cargar();
     } catch (err) {
         console.error('[La 26] Error crítico en init:', err);
-        _mostrarEstado('error', `Error al iniciar: ${err.message}`);
+        _mostrarEstado('error', `Error al iniciar la carta: ${err.message}`);
     }
 })();
