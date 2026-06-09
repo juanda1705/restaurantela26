@@ -1,6 +1,21 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE MESERO
-// menu.js · Versión 7.3
+// menu.js · Versión 7.4
+//
+// CAMBIOS v7.4:
+//  [ADD-SESION]      Sesión de mesero por nombre (sessionStorage).
+//                   Pedidos etiquetados con el mesero.
+//                   Historial filtra solo pedidos del mesero activo.
+//  [ADD-MEDIANOCHE]  Reset automático del historial a las 00:00.
+//  [DEL-VENTA]       Stats row solo muestra Total, Pendientes,
+//                   Entregados (sin Venta Total).
+//  [ADD-EDITAR]      Módulo EditarPedido: modal inline para
+//                   agregar ítems, cambiar cantidades y eliminar
+//                   productos pendientes de órdenes en estado
+//                   pending / preparing / confirmed.
+//                   NUNCA crea órdenes nuevas. Usa el mismo
+//                   order_id. Realtime propaga cambios a cocina,
+//                   caja y dashboard sin modificarlos.
 //
 // CAMBIOS v7.3:
 //  [ADD-HISTORIAL] Módulo Hist integrado directamente en este
@@ -43,6 +58,11 @@ const CATEGORIAS = {
 
 const ITEM_TYPES_VALIDOS = ['executive_lunch','a_la_carte','drink','dessert','side'];
 
+// Estados que permiten edición
+const ESTADOS_EDITABLES = ['pending', 'preparing', 'confirmed'];
+// Estados de ítem que NO se pueden eliminar
+const ITEM_ESTADOS_NO_ELIMINABLES = ['preparing', 'delivered'];
+
 // ============================================================
 // ESTADO GLOBAL
 // ============================================================
@@ -54,6 +74,139 @@ const State = {
     isSubmitting:    false,
     realtimeChannel: null,
 };
+
+// ============================================================
+// ═══ SESIÓN DE MESERO ═══
+// ============================================================
+const Sesion = {
+    KEY: 'la26_mesero_nombre',
+
+    obtener() {
+        return sessionStorage.getItem(this.KEY) || null;
+    },
+
+    guardar(nombre) {
+        const n = (nombre || '').trim();
+        if (!n) return false;
+        sessionStorage.setItem(this.KEY, n);
+        return true;
+    },
+
+    cerrar() {
+        sessionStorage.removeItem(this.KEY);
+    },
+
+    /** Devuelve el nombre en mayúsculas para display */
+    label() {
+        const n = this.obtener();
+        return n ? n : '—';
+    },
+
+    /**
+     * Verifica si hay sesión activa.
+     * Si no, muestra el prompt de nombre y bloquea hasta que se ingrese.
+     */
+    async requerir() {
+        if (this.obtener()) {
+            _actualizarBannerMesero();
+            return;
+        }
+        await this._mostrarPrompt();
+        _actualizarBannerMesero();
+    },
+
+    _mostrarPrompt() {
+        return new Promise((resolve) => {
+            const overlay = document.getElementById('sesion-overlay');
+            const input   = document.getElementById('sesion-input');
+            const btn     = document.getElementById('sesion-btn');
+            const errEl   = document.getElementById('sesion-error');
+            if (!overlay) { resolve(); return; }
+
+            overlay.style.display = 'flex';
+            if (input) { input.value = ''; setTimeout(() => input.focus(), 120); }
+            if (errEl) errEl.style.display = 'none';
+
+            const confirmar = () => {
+                const val = (input?.value || '').trim();
+                if (!val) {
+                    if (errEl) { errEl.textContent = 'Ingresa tu nombre para continuar.'; errEl.style.display = 'block'; }
+                    input?.focus();
+                    return;
+                }
+                this.guardar(val);
+                overlay.style.display = 'none';
+                resolve();
+            };
+
+            if (btn) btn.onclick = confirmar;
+            if (input) {
+                input.onkeydown = (e) => { if (e.key === 'Enter') confirmar(); };
+            }
+        });
+    },
+
+    cambiar() {
+        const overlay = document.getElementById('sesion-overlay');
+        const input   = document.getElementById('sesion-input');
+        const errEl   = document.getElementById('sesion-error');
+        if (!overlay) return;
+        this.cerrar();
+        if (input) input.value = '';
+        if (errEl) errEl.style.display = 'none';
+        overlay.style.display = 'flex';
+        setTimeout(() => input?.focus(), 120);
+
+        const btn = document.getElementById('sesion-btn');
+        if (btn) {
+            btn.onclick = () => {
+                const val = (input?.value || '').trim();
+                if (!val) {
+                    if (errEl) { errEl.textContent = 'Ingresa tu nombre para continuar.'; errEl.style.display = 'block'; }
+                    input?.focus();
+                    return;
+                }
+                this.guardar(val);
+                overlay.style.display = 'none';
+                _actualizarBannerMesero();
+                // Recargar historial con el nuevo mesero
+                HistState.cargado = false;
+                HistState.pedidos = [];
+                if (typeof Tabs !== 'undefined' && Tabs.actual === 'historial') {
+                    Hist.cargar();
+                }
+            };
+        }
+    },
+};
+
+function _actualizarBannerMesero() {
+    const el = document.getElementById('mesero-nombre-display');
+    if (el) el.textContent = Sesion.label();
+}
+
+// ============================================================
+// RESET AUTOMÁTICO A MEDIANOCHE
+// ============================================================
+function _programarResetMedianoche() {
+    const ahora  = new Date();
+    const manana = new Date(ahora);
+    manana.setDate(manana.getDate() + 1);
+    manana.setHours(0, 0, 5, 0); // 00:00:05 del día siguiente
+    const ms = manana - ahora;
+
+    setTimeout(() => {
+        // Limpiar historial para que recargue con la nueva fecha
+        HistState.cargado = false;
+        HistState.pedidos = [];
+        // Si el historial está visible, recargarlo
+        if (typeof Tabs !== 'undefined' && Tabs.actual === 'historial') {
+            Hist.cargar();
+        }
+        // Reprogramar para el siguiente día
+        _programarResetMedianoche();
+    }, ms);
+}
 
 // ============================================================
 // TOAST
@@ -557,11 +710,14 @@ const Order = {
             }
             if (!tableIdFinal) throw new Error('No hay mesas configuradas. Crea al menos una en el panel admin.');
 
+            // Inyectar mesero en las notas
+            const mesero = Sesion.obtener();
             let notaCocina = '';
             if (modalidad === 'mesa')      notaCocina = `[MESA] Mesa: ${mesa}`;
             else if (modalidad === 'llevar')    notaCocina = `[PARA LLEVAR] Cliente: ${nombre || 'Sin nombre'}`;
             else if (modalidad === 'domicilio') notaCocina = `[DOMICILIO] Cliente: ${nombre || 'Sin nombre'} | Dir: ${direccion}`;
-            if (notas) notaCocina += ` | Nota: ${notas}`;
+            if (mesero)   notaCocina += ` | Mesero: ${mesero}`;
+            if (notas)    notaCocina += ` | Nota: ${notas}`;
 
             const numeroOrden = generarNumeroOrden();
             const total       = calcularTotal();
@@ -659,7 +815,7 @@ function _suscribirRealtimeMenu() {
     if (State.realtimeChannel) { db.removeChannel(State.realtimeChannel); State.realtimeChannel = null; }
 
     State.realtimeChannel = db
-        .channel(`la26-menu-v73-${State.restaurantId}`)
+        .channel(`la26-menu-v74-${State.restaurantId}`)
         .on('postgres_changes',{ event:'UPDATE', schema:'public', table:'menu_items',
             filter:`restaurant_id=eq.${State.restaurantId}` },
             (payload) => _actualizarSlotDesdeRealtime(payload.new))
@@ -695,7 +851,7 @@ function _actualizarSlotDesdeRealtime(item) {
 }
 
 // ============================================================
-// ═══ MÓDULO HISTORIAL (v7.3) ═══
+// ═══ MÓDULO HISTORIAL (v7.4) ═══
 // ============================================================
 
 const HistState = {
@@ -705,10 +861,10 @@ const HistState = {
     realtimeChannel: null,
 };
 
-// ── Parsear el campo notes para extraer tipo, destino, etc. ──
+// ── Parsear el campo notes para extraer tipo, destino, mesero, etc. ──
 function _parsearNota(notes) {
     const n = notes || '';
-    let tipo = 'mesa', destino = '', cliente = '', direccion = '', nota = '';
+    let tipo = 'mesa', destino = '', cliente = '', direccion = '', nota = '', mesero = '';
 
     if (n.startsWith('[MESA]')) {
         tipo = 'mesa';
@@ -728,9 +884,13 @@ function _parsearNota(notes) {
         tipo = 'mesa'; destino = n || 'Sin datos';
     }
 
+    // Extraer mesero
+    const mm = n.match(/Mesero:\s*([^|]+)/);
+    mesero = mm ? mm[1].trim() : '';
+
     const mn = n.match(/Nota:\s*(.+)$/);
     nota = mn ? mn[1].trim() : '';
-    return { tipo, destino, cliente, direccion, nota };
+    return { tipo, destino, cliente, direccion, nota, mesero };
 }
 
 function _horaCorta(isoStr) {
@@ -758,7 +918,7 @@ const Hist = {
                     id, order_number, status, customer_name,
                     total_amount, notes, created_at,
                     order_items (
-                        id, quantity, unit_price, notes,
+                        id, quantity, unit_price, notes, item_status,
                         menu_items ( name )
                     )
                 `)
@@ -769,7 +929,16 @@ const Hist = {
 
             if (error) throw error;
 
-            HistState.pedidos = ordenes || [];
+            // Filtrar por mesero activo
+            const meseroActivo = Sesion.obtener();
+            const todas = ordenes || [];
+            HistState.pedidos = meseroActivo
+                ? todas.filter(p => {
+                    const { mesero } = _parsearNota(p.notes);
+                    return mesero.toLowerCase() === meseroActivo.toLowerCase();
+                })
+                : todas;
+
             HistState.cargado = true;
             this._render();
             this._suscribirRealtime();
@@ -780,7 +949,6 @@ const Hist = {
     },
 
     cargarSiNecesario() {
-        // Si ya está cargado solo re-renderiza; si no, carga desde Supabase
         if (HistState.cargado) {
             this._render();
         } else {
@@ -809,19 +977,15 @@ const Hist = {
     },
 
     _render() {
-        // ── Stats ──
+        // ── Stats (sin venta total) ──
         const total      = HistState.pedidos.length;
         const pendientes = HistState.pedidos.filter(p => p.status === 'pending' || p.status === 'preparing').length;
         const entregados = HistState.pedidos.filter(p => p.status === 'delivered').length;
-        const venta      = HistState.pedidos
-            .filter(p => p.status !== 'cancelled')
-            .reduce((a,p) => a + (Number(p.total_amount)||0), 0);
 
         const set = (id,v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
         set('st-total',      total);
         set('st-pendientes', pendientes);
         set('st-entregados', entregados);
-        set('st-venta',      formatCOP(venta));
 
         // Badge en la pestaña
         const badge = document.getElementById('badge-pendientes');
@@ -836,7 +1000,7 @@ const Hist = {
             { weekday:'long', year:'numeric', month:'long', day:'numeric', timeZone:'America/Bogota' });
 
         // Lista
-        const lista    = document.getElementById('hist-lista');
+        const lista = document.getElementById('hist-lista');
         if (!lista) return;
         lista.innerHTML = '';
 
@@ -866,7 +1030,7 @@ const Hist = {
             HistState.realtimeChannel = null;
         }
         HistState.realtimeChannel = db
-            .channel(`la26-hist-v73-${State.restaurantId}`)
+            .channel(`la26-hist-v74-${State.restaurantId}`)
             .on('postgres_changes', {
                 event:'*', schema:'public', table:'orders',
                 filter:`restaurant_id=eq.${State.restaurantId}`,
@@ -914,6 +1078,7 @@ function _crearTarjetaPedido(pedido, idx) {
 
     const statusClass = pedido.status || 'pending';
     const nombreMostrar = pedido.customer_name || cliente || '';
+    const editable = ESTADOS_EDITABLES.includes(pedido.status);
 
     // Items
     const items = pedido.order_items || [];
@@ -945,6 +1110,13 @@ function _crearTarjetaPedido(pedido, idx) {
                <span style="font-size:14px;flex-shrink:0;margin-top:1px;">📝</span>
                <span class="card-nota-text">${nota}</span>
            </div>` : '';
+
+    // Botón editar — solo si el estado lo permite
+    const editarBtnHTML = editable
+        ? `<button class="btn-editar-pedido" onclick="EditarPedido.abrir('${pedido.id}')" title="Editar este pedido">
+               ✏️ Editar pedido
+           </button>`
+        : '';
 
     const bodyId = `hbody-${pedido.id}`;
     const chevId = `hchev-${pedido.id}`;
@@ -978,6 +1150,7 @@ function _crearTarjetaPedido(pedido, idx) {
                 <span class="card-total-monto">${formatCOP(pedido.total_amount)}</span>
             </div>
             <p class="card-order-no"># ${pedido.order_number || '—'}</p>
+            ${editarBtnHTML}
         </div>`;
 
     return card;
@@ -992,10 +1165,461 @@ function toggleHistCard(bodyId, chevId) {
 }
 
 // ============================================================
+// ═══ MÓDULO EDITAR PEDIDO (v7.4) ═══
+// ============================================================
+
+const EditarPedido = {
+    // Estado del editor
+    _pedidoId:    null,
+    _pedido:      null,         // datos completos del pedido
+    _itemsEdit:   [],           // [{id, menuItemId, nombre, precio, cantidad, item_status, esNuevo}]
+    _notaEdit:    '',
+    _guardando:   false,
+
+    async abrir(pedidoId) {
+        this._pedidoId  = pedidoId;
+        this._guardando = false;
+
+        // Mostrar modal con loader
+        const modal = document.getElementById('edit-modal');
+        if (!modal) return;
+        modal.classList.add('open');
+        document.body.style.overflow = 'hidden';
+        _editSetLoader(true);
+
+        try {
+            // Cargar datos frescos del pedido
+            const { data: pedido, error } = await db
+                .from('orders')
+                .select(`
+                    id, order_number, status, notes, total_amount,
+                    order_items (
+                        id, quantity, unit_price, notes, item_status,
+                        menu_item_id,
+                        menu_items ( name )
+                    )
+                `)
+                .eq('id', pedidoId)
+                .single();
+
+            if (error) throw error;
+            if (!pedido) throw new Error('Pedido no encontrado.');
+
+            // Verificar que sea editable
+            if (!ESTADOS_EDITABLES.includes(pedido.status)) {
+                _editSetError(`Este pedido no se puede editar (estado: ${pedido.status}).`);
+                return;
+            }
+
+            this._pedido = pedido;
+
+            // Extraer nota libre del campo notes
+            const parsed = _parsearNota(pedido.notes);
+            this._notaEdit = parsed.nota;
+
+            // Construir lista de ítems editables
+            this._itemsEdit = (pedido.order_items || []).map(it => {
+                let nombre = it.menu_items?.name || '';
+                if (!nombre && it.notes) {
+                    const m = it.notes.match(/\[nombre\](.+)/);
+                    nombre = m ? m[1] : 'Ítem';
+                }
+                return {
+                    id:          it.id,
+                    menuItemId:  it.menu_item_id,
+                    nombre:      nombre || 'Ítem',
+                    precio:      Number(it.unit_price) || 0,
+                    cantidad:    it.quantity,
+                    item_status: it.item_status || 'pending',
+                    esNuevo:     false,
+                    eliminado:   false,
+                };
+            });
+
+            this._renderEditor();
+
+        } catch (err) {
+            console.error('[EditarPedido] Error al abrir:', err);
+            _editSetError(`No se pudo cargar el pedido: ${err.message}`);
+        }
+    },
+
+    cerrar() {
+        const modal = document.getElementById('edit-modal');
+        if (modal) modal.classList.remove('open');
+        document.body.style.overflow = '';
+        this._pedidoId  = null;
+        this._pedido    = null;
+        this._itemsEdit = [];
+        this._notaEdit  = '';
+        this._guardando = false;
+    },
+
+    _renderEditor() {
+        const contenedor = document.getElementById('edit-modal-body');
+        if (!contenedor) return;
+
+        const parsed  = _parsearNota(this._pedido.notes);
+        const statusLabels = {
+            pending:'Pendiente', preparing:'En cocina',
+            ready:'Listo', delivered:'Entregado', cancelled:'Cancelado', confirmed:'Confirmado',
+        };
+
+        // Título del pedido
+        const tituloHTML = `
+            <div class="edit-pedido-titulo">
+                <span class="edit-order-no"># ${this._pedido.order_number || '—'}</span>
+                <span class="status-badge ${this._pedido.status}">${statusLabels[this._pedido.status] || this._pedido.status}</span>
+            </div>
+            <p class="edit-destino-label">${parsed.destino}${parsed.cliente ? ` · ${parsed.cliente}` : ''}</p>`;
+
+        // Lista de ítems actuales
+        const itemsHTML = this._itemsEdit
+            .filter(it => !it.eliminado)
+            .map((it, i) => this._renderItemRow(it, i))
+            .join('');
+
+        // Selector de platos para agregar
+        const slotsDisponibles = State.slots.filter(s => s.disponible);
+        const opcionesSlots = slotsDisponibles.map(s =>
+            `<option value="${s.id}">${s.nombre}${s.precio > 0 ? ' — ' + formatCOP(s.precio) : ' (Incluido)'}</option>`
+        ).join('');
+
+        contenedor.innerHTML = `
+            ${tituloHTML}
+
+            <div class="edit-section">
+                <p class="edit-section-title">Ítems del pedido</p>
+                <div id="edit-items-list">
+                    ${itemsHTML || '<p class="edit-empty-items">Sin ítems.</p>'}
+                </div>
+            </div>
+
+            <div class="edit-section">
+                <p class="edit-section-title">Agregar ítem</p>
+                <div class="edit-agregar-row">
+                    <select id="edit-slot-select" class="form-input edit-select">
+                        <option value="">— Selecciona un plato o bebida —</option>
+                        ${opcionesSlots}
+                    </select>
+                    <div class="edit-qty-row">
+                        <button class="edit-qty-btn" onclick="EditarPedido._decrementarNuevo()">−</button>
+                        <span id="edit-nueva-qty" class="edit-qty-num">1</span>
+                        <button class="edit-qty-btn" onclick="EditarPedido._incrementarNuevo()">+</button>
+                        <button class="btn-agregar-item" onclick="EditarPedido._agregarItem()">Agregar</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="edit-section">
+                <p class="edit-section-title">Nota del pedido</p>
+                <textarea id="edit-nota-input" class="form-input" rows="2"
+                    placeholder="Sin picante, sin cebolla, alergia a…">${this._notaEdit}</textarea>
+            </div>
+
+            <div class="edit-total-preview">
+                <span class="edit-total-label">Total estimado</span>
+                <span id="edit-total-monto" class="edit-total-monto">${formatCOP(this._calcularTotalEdit())}</span>
+            </div>`;
+
+        // Inicializar qty nueva
+        this._nuevaQty = 1;
+        _editSetLoader(false);
+    },
+
+    _renderItemRow(it, i) {
+        const noEliminable = ITEM_ESTADOS_NO_ELIMINABLES.includes(it.item_status) && !it.esNuevo;
+        const precioStr    = it.precio > 0 ? formatCOP(it.precio) : 'Incl.';
+        const subtotalStr  = it.precio > 0 ? formatCOP(it.precio * it.cantidad) : '—';
+
+        return `
+            <div class="edit-item-row" id="edit-item-row-${it.id || 'new-'+i}">
+                <div class="edit-item-info">
+                    <span class="edit-item-nombre">${it.nombre}</span>
+                    <span class="edit-item-precio">${precioStr} c/u</span>
+                </div>
+                <div class="edit-item-ctrl">
+                    <button class="edit-qty-btn" onclick="EditarPedido._cambiarCantidad('${it.id || 'new-'+i}', -1)"
+                        ${it.cantidad <= 1 && noEliminable ? 'disabled title="No se puede reducir: ítem en cocina"' : ''}>−</button>
+                    <span class="edit-qty-num">${it.cantidad}</span>
+                    <button class="edit-qty-btn" onclick="EditarPedido._cambiarCantidad('${it.id || 'new-'+i}', +1)">+</button>
+                    <span class="edit-item-subtotal">${subtotalStr}</span>
+                    ${noEliminable
+                        ? `<span class="edit-item-lock" title="En cocina, no se puede eliminar">🔒</span>`
+                        : `<button class="edit-item-del" onclick="EditarPedido._eliminarItem('${it.id || 'new-'+i}')" title="Eliminar">✕</button>`
+                    }
+                </div>
+            </div>`;
+    },
+
+    _nuevaQty: 1,
+
+    _decrementarNuevo() {
+        if (this._nuevaQty > 1) {
+            this._nuevaQty--;
+            const el = document.getElementById('edit-nueva-qty');
+            if (el) el.textContent = this._nuevaQty;
+        }
+    },
+
+    _incrementarNuevo() {
+        this._nuevaQty++;
+        const el = document.getElementById('edit-nueva-qty');
+        if (el) el.textContent = this._nuevaQty;
+    },
+
+    _agregarItem() {
+        const select = document.getElementById('edit-slot-select');
+        const slotId = select?.value;
+        if (!slotId) { Toast.error('Selecciona un plato o bebida.'); return; }
+
+        const slot = State.slots.find(s => s.id === slotId);
+        if (!slot) return;
+
+        // Si ya existe en la lista, sumar cantidad
+        const existente = this._itemsEdit.find(it => !it.eliminado && it.menuItemId === slot.menuItemId && it.esNuevo);
+        if (existente) {
+            existente.cantidad += this._nuevaQty;
+        } else {
+            // Ítem nuevo — usar slotId como id temporal
+            this._itemsEdit.push({
+                id:          `new-${Date.now()}`,
+                menuItemId:  slot.menuItemId,
+                nombre:      slot.nombre,
+                precio:      slot.precio,
+                cantidad:    this._nuevaQty,
+                item_status: 'pending',
+                esNuevo:     true,
+                eliminado:   false,
+            });
+        }
+
+        if (select) select.value = '';
+        this._nuevaQty = 1;
+        const qtyEl = document.getElementById('edit-nueva-qty');
+        if (qtyEl) qtyEl.textContent = '1';
+
+        this._refrescarListaItems();
+        this._actualizarTotalPreview();
+        Toast.ok(`"${slot.nombre}" agregado al pedido.`);
+    },
+
+    _cambiarCantidad(itemId, delta) {
+        const it = this._itemsEdit.find(i => i.id === itemId);
+        if (!it || it.eliminado) return;
+
+        const noEliminable = ITEM_ESTADOS_NO_ELIMINABLES.includes(it.item_status) && !it.esNuevo;
+        const nueva = it.cantidad + delta;
+
+        if (nueva <= 0) {
+            if (noEliminable) {
+                Toast.error(`No se puede eliminar "${it.nombre}": ya está en cocina.`);
+                return;
+            }
+            it.eliminado = true;
+        } else {
+            it.cantidad = nueva;
+        }
+
+        this._refrescarListaItems();
+        this._actualizarTotalPreview();
+    },
+
+    _eliminarItem(itemId) {
+        const it = this._itemsEdit.find(i => i.id === itemId);
+        if (!it) return;
+
+        const noEliminable = ITEM_ESTADOS_NO_ELIMINABLES.includes(it.item_status) && !it.esNuevo;
+        if (noEliminable) {
+            Toast.error(`No se puede eliminar "${it.nombre}": ya está en cocina.`);
+            return;
+        }
+
+        it.eliminado = true;
+        this._refrescarListaItems();
+        this._actualizarTotalPreview();
+    },
+
+    _refrescarListaItems() {
+        const lista = document.getElementById('edit-items-list');
+        if (!lista) return;
+        const activos = this._itemsEdit.filter(it => !it.eliminado);
+        if (activos.length === 0) {
+            lista.innerHTML = '<p class="edit-empty-items">Sin ítems.</p>';
+            return;
+        }
+        lista.innerHTML = activos.map((it, i) => this._renderItemRow(it, i)).join('');
+    },
+
+    _calcularTotalEdit() {
+        return this._itemsEdit
+            .filter(it => !it.eliminado)
+            .reduce((acc, it) => acc + it.precio * it.cantidad, 0);
+    },
+
+    _actualizarTotalPreview() {
+        const el = document.getElementById('edit-total-monto');
+        if (el) el.textContent = formatCOP(this._calcularTotalEdit());
+    },
+
+    async guardar() {
+        if (this._guardando) return;
+        if (!this._pedidoId || !this._pedido) return;
+
+        const btnGuardar = document.getElementById('edit-btn-guardar');
+        this._guardando = true;
+        if (btnGuardar) { btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando…'; }
+
+        try {
+            const pedidoId  = this._pedidoId;
+            const pedido    = this._pedido;
+            const notaInput = document.getElementById('edit-nota-input');
+            const nuevaNota = (notaInput?.value || '').trim();
+
+            // ── 1. Reconstruir el campo notes conservando prefijo y mesero ──
+            const parsed = _parsearNota(pedido.notes);
+            let notaBase = pedido.notes || '';
+            // Reemplazar la parte de Nota: al final
+            notaBase = notaBase.replace(/\s*\|\s*Nota:\s*.+$/, '');
+            if (nuevaNota) notaBase += ` | Nota: ${nuevaNota}`;
+            const notaFinal = notaBase.trim();
+
+            // ── 2. Separar ítems: eliminar, actualizar, insertar ──
+            const itemsOriginales = pedido.order_items || [];
+            const idsOriginales   = new Set(itemsOriginales.map(i => i.id));
+
+            // Ítems a eliminar (existentes marcados como eliminados)
+            const aEliminar = this._itemsEdit
+                .filter(it => it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
+
+            // Ítems a actualizar cantidad (existentes no eliminados)
+            const aActualizar = this._itemsEdit
+                .filter(it => !it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
+
+            // Ítems nuevos
+            const aNuevos = this._itemsEdit.filter(it => it.esNuevo && !it.eliminado);
+
+            // Ejecutar eliminaciones
+            for (const it of aEliminar) {
+                const { error } = await db.from('order_items').delete().eq('id', it.id);
+                if (error) console.warn('[EditarPedido] Error eliminando ítem:', error.message);
+            }
+
+            // Ejecutar actualizaciones de cantidad
+            for (const it of aActualizar) {
+                const original = itemsOriginales.find(o => o.id === it.id);
+                if (original && original.quantity !== it.cantidad) {
+                    const { error } = await db.from('order_items')
+                        .update({ quantity: it.cantidad })
+                        .eq('id', it.id);
+                    if (error) console.warn('[EditarPedido] Error actualizando cantidad:', error.message);
+                }
+            }
+
+            // Insertar nuevos ítems
+            if (aNuevos.length > 0) {
+                // Obtener fallback de menu_items si el slot es demo
+                const { data: todosMenuItems } = await db.from('menu_items')
+                    .select('id,name').eq('restaurant_id', State.restaurantId).eq('is_active', true);
+                const listaMenu = todosMenuItems || [];
+
+                const payloadNuevos = aNuevos.map(it => {
+                    let menuItemId = it.menuItemId;
+                    if (!menuItemId && listaMenu.length > 0) {
+                        const nb = (it.nombre || '').toLowerCase().trim();
+                        const ex = listaMenu.find(m => m.name.toLowerCase().trim() === nb);
+                        menuItemId = ex?.id || listaMenu[0]?.id || null;
+                    }
+                    return {
+                        order_id:     pedidoId,
+                        menu_item_id: menuItemId,
+                        quantity:     it.cantidad,
+                        unit_price:   it.precio,
+                        item_status:  'pending',
+                        product_name: it.nombre,
+                        notes:        `[nombre]${it.nombre}`,
+                    };
+                });
+
+                const { error: errNuevos } = await db.from('order_items').insert(payloadNuevos);
+                if (errNuevos) {
+                    // Reintentar sin product_name si la columna no existe
+                    if (errNuevos.code === '42703' || errNuevos.message?.includes('product_name')) {
+                        const p2 = payloadNuevos.map(({ product_name, ...rest }) => rest);
+                        const { error: err2 } = await db.from('order_items').insert(p2);
+                        if (err2) console.warn('[EditarPedido] Error insertando nuevos ítems:', err2.message);
+                    } else {
+                        console.warn('[EditarPedido] Error insertando nuevos ítems:', errNuevos.message);
+                    }
+                }
+            }
+
+            // ── 3. Recalcular total y actualizar orders ──
+            const nuevoTotal = this._calcularTotalEdit();
+            const { error: errUpdate } = await db.from('orders')
+                .update({
+                    total_amount: nuevoTotal,
+                    notes:        notaFinal,
+                    updated_at:   new Date().toISOString(),
+                })
+                .eq('id', pedidoId);
+            if (errUpdate) console.warn('[EditarPedido] Error actualizando orden:', errUpdate.message);
+
+            Toast.ok('Pedido actualizado correctamente.');
+            this.cerrar();
+
+            // Refrescar historial — el realtime en cocina/caja/dashboard
+            // se encarga automáticamente gracias al UPDATE en orders
+            await Hist.cargar();
+
+        } catch (err) {
+            console.error('[EditarPedido] Error al guardar:', err);
+            Toast.error('No se pudo guardar. Verifica tu conexión.', 5000);
+        } finally {
+            this._guardando = false;
+            const btn = document.getElementById('edit-btn-guardar');
+            if (btn) { btn.disabled = false; btn.textContent = 'Guardar cambios'; }
+        }
+    },
+};
+
+function _editSetLoader(activo) {
+    const body = document.getElementById('edit-modal-body');
+    const footer = document.getElementById('edit-modal-footer');
+    if (activo) {
+        if (body) body.innerHTML = `
+            <div class="hist-loader" style="padding:60px 0;">
+                <div class="spinner-sm"></div>
+                <p>Cargando pedido…</p>
+            </div>`;
+        if (footer) footer.style.display = 'none';
+    } else {
+        if (footer) footer.style.display = 'flex';
+    }
+}
+
+function _editSetError(msg) {
+    const body = document.getElementById('edit-modal-body');
+    const footer = document.getElementById('edit-modal-footer');
+    if (body) body.innerHTML = `
+        <div class="empty-state" style="padding:56px 28px;">
+            <div class="icon">⚠️</div>
+            <p>${msg}</p>
+        </div>`;
+    if (footer) footer.style.display = 'none';
+}
+
+// ============================================================
 // INIT
 // ============================================================
 (async function init() {
     try {
+        // Programar reset de medianoche
+        _programarResetMedianoche();
+
+        // Requerir sesión de mesero antes de cargar
+        await Sesion.requerir();
+
         await _resolverRestaurant();
         await Menu.cargar();
     } catch (err) {
