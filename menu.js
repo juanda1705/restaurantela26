@@ -237,10 +237,11 @@ async function _resolverTableId(modalidad, mesa) {
     if (!State.restaurantId) await _resolverRestaurant();
     if (!State.restaurantId) return null;
 
+    // ── Para pedidos EN MESA ─────────────────────────────────
     if (modalidad === 'mesa') {
         const mesaNum = parseInt(mesa);
-        // Buscar por número (solo si > 0) o por label exacto
-        // number=0 está reservado para "Para Llevar", nunca asignarlo a mesa
+
+        // 1. Buscar por número exacto (> 0 para no tocar "Para Llevar")
         if (!isNaN(mesaNum) && mesaNum > 0) {
             const { data: porNum } = await db
                 .from('tables')
@@ -248,9 +249,13 @@ async function _resolverTableId(modalidad, mesa) {
                 .eq('restaurant_id', State.restaurantId)
                 .eq('number', mesaNum)
                 .maybeSingle();
-            if (porNum?.id) return porNum.id;
+            if (porNum?.id) {
+                console.log(`[La 26] Mesa ${mesaNum} encontrada:`, porNum.id);
+                return porNum.id;
+            }
         }
-        // Buscar por label si no se encontró por número
+
+        // 2. Buscar por label sin tocar mesas de despacho
         if (mesa) {
             const { data: porLabel } = await db
                 .from('tables')
@@ -259,44 +264,76 @@ async function _resolverTableId(modalidad, mesa) {
                 .ilike('label', `%${mesa}%`)
                 .not('label', 'ilike', '%llevar%')
                 .not('label', 'ilike', '%domicilio%')
+                .not('label', 'ilike', '%takeaway%')
                 .maybeSingle();
-            if (porLabel?.id) return porLabel.id;
+            if (porLabel?.id) {
+                console.log(`[La 26] Mesa por label "${mesa}":`, porLabel.id);
+                return porLabel.id;
+            }
         }
-        // Si no existe la mesa, crearla automáticamente
-        const mesaNum2 = parseInt(mesa) || 1;
-        const { data: nuevaMesa } = await db
+
+        // 3. Crear la mesa si no existe (insert, no upsert)
+        const mesaNumFinal = (!isNaN(parseInt(mesa)) && parseInt(mesa) > 0)
+            ? parseInt(mesa) : null;
+
+        if (mesaNumFinal) {
+            const { data: nueva } = await db
+                .from('tables')
+                .insert([{
+                    restaurant_id: State.restaurantId,
+                    number:        mesaNumFinal,
+                    label:         `Mesa ${mesaNumFinal}`,
+                    qr_code:       `MESA-${State.restaurantId}-${mesaNumFinal}-${Date.now()}`,
+                    capacity:      4,
+                    status:        'available',
+                }])
+                .select('id')
+                .single();
+            if (nueva?.id) {
+                console.log(`[La 26] Mesa ${mesaNumFinal} creada:`, nueva.id);
+                return nueva.id;
+            }
+        }
+
+        // 4. Fallback: cualquier mesa que no sea número 0
+        const { data: cualquiera } = await db
             .from('tables')
-            .upsert([{
-                restaurant_id: State.restaurantId,
-                number:        mesaNum2,
-                label:         `Mesa ${mesaNum2}`,
-                qr_code:       `MESA-${State.restaurantId}-${mesaNum2}`,
-                capacity:      4,
-                status:        'available',
-            }], { onConflict: 'restaurant_id,number' })
-            .select('id').single();
-        if (nuevaMesa?.id) return nuevaMesa.id;
+            .select('id')
+            .eq('restaurant_id', State.restaurantId)
+            .neq('number', 0)
+            .limit(1)
+            .maybeSingle();
+        if (cualquiera?.id) return cualquiera.id;
     }
 
-    const { data: mv } = await db
+    // ── Para Llevar / Domicilio ──────────────────────────────
+    const { data: mv0 } = await db
+        .from('tables')
+        .select('id')
+        .eq('restaurant_id', State.restaurantId)
+        .eq('number', 0)
+        .maybeSingle();
+    if (mv0?.id) return mv0.id;
+
+    const { data: mvLabel } = await db
         .from('tables')
         .select('id')
         .eq('restaurant_id', State.restaurantId)
         .ilike('label', '%para llevar%')
         .maybeSingle();
+    if (mvLabel?.id) return mvLabel.id;
 
-    if (mv?.id) return mv.id;
-
+    // Crear mesa virtual para llevar
     const { data: mn } = await db
         .from('tables')
-        .upsert([{
+        .insert([{
             restaurant_id: State.restaurantId,
             number:        0,
             label:         'Para Llevar / Domicilio',
-            qr_code:       `VIRTUAL-TAKEAWAY-${State.restaurantId}`,
+            qr_code:       `VIRTUAL-TAKEAWAY-${State.restaurantId}-${Date.now()}`,
             capacity:      99,
             status:        'available',
-        }], { onConflict: 'restaurant_id,number' })
+        }])
         .select('id')
         .single();
 
