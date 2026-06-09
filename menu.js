@@ -723,22 +723,60 @@ const Order = {
             if (errOrd) throw errOrd;
 
             // ── Insertar ítems ────────────────────────────────
-            // product_name → Capa 1 de cocina (app.js v3.3)
-            // notes [nombre] → Capa 2 legacy
-            // Ambas apuntan al nombre real del slot, nunca al JOIN.
+            // Estrategia de resolución de menu_item_id:
+            //   1. slot.menuItemId (viene directo de menu_items.id — siempre válido en v7.0)
+            //   2. Si por algún motivo es null, buscar por nombre exacto en menu_items
+            //   3. Si tampoco, usar el primer item activo del restaurante como fallback FK
+            //
+            // product_name y notes[nombre] garantizan que cocina siempre
+            // muestra el nombre correcto independiente del menu_item_id.
+
+            // Cargar todos los items para resolución de FK
+            const { data: todosItems } = await db
+                .from('menu_items')
+                .select('id, name, item_type')
+                .eq('restaurant_id', State.restaurantId)
+                .eq('is_active', true);
+
+            const listaItems  = todosItems || [];
+            const fallbackId  = listaItems[0]?.id || null;
+
             const payload = State.cart.map(item => {
                 const slot = State.slots.find(s => s.id === item.slotId);
                 if (!slot) return null;
+
+                // Resolver menu_item_id con 3 capas
+                let menuItemId = slot.menuItemId;  // Capa 1: directo del slot
+
+                if (!menuItemId && listaItems.length > 0) {
+                    const nombreBuscar = (slot.nombre || '').toLowerCase().trim();
+                    // Capa 2: coincidencia exacta por nombre
+                    const exacto = listaItems.find(m =>
+                        m.name.toLowerCase().trim() === nombreBuscar
+                    );
+                    // Capa 3: coincidencia parcial
+                    const parcial = !exacto && listaItems.find(m =>
+                        m.name.toLowerCase().includes(nombreBuscar.split(' ')[0])
+                    );
+                    menuItemId = exacto?.id || parcial?.id || fallbackId;
+                }
+
+                console.log(`[La 26] Item "${slot.nombre}" → menu_item_id: ${menuItemId}`);
+
                 return {
                     order_id:     orden.id,
-                    menu_item_id: slot.menuItemId || null,
+                    menu_item_id: menuItemId,           // FK resuelta — nunca null si hay items
                     quantity:     item.cantidad,
                     unit_price:   slot.precio,
                     item_status:  'pending',
-                    product_name: slot.nombre,                    // [FIX-4] Capa 1
-                    notes:        `[nombre]${slot.nombre}`,       // Capa 2 legacy
+                    product_name: slot.nombre,          // Capa 1 cocina: nombre directo
+                    notes:        `[nombre]${slot.nombre}`, // Capa 2 cocina: prefijo legacy
                 };
             }).filter(Boolean);
+
+            console.log('[La 26] Insertando order_items:', JSON.stringify(payload.map(p => ({
+                nombre: p.product_name, qty: p.quantity, menu_item_id: p.menu_item_id
+            }))));
 
             if (payload.length > 0) {
                 const { error: errItems } = await db
@@ -746,11 +784,31 @@ const Order = {
                     .insert(payload);
 
                 if (errItems) {
-                    console.warn('[La 26] order_items falló:', errItems.message);
-                    // Segundo intento sin menu_item_id por si hay FK inválida
-                    const payloadSafe = payload.map(p => ({ ...p, menu_item_id: null }));
-                    const { error: err2 } = await db.from('order_items').insert(payloadSafe);
-                    if (err2) console.error('[La 26] order_items segundo intento falló:', err2.message);
+                    console.warn('[La 26] order_items primer intento error:', errItems.message);
+
+                    // Si falla por columna product_name inexistente (error 42703),
+                    // reintentar sin esa columna — el nombre sigue en notes[nombre]
+                    if (errItems.code === '42703' || errItems.message?.includes('product_name')) {
+                        console.log('[La 26] Reintentando sin product_name (columna no existe en BD)');
+                        const payloadSinProductName = payload.map(p => {
+                            const { product_name, ...rest } = p;
+                            return rest;
+                        });
+                        const { error: err2 } = await db
+                            .from('order_items')
+                            .insert(payloadSinProductName);
+                        if (err2) {
+                            console.error('[La 26] order_items segundo intento error:', err2.message, err2);
+                            Toast.error('El pedido se registró pero los ítems fallaron. Avisa al administrador.', 6000);
+                        } else {
+                            console.log('[La 26] order_items insertados OK (sin product_name):', payloadSinProductName.length);
+                        }
+                    } else {
+                        console.error('[La 26] order_items ERROR no recuperable:', errItems.message, errItems);
+                        Toast.error('El pedido se registró pero los ítems fallaron. Avisa al administrador.', 6000);
+                    }
+                } else {
+                    console.log('[La 26] order_items insertados OK:', payload.length);
                 }
             }
 
