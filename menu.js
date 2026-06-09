@@ -157,9 +157,10 @@ function todayISO() {
 
 // [FIX-1] Template literal corregido
 function generarNumeroOrden() {
-    const year = new Date().getFullYear();
-    const rand = Math.floor(1000 + Math.random() * 9000);
-    return `MES-LA26-${year}-${rand}`;
+    // VARCHAR(20) en BD — máximo 20 caracteres
+    // Formato: LA26-XXXXXXXX = 13 chars (seguro)
+    const rand = Math.floor(10000000 + Math.random() * 89999999);
+    return `LA26-${rand}`;
 }
 
 function calcularTotal() {
@@ -237,14 +238,44 @@ async function _resolverTableId(modalidad, mesa) {
     if (!State.restaurantId) return null;
 
     if (modalidad === 'mesa') {
-        const mesaVal = mesa;
-        const { data } = await db
+        const mesaNum = parseInt(mesa);
+        // Buscar por número (solo si > 0) o por label exacto
+        // number=0 está reservado para "Para Llevar", nunca asignarlo a mesa
+        if (!isNaN(mesaNum) && mesaNum > 0) {
+            const { data: porNum } = await db
+                .from('tables')
+                .select('id')
+                .eq('restaurant_id', State.restaurantId)
+                .eq('number', mesaNum)
+                .maybeSingle();
+            if (porNum?.id) return porNum.id;
+        }
+        // Buscar por label si no se encontró por número
+        if (mesa) {
+            const { data: porLabel } = await db
+                .from('tables')
+                .select('id')
+                .eq('restaurant_id', State.restaurantId)
+                .ilike('label', `%${mesa}%`)
+                .not('label', 'ilike', '%llevar%')
+                .not('label', 'ilike', '%domicilio%')
+                .maybeSingle();
+            if (porLabel?.id) return porLabel.id;
+        }
+        // Si no existe la mesa, crearla automáticamente
+        const mesaNum2 = parseInt(mesa) || 1;
+        const { data: nuevaMesa } = await db
             .from('tables')
-            .select('id')
-            .eq('restaurant_id', State.restaurantId)
-            .or(`number.eq.${isNaN(mesaVal) ? 0 : mesaVal},label.ilike.${mesaVal}`)
-            .maybeSingle();
-        if (data?.id) return data.id;
+            .upsert([{
+                restaurant_id: State.restaurantId,
+                number:        mesaNum2,
+                label:         `Mesa ${mesaNum2}`,
+                qr_code:       `MESA-${State.restaurantId}-${mesaNum2}`,
+                capacity:      4,
+                status:        'available',
+            }], { onConflict: 'restaurant_id,number' })
+            .select('id').single();
+        if (nuevaMesa?.id) return nuevaMesa.id;
     }
 
     const { data: mv } = await db
@@ -695,12 +726,12 @@ const Order = {
             const tableId = await _resolverTableId(modalidad, mesa);
             if (!tableId) throw new Error('No se pudo identificar la mesa.');
 
-            // Construir nota de cocina
+            // Construir nota de cocina — prefijo que lee app.js para mostrar modalidad
             let notaCocina = '';
-            if (modalidad === 'mesa')         notaCocina = `[MESA ${mesa}]`;
-            else if (modalidad === 'llevar')   notaCocina = `[PARA LLEVAR] Cliente: ${nombre}`;
-            else if (modalidad === 'domicilio') notaCocina = `[DOMICILIO] Cliente: ${nombre}`;
-            if (notas) notaCocina += ` | ${notas}`;
+            if (modalidad === 'mesa')          notaCocina = `[MESA] Mesa: ${mesa}`;
+            else if (modalidad === 'llevar')   notaCocina = `[PARA LLEVAR] Cliente: ${nombre || 'Sin nombre'}`;
+            else if (modalidad === 'domicilio') notaCocina = `[DOMICILIO] Cliente: ${nombre || 'Sin nombre'}`;
+            if (notas) notaCocina += ` | Nota: ${notas}`;
 
             const numeroOrden = generarNumeroOrden();
             const total       = calcularTotal();
