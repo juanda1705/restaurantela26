@@ -1,9 +1,18 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE MESERO
-// menu.js · Versión 7.1 — Fuente única de verdad
+// menu.js · Versión 7.2 — Fuente única de verdad
 // Bucaramanga, Santander — Colombia
 //
-// CAMBIOS v7.1:
+// CAMBIOS v7.2:
+//  [ADD-DIRECCION] Order.enviar: se captura el campo
+//             #form-direccion, se valida como obligatorio
+//             cuando modalidad === 'domicilio', y se incluye
+//             en notaCocina: "[DOMICILIO] Cliente: X | Dir: Y".
+//
+//  [ADD-RESET-DIRECCION] Order.nuevoPedido: limpia el campo
+//             de dirección al iniciar un nuevo pedido.
+//
+// CAMBIOS v7.1 (sin cambios):
 //  [FIX-MESA] _resolverTableId: el fallback final ya NO devuelve
 //             la primera mesa disponible (siempre era Mesa 1).
 //             Ahora crea la mesa con el número exacto pedido, y si
@@ -232,7 +241,7 @@ async function _resolverRestaurant() {
 //   "Mesa 1" sin importar qué número escribió el mesero.
 //
 // SOLUCIÓN:
-//   1. Si la mesa no existe → CREARLA con el número exacto.
+//   1. Si la mesa no existe → CREARLA con el número EXACTO.
 //      El INSERT usa ON CONFLICT DO NOTHING internamente (vía try/catch)
 //      para evitar duplicados en caso de race condition.
 //   2. Si la creación falla (constraint, permisos, etc.) →
@@ -732,17 +741,20 @@ const Order = {
             return;
         }
 
-        const btnEl       = document.getElementById('btn-enviar');
-        const mesaEl      = document.getElementById('form-mesa');
-        const nombreEl    = document.getElementById('form-nombre');
-        const notasEl     = document.getElementById('form-notas');
-        const modalidadEl = document.querySelector('input[name="form-modalidad"]:checked');
+        const btnEl        = document.getElementById('btn-enviar');
+        const mesaEl       = document.getElementById('form-mesa');
+        const nombreEl     = document.getElementById('form-nombre');
+        const notasEl      = document.getElementById('form-notas');
+        const direccionEl  = document.getElementById('form-direccion');  // [ADD-DIRECCION v7.2]
+        const modalidadEl  = document.querySelector('input[name="form-modalidad"]:checked');
 
-        const mesa      = (mesaEl?.value     || '').trim();
-        const nombre    = (nombreEl?.value   || '').trim();
-        const notas     = (notasEl?.value    || '').trim();
+        const mesa      = (mesaEl?.value      || '').trim();
+        const nombre    = (nombreEl?.value    || '').trim();
+        const notas     = (notasEl?.value     || '').trim();
+        const direccion = (direccionEl?.value || '').trim();             // [ADD-DIRECCION v7.2]
         const modalidad = modalidadEl?.value || 'mesa';
 
+        // Validar mesa
         if (modalidad === 'mesa' && !mesa) {
             mesaEl?.classList.add('error');
             mesaEl?.focus();
@@ -750,6 +762,15 @@ const Order = {
             return;
         }
         mesaEl?.classList.remove('error');
+
+        // [ADD-DIRECCION v7.2] Validar dirección en domicilio
+        if (modalidad === 'domicilio' && !direccion) {
+            direccionEl?.classList.add('error');
+            direccionEl?.focus();
+            Toast.error('Indica la dirección de entrega.');
+            return;
+        }
+        direccionEl?.classList.remove('error');
 
         State.isSubmitting = true;
         if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Enviando…'; }
@@ -784,14 +805,14 @@ const Order = {
             // ── Construir nota de cocina ──────────────────────
             // [FIX-MESA v7.1] El número de mesa se guarda EXPLÍCITAMENTE en notes
             // con el valor que escribió el mesero, NO el número de la FK de BD.
-            // Esto garantiza que cocina y admin siempre muestren el número correcto.
+            // [ADD-DIRECCION v7.2] La dirección se incluye en la nota de domicilio.
             let notaCocina = '';
             if (modalidad === 'mesa') {
                 notaCocina = `[MESA] Mesa: ${mesa}`;
             } else if (modalidad === 'llevar') {
                 notaCocina = `[PARA LLEVAR] Cliente: ${nombre || 'Sin nombre'}`;
             } else if (modalidad === 'domicilio') {
-                notaCocina = `[DOMICILIO] Cliente: ${nombre || 'Sin nombre'}`;
+                notaCocina = `[DOMICILIO] Cliente: ${nombre || 'Sin nombre'} | Dir: ${direccion}`;
             }
             if (notas) notaCocina += ` | Nota: ${notas}`;
 
@@ -917,8 +938,11 @@ const Order = {
     nuevoPedido() {
         document.getElementById('success-modal').classList.remove('open');
 
-        const notasEl = document.getElementById('form-notas');
-        if (notasEl) notasEl.value = '';
+        // Limpiar campos del formulario
+        const notasEl     = document.getElementById('form-notas');
+        const direccionEl = document.getElementById('form-direccion');  // [ADD-RESET-DIRECCION v7.2]
+        if (notasEl)     notasEl.value     = '';
+        if (direccionEl) direccionEl.value = '';
 
         window.scrollTo({ top: 0, behavior: 'smooth' });
         _renderizarMenu();
@@ -942,7 +966,7 @@ function _suscribirRealtime() {
     }
 
     State.realtimeChannel = db
-        .channel(`la26-menu-v71-${State.restaurantId}`)
+        .channel(`la26-menu-v72-${State.restaurantId}`)
         .on(
             'postgres_changes',
             {
