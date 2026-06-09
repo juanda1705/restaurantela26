@@ -532,6 +532,15 @@
                     placeholder="Ej: 5, 12, Barra…" autocomplete="off">
             </div>
 
+            <!-- Dirección (visible solo en modo domicilio) -->
+            <div id="campo-direccion-wrapper" style="display:none;">
+                <label class="form-label" for="form-direccion">
+                    Dirección de entrega <span style="color:var(--red);">*</span>
+                </label>
+                <textarea id="form-direccion" class="form-input"
+                    placeholder="Calle, barrio, punto de referencia…" rows="2"></textarea>
+            </div>
+
             <!-- Nombre del cliente -->
             <div>
                 <label class="form-label" for="form-nombre">Nombre del cliente</label>
@@ -642,6 +651,16 @@
             if (campoMesa) {
                 campoMesa.style.display = valor === 'mesa' ? 'block' : 'none';
             }
+
+            // Mostrar / ocultar campo de dirección
+            const campoDireccion = document.getElementById('campo-direccion-wrapper');
+            if (campoDireccion) {
+                campoDireccion.style.display = valor === 'domicilio' ? 'block' : 'none';
+            }
+
+            // Limpiar errores al cambiar modalidad
+            document.getElementById('form-mesa')?.classList.remove('error');
+            document.getElementById('form-direccion')?.classList.remove('error');
         }
     };
 </script>
