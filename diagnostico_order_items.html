@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Diagnóstico order_items — La 26</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  body { font-family: monospace; padding: 24px; background: #1a1a1a; color: #e0e0e0; }
+  h2 { color: #4ade80; }
+  .ok   { color: #4ade80; }
+  .err  { color: #f87171; }
+  .warn { color: #fbbf24; }
+  pre { background: #2a2a2a; padding: 12px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; }
+  button { background: #4a6741; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; margin: 6px 4px; }
+  button:hover { background: #3a5631; }
+  #log { margin-top: 16px; }
+  .step { border-left: 3px solid #4a6741; padding-left: 12px; margin: 8px 0; }
+</style>
+</head>
+<body>
+<h2>🔬 Diagnóstico order_items — Restaurante La 26</h2>
+<p style="color:#9ca3af;font-size:13px;">Abre esta página en el navegador. Hace consultas reales a Supabase y muestra exactamente qué columnas existen y qué falla.</p>
+
+<button onclick="ejecutarDiagnostico()">▶ Ejecutar diagnóstico completo</button>
+<button onclick="document.getElementById('log').innerHTML=''">🗑 Limpiar</button>
+
+<div id="log"></div>
+
+<script>
+const SUPABASE_URL      = "https://hxmodeduckuhvvspnkxd.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_ESxhljLgqWkGvrnKhvbeEg_iBqaGciv";
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const log = document.getElementById('log');
+function print(msg, cls='') {
+    const d = document.createElement('div');
+    d.className = 'step';
+    d.innerHTML = `<span class="${cls}">${msg}</span>`;
+    log.appendChild(d);
+    console.log(msg);
+}
+function printJSON(obj) {
+    const pre = document.createElement('pre');
+    pre.textContent = JSON.stringify(obj, null, 2);
+    log.appendChild(pre);
+}
+
+async function ejecutarDiagnostico() {
+    log.innerHTML = '';
+    print('=== INICIO DIAGNÓSTICO ===', 'ok');
+
+    // 1. Resolver restaurant_id
+    print('1. Buscando restaurant_id...');
+    const { data: rest, error: eRest } = await db
+        .from('restaurants').select('id,name,slug').limit(3);
+    if (eRest) { print('ERROR restaurants: ' + eRest.message, 'err'); return; }
+    print('Restaurantes encontrados: ' + rest.length, 'ok');
+    printJSON(rest);
+    const restaurantId = rest[0]?.id;
+    if (!restaurantId) { print('Sin restaurant_id — DETENER', 'err'); return; }
+
+    // 2. Buscar una mesa válida
+    print('2. Buscando table_id...');
+    const { data: tables, error: eTab } = await db
+        .from('tables').select('id,label,number').eq('restaurant_id', restaurantId).limit(5);
+    if (eTab) { print('ERROR tables: ' + eTab.message, 'err'); }
+    else { print('Mesas: ' + tables.length, 'ok'); printJSON(tables); }
+    const tableId = tables?.[0]?.id;
+    if (!tableId) { print('Sin table_id — DETENER', 'err'); return; }
+
+    // 3. Buscar menu_item válido
+    print('3. Buscando menu_item_id...');
+    const { data: items, error: eItems } = await db
+        .from('menu_items').select('id,name,item_type,is_active').eq('restaurant_id', restaurantId).limit(5);
+    if (eItems) { print('ERROR menu_items: ' + eItems.message, 'err'); }
+    else { print('Items: ' + items.length, 'ok'); printJSON(items); }
+    const menuItemId = items?.[0]?.id;
+    if (!menuItemId) { print('Sin menu_item_id — DETENER', 'err'); return; }
+
+    // 4. Crear orden de prueba
+    print('4. Creando orden de prueba...');
+    const { data: orden, error: eOrd } = await db
+        .from('orders')
+        .insert([{
+            restaurant_id: restaurantId,
+            table_id:      tableId,
+            order_number:  'DIAG-TEST-' + Date.now(),
+            status:        'pending',
+            customer_name: 'DIAGNÓSTICO',
+            total_amount:  0,
+            notes:         '[DIAGNOSTICO]'
+        }])
+        .select('id').single();
+    if (eOrd) { print('ERROR creando orden: ' + eOrd.message, 'err'); printJSON(eOrd); return; }
+    print('Orden creada: ' + orden.id, 'ok');
+
+    // 5. Intentar insertar CON product_name
+    print('5a. Intentando insert CON product_name...');
+    const { error: e5a } = await db.from('order_items').insert([{
+        order_id:     orden.id,
+        menu_item_id: menuItemId,
+        quantity:     1,
+        unit_price:   0,
+        item_status:  'pending',
+        product_name: 'TEST DIAGNÓSTICO',
+        notes:        '[nombre]TEST DIAGNÓSTICO'
+    }]);
+    if (e5a) {
+        print('FALLÓ con product_name: ' + e5a.message, 'err');
+        print('  code: ' + e5a.code, 'warn');
+        printJSON(e5a);
+
+        // 5b. Intentar SIN product_name
+        print('5b. Intentando insert SIN product_name...');
+        const { error: e5b } = await db.from('order_items').insert([{
+            order_id:     orden.id,
+            menu_item_id: menuItemId,
+            quantity:     1,
+            unit_price:   0,
+            item_status:  'pending',
+            notes:        '[nombre]TEST DIAGNÓSTICO'
+        }]);
+        if (e5b) {
+            print('TAMBIÉN FALLÓ sin product_name: ' + e5b.message, 'err');
+            printJSON(e5b);
+
+            // 5c. Intentar con campos mínimos
+            print('5c. Intentando con campos MÍNIMOS...');
+            const { error: e5c } = await db.from('order_items').insert([{
+                order_id:     orden.id,
+                menu_item_id: menuItemId,
+                quantity:     1,
+                unit_price:   0
+            }]);
+            if (e5c) {
+                print('FALLÓ incluso con campos mínimos: ' + e5c.message, 'err');
+                printJSON(e5c);
+                print('⛔ PROBLEMA DE PERMISOS RLS o CONSTRAINT en order_items', 'err');
+            } else {
+                print('✅ Funciona con campos mínimos — item_status tiene constraint', 'ok');
+            }
+        } else {
+            print('✅ Funciona SIN product_name — columna no existe en BD', 'ok');
+            print('→ SOLUCIÓN: Ejecutar en Supabase SQL: ALTER TABLE order_items ADD COLUMN IF NOT EXISTS product_name TEXT;', 'warn');
+        }
+    } else {
+        print('✅ Funciona CON product_name — columna existe', 'ok');
+    }
+
+    // 6. Leer order_items de la orden para confirmar
+    print('6. Verificando order_items insertados...');
+    const { data: ois, error: eOis } = await db
+        .from('order_items').select('*').eq('order_id', orden.id);
+    if (eOis) { print('ERROR leyendo order_items: ' + eOis.message, 'err'); }
+    else { print('order_items encontrados: ' + ois.length, ois.length > 0 ? 'ok' : 'err'); printJSON(ois); }
+
+    // 7. Limpiar orden de prueba
+    await db.from('order_items').delete().eq('order_id', orden.id);
+    await db.from('orders').delete().eq('id', orden.id);
+    print('7. Orden de diagnóstico eliminada', 'ok');
+
+    print('=== FIN DIAGNÓSTICO ===', 'ok');
+    print('Copia todo este resultado y compártelo si persiste el problema.', 'warn');
+}
+</script>
+</body>
+</html>
