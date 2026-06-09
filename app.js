@@ -1,20 +1,33 @@
 // ============================================================
-// RESTAURANTE LA 26 — app.js · Versión 3.2
+// RESTAURANTE LA 26 — app.js · Versión 3.3
 // Módulo principal: login, cocina, Supabase Realtime
 // Namespace global: window.La26
 // Bucaramanga, Santander — Colombia
 //
-// CAMBIOS v3.2 (fixes críticos):
+// CAMBIOS v3.3 (fix crítico de mesa):
+//  [FIX-MESA] _crearCardHTML: identificadorMesa ahora lee el
+//             número de mesa DESDE NOTES con máxima prioridad.
+//             El formato en notes es "[MESA] Mesa: N" y se
+//             extrae con regex. El JOIN a tables solo se usa
+//             como último recurso para compatibilidad legacy.
+//
+//             PROBLEMA ORIGINAL:
+//               - menu.js resolvía table_id y a veces caía en
+//                 Mesa 1 (fallback). El JOIN en app.js leía el
+//                 label de esa Mesa 1, mostrando "Mesa 1" aunque
+//                 el mesero hubiera escrito "Mesa 5".
+//
+//             SOLUCIÓN:
+//               - menu.js v7.1 guarda el número REAL en notes:
+//                 "[MESA] Mesa: 5" (siempre, independiente del table_id).
+//               - app.js v3.3 lee ese valor de notes con prioridad
+//                 máxima. El JOIN es solo fallback legacy.
+//
+// CAMBIOS v3.2 (sin modificar):
 //  [FIX-1] cargarPedidos: fallback sin join anidado a menu_items
-//          → el fallback ahora solo pide order_items sin menu_items(name)
-//            porque si RLS bloquea ese sub-join devuelve [] silencioso.
-//            El nombre del plato se resuelve desde notes con [nombre].
 //  [FIX-2] Realtime INSERT orders: delay 300 → 1500 ms
-//          → le da tiempo a que order_items ya esté en BD antes del fetch.
-//  [FIX-3] Realtime INSERT order_items: delay 600 → 1200 ms y fuerza
-//          recarga aunque la orden ya estuviera en _allOrders vacía.
-//  [FIX-4] _crearCardHTML: muestra nota de entrega (Para Llevar / Domicilio)
-//          parseada del campo notes de la orden, útil para cocina.
+//  [FIX-3] Realtime INSERT order_items: delay 600 → 1200 ms
+//  [FIX-4] _crearCardHTML: muestra nota de entrega parseada
 // ============================================================
 
 const SUPABASE_URL      = "https://hxmodeduckuhvvspnkxd.supabase.co";
@@ -120,25 +133,6 @@ window.La26 = {
         else _mostrarToast('📍 Vista de Cocina', 'info');
     },
 
-    // ──────────────────────────────────────────────────────────
-    // cargarPedidos — v3.2
-    //
-    // ESTRATEGIA DE 3 CAPAS para resistir RLS silenciosos:
-    //
-    //  Capa 1 — Query principal con join completo (ideal, funciona
-    //           si RLS de order_items y menu_items tienen policy SELECT).
-    //
-    //  Capa 2 — Fallback SIN join a menu_items: solo trae order_items
-    //           planos. El nombre del plato viene de notes con [nombre].
-    //           Se activa para cada orden que llegó con order_items=[].
-    //           CRÍTICO: NO incluimos menu_items(name) aquí para evitar
-    //           que un RLS en menu_items mate el array completo.
-    //
-    //  Capa 3 — Si aun así order_items está vacío (timing: el INSERT
-    //           de order_items aún no se procesó), la tarjeta muestra
-    //           un mensaje de espera y el Realtime la actualizará en
-    //           cuanto llegue el INSERT de order_items (~1-2 seg).
-    // ──────────────────────────────────────────────────────────
     async cargarPedidos() {
         const grid = document.getElementById('contenedor-pedidos');
         if (!grid) return;
@@ -150,7 +144,7 @@ window.La26 = {
             </div>`;
 
         try {
-            // ── Capa 1: query principal con join anidado ──────
+            // Capa 1: query principal con join anidado
             const { data: orders, error } = await supabaseClient
                 .from('orders')
                 .select(`
@@ -178,10 +172,7 @@ window.La26 = {
 
             if (error) throw error;
 
-            // ── Capa 2: fallback para órdenes sin ítems ───────
-            // IMPORTANTE: este segundo SELECT no incluye menu_items(name)
-            // para evitar que RLS en esa tabla elimine el resultado entero.
-            // El nombre del plato se extrae de notes con el prefijo [nombre].
+            // Capa 2: fallback para órdenes sin ítems (sin join a menu_items)
             const ordenesSinItems = (orders || []).filter(o =>
                 !o.order_items || o.order_items.length === 0
             );
@@ -189,7 +180,6 @@ window.La26 = {
             if (ordenesSinItems.length > 0) {
                 const ids = ordenesSinItems.map(o => o.id);
 
-                // [FIX-1] Sin join a menu_items — solo columnas directas de order_items
                 const { data: itemsDirectos, error: errFallback } = await supabaseClient
                     .from('order_items')
                     .select('id, order_id, quantity, unit_price, notes, item_status, menu_item_id')
@@ -202,16 +192,12 @@ window.La26 = {
                 if (itemsDirectos && itemsDirectos.length > 0) {
                     (orders || []).forEach(o => {
                         if (!o.order_items || o.order_items.length === 0) {
-                            // Inyectamos los ítems; menu_items será null pero
-                            // _parsearNotes(item.notes) resolverá el nombre desde [nombre].
                             o.order_items = itemsDirectos
                                 .filter(i => i.order_id === o.id)
                                 .map(i => ({ ...i, menu_items: null }));
                         }
                     });
                 }
-                // Si itemsDirectos sigue vacío → Capa 3 (timing): la tarjeta
-                // mostrará "Preparando comanda…" y Realtime la recargará.
             }
 
             _allOrders = orders || [];
@@ -342,7 +328,6 @@ function _mostrarCocina() {
     _iniciarTimers();
 }
 
-// ── BOTTOM NAV MÓVIL — solo se inyecta una vez ────────────
 function _inyectarBottomNav() {
     if (document.getElementById('bottom-nav-cocina')) return;
 
@@ -425,9 +410,6 @@ function _inyectarBottomNav() {
 }
 
 // ── Realtime ──────────────────────────────────────────────
-// [FIX-2] INSERT orders: delay aumentado a 1500 ms para darle tiempo
-//         al INSERT de order_items que ocurre inmediatamente después.
-// [FIX-3] INSERT order_items: delay 1200 ms y fuerza recarga total.
 function _activarRealtime() {
     if (_realtimeChannel) supabaseClient.removeChannel(_realtimeChannel);
 
@@ -438,13 +420,11 @@ function _activarRealtime() {
     };
 
     _realtimeChannel = supabaseClient
-        .channel('la26-cocina-v32')
+        .channel('la26-cocina-v33')
         .on('postgres_changes', { event:'INSERT', schema:'public', table:'orders' },
             (payload) => {
                 console.info('[La 26] 📦 Nuevo pedido:', payload.new?.order_number || payload.new?.id);
                 _dispararAlerta(payload.new);
-                // [FIX-2] 1500 ms: el INSERT de order_items llega ~200-800 ms
-                // después del INSERT de orders desde menu.js.
                 recargar(1500);
             })
         .on('postgres_changes', { event:'UPDATE', schema:'public', table:'orders' },
@@ -452,8 +432,6 @@ function _activarRealtime() {
         .on('postgres_changes', { event:'INSERT', schema:'public', table:'order_items' },
             (payload) => {
                 console.info('[La 26] 🍽️ Nuevo ítem recibido, recargando comanda…');
-                // [FIX-3] Siempre recarga cuando llega un nuevo item, sin debounce largo.
-                // Esto cubre el caso donde la orden ya apareció en pantalla vacía.
                 recargar(1200);
             })
         .subscribe((status) => {
@@ -464,7 +442,11 @@ function _activarRealtime() {
 }
 
 function _dispararAlerta(pedido) {
-    const mesa = pedido?.table_id || pedido?.tables?.label || 'nueva mesa';
+    // [FIX-MESA v3.3] Leer mesa desde notes del pedido, no desde join
+    const notasOrden = pedido?.notes || '';
+    const mesaDesdeNotes = _extraerMesaDesdeNotes(notasOrden);
+    const mesa = mesaDesdeNotes || pedido?.table_id || 'nueva mesa';
+
     _mostrarToast(`🛎️ Nuevo pedido — ${mesa}`, 'new');
 
     const banner    = document.getElementById('new-order-banner');
@@ -509,6 +491,40 @@ function _mostrarToast(mensaje, tipo = 'info') {
     setTimeout(() => { toast.classList.add('out'); setTimeout(() => toast.remove(), 350); }, 4000);
 }
 
+// ============================================================
+// _extraerMesaDesdeNotes — helper central [FIX-MESA v3.3]
+//
+// Lee el número/label de mesa directamente del campo `notes`
+// de la orden. Este valor lo escribe menu.js v7.1 con el texto
+// exacto que ingresó el mesero — es la fuente de verdad.
+//
+// Formatos soportados:
+//   "[MESA] Mesa: 5"          → "Mesa 5"
+//   "[MESA] Mesa: Barra"      → "Mesa Barra"
+//   "[PARA LLEVAR] ..."       → null  (se maneja por separado)
+//   "[DOMICILIO] ..."         → null  (se maneja por separado)
+//   "Mesa: 3" (legacy sin []) → "Mesa 3"
+// ============================================================
+function _extraerMesaDesdeNotes(notes) {
+    if (!notes) return null;
+
+    // Formato v7.1: "[MESA] Mesa: N" — prioridad máxima
+    const matchMesaNuevo = notes.match(/\[MESA\]\s*Mesa:\s*(.+?)(?:\s*\||\s*$)/i);
+    if (matchMesaNuevo) {
+        const val = matchMesaNuevo[1].trim();
+        // Si ya tiene "Mesa" en el valor, devolverlo tal cual; si no, agregar prefijo
+        return val.toLowerCase().startsWith('mesa') ? val : `Mesa ${val}`;
+    }
+
+    // Formato legacy: "Mesa: N" sin prefijo [MESA]
+    const matchMesaLegacy = notes.match(/Mesa:\s*(\S+)/i);
+    if (matchMesaLegacy) {
+        return `Mesa ${matchMesaLegacy[1].trim()}`;
+    }
+
+    return null;
+}
+
 function _renderizarPedidos(nuevoId = null) {
     const grid = document.getElementById('contenedor-pedidos');
     if (!grid) return;
@@ -544,19 +560,40 @@ function _renderizarPedidos(nuevoId = null) {
     _actualizarTimers();
 }
 
-// ── _crearCardHTML v3.2 ────────────────────────────────────
-// [FIX-4] Muestra la modalidad de entrega (notes de la orden)
-//         arriba del listado de platos para que cocina sepa
-//         si es para llevar, domicilio o en mesa.
+// ── _crearCardHTML v3.3 ────────────────────────────────────
 //
-// Resolución del nombre del plato — 4 capas:
-//   1. item.menu_items?.name       → join exitoso (ideal, requiere RLS OK)
-//   2. _parsearNotes(notes).nombrePlato → prefijo [nombre] en notes
-//   3. notes plano (sin prefijo)   → último recurso legible
-//   4. '(Plato sin nombre)'        → placeholder
+// [FIX-MESA v3.3] PRIORIDAD DE RESOLUCIÓN DEL NÚMERO DE MESA:
+//
+//   1. notes de la orden (campo "[MESA] Mesa: N") ← FUENTE DE VERDAD
+//      → Escrito por menu.js con el número REAL ingresado por el mesero.
+//      → NUNCA se ve afectado por qué table_id se resolvió en BD.
+//
+//   2. tables.label del JOIN (fallback legacy)
+//      → Solo para órdenes antiguas creadas antes de v7.1.
+//      → Puede ser incorrecto si el table_id fue resuelto a Mesa 1.
+//
+//   3. tables.number del JOIN (último recurso)
+//
+// Para modalidades Para Llevar y Domicilio se parsea desde notes
+// de la misma forma que en v3.2.
+//
+// Resolución del nombre del plato (sin cambios desde v3.2):
+//   1. [nombre] en notes del ítem → fuente de verdad
+//   2. notes plano sin prefijo    → legacy
+//   3. menu_items.name del JOIN   → respaldo
+//   4. placeholder
 function _crearCardHTML(order, esNuevo = false) {
-    const identificadorMesa = order.tables?.label
-        || (order.tables?.number ? `Mesa ${order.tables.number}` : 'Mesa Rápida');
+    const notasOrden = order.notes || '';
+
+    // [FIX-MESA v3.3] Leer número de mesa desde notes (prioridad máxima)
+    const mesaDesdeNotes = _extraerMesaDesdeNotes(notasOrden);
+
+    // Fallback legacy: leer desde el JOIN a tables
+    const mesaDesdeJoin = order.tables?.label
+        || (order.tables?.number ? `Mesa ${order.tables.number}` : null);
+
+    // identificadorMesa: notes primero, JOIN como último recurso
+    const identificadorMesa = mesaDesdeNotes || mesaDesdeJoin || 'Mesa Rápida';
 
     const estadoMap = {
         pending:    { label:'Pendiente',      cls:'pending'    },
@@ -565,29 +602,25 @@ function _crearCardHTML(order, esNuevo = false) {
     };
     const cfg = estadoMap[order.status] || { label: order.status, cls:'pending' };
 
-    // [FIX-4] Parsear modalidad de entrega desde notes de la orden
-    const notasOrden  = order.notes || '';
+    // Parsear modalidad de entrega desde notes
     let   modalidad   = '';
     let   modalidadCls = '';
     if (notasOrden.includes('[PARA LLEVAR]')) {
         modalidad    = '🛍️ Para Llevar / Retiro';
         modalidadCls = 'modalidad-llevar';
     } else if (notasOrden.includes('[DOMICILIO]')) {
-        // Extraer dirección si existe
         const matchDir = notasOrden.match(/Dirección:\s*(.+)$/);
         const dir = matchDir ? matchDir[1].trim() : '';
         modalidad    = `🛵 Domicilio${dir ? ` — ${dir}` : ''}`;
         modalidadCls = 'modalidad-domicilio';
     } else if (notasOrden.includes('[MESA]')) {
+        // [FIX-MESA v3.3] Usar identificadorMesa que ya viene de notes
         modalidad    = `🍽️ En mesa — ${identificadorMesa}`;
         modalidadCls = 'modalidad-mesa';
     }
 
     const items = order.order_items || [];
 
-    // Capa 3 de seguridad: si la orden acaba de crearse y los ítems
-    // aún no llegaron (timing), mostramos un mensaje de espera activa
-    // en vez del frustrante "Sin detalle registrado".
     let itemsHTML;
     if (items.length === 0) {
         itemsHTML = `
@@ -600,28 +633,16 @@ function _crearCardHTML(order, esNuevo = false) {
         itemsHTML = items.map(item => {
             const parsed = _parsearNotes(item.notes);
 
-            // PROBLEMA 2 FIX — prioridad de resolución del nombre:
-            //   ANTES: item.menu_items?.name (JOIN) tenía prioridad máxima.
-            //          Si menu_item_id apuntaba al producto equivocado (bug del
-            //          fallback fuzzy en menu.js), el JOIN devolvía ese nombre
-            //          incorrecto (ej: "Albondigas") ignorando el notes correcto.
-            //
-            //   AHORA: notes[nombre] tiene prioridad máxima.
-            //          El mesero escribe [nombre]<plato real> en el momento del
-            //          pedido. Es la fuente de verdad. El JOIN solo se usa como
-            //          respaldo para órdenes antiguas sin prefijo [nombre].
-            //
-            // Capa 1: prefijo [nombre] en notes  → fuente de verdad del pedido
-            // Capa 2: notes plano sin prefijo     → órdenes antiguas
-            // Capa 3: item.menu_items?.name (JOIN) → respaldo para casos legacy
-            // Capa 4: placeholder
-
+            // Prioridad del nombre del plato (sin cambios desde v3.2):
+            // 1. prefijo [nombre] en notes → fuente de verdad del pedido
+            // 2. notes plano sin prefijo   → órdenes antiguas
+            // 3. menu_items.name (JOIN)    → respaldo legacy
+            // 4. placeholder
             const nombrePlato = parsed.nombrePlato
                 || (item.notes && !item.notes.startsWith('[nombre]') ? item.notes : null)
                 || item.menu_items?.name
                 || '(Plato sin nombre)';
 
-            // Nota del cliente: texto libre después de " | " en notes
             const notaCliente = parsed.notaCliente;
 
             return `
@@ -834,7 +855,8 @@ async function ejecutarSimulador() {
             .from('orders')
             .insert([{ restaurant_id:restaurantId, table_id:mesa.id,
                        order_number:orderNo, status:'pending',
-                       customer_name:'Cliente Demo — La 26', total_amount:total }])
+                       customer_name:'Cliente Demo — La 26', total_amount:total,
+                       notes: '[MESA] Mesa: Demo' }])
             .select('id').single();
 
         if (errOrden || !nuevaOrden) throw new Error(errOrden?.message || 'Error creando orden');
@@ -850,7 +872,6 @@ async function ejecutarSimulador() {
         if (errItems) console.error('[La 26] Error en order_items del simulador:', errItems);
         else console.log(`[La 26] ✅ Pedido simulado ${orderNo} con ${orderItems.length} plato(s).`);
 
-        // Esperar 1.8s para que order_items esté en BD antes de renderizar
         setTimeout(() => La26.cargarPedidos(), 1800);
 
     } catch(err) {
@@ -877,6 +898,7 @@ document.addEventListener('DOMContentLoaded', () => {
         _mostrarLogin();
     }
 });
+
 // ═══ GUARD: Verificar si el sistema está habilitado ═══
 async function verificarAccesoPedidos() {
     try {
@@ -889,26 +911,12 @@ async function verificarAccesoPedidos() {
         const habilitado = data ? data.value === 'true' : true;
 
         if (!habilitado) {
-            // Ocultar toda la UI de pedidos y mostrar aviso
             document.getElementById('app-pedidos').style.display = 'none';
             document.getElementById('panel-fuera-servicio').style.display = 'flex';
             return false;
         }
         return true;
     } catch {
-        return true; // En caso de error de red, permitir acceso
+        return true;
     }
 }
-
-// Llamar al inicio del DOMContentLoaded de app.js:
-// document.addEventListener('DOMContentLoaded', async () => {
-//     const ok = await verificarAccesoPedidos();
-//     if (!ok) return;
-//     // ... resto de la inicialización
-// });
-
-// HTML que debes tener en app.html / mesero.html:
-// <div id="panel-fuera-servicio" style="display:none;...">
-//   <p>🔒 Sistema Fuera de Servicio</p>
-//   <p>El administrador ha cerrado el sistema temporalmente.</p>
-// </div>
