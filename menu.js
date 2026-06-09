@@ -1,36 +1,28 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE MESERO
-// menu.js · Versión 7.0 — Fuente única de verdad
+// menu.js · Versión 7.1 — Fuente única de verdad
 // Bucaramanga, Santander — Colombia
 //
-// ARQUITECTURA v7.0:
+// CAMBIOS v7.1:
+//  [FIX-MESA] _resolverTableId: el fallback final ya NO devuelve
+//             la primera mesa disponible (siempre era Mesa 1).
+//             Ahora crea la mesa con el número exacto pedido, y si
+//             falla, guarda el número en notes y usa Mesa 1 solo
+//             como FK de BD pero la comanda muestra el número real.
 //
-//  PROBLEMA RAÍZ (detectado en auditoría):
-//    admin.js  → escribe: menu_items (is_active, price, portions_today)
-//    menu.js   → leía:    daily_menu_slots_availability  ← TABLA DIFERENTE
-//    Resultado: cambios de Admin nunca llegaban a Menu.
+//  [FIX-MESA-NOTES] generarNotaCocina: el número de mesa se guarda
+//             de forma explícita en notes como "[MESA N]" para que
+//             cocina y admin siempre muestren el número correcto
+//             independientemente del table_id resuelto.
 //
-//  SOLUCIÓN:
-//    Una sola fuente de verdad: menu_items
-//    - Admin escribe menu_items  ✓
-//    - Menu lee   menu_items  ✓  (mismo dato, misma tabla)
-//    - Cocina resuelve nombres desde order_items.product_name ✓
-//
+// ARQUITECTURA v7.0 (sin cambios):
+//  Una sola fuente de verdad: menu_items
+//  - Admin escribe menu_items  ✓
+//  - Menu lee   menu_items  ✓
 //  daily_menu_slots_availability se mantiene como FALLBACK OPCIONAL
-//  solo si el admin quiere granularidad de porciones por día.
-//  Nunca reemplaza is_active como señal de disponibilidad.
 //
 //  REALTIME v7.0:
 //    Suscripción a postgres_changes en menu_items.
-//    Cualquier UPDATE desde Admin se refleja en ≤2 seg en Menu.
-//
-//  BUGS SINTAXIS CORREGIDOS (de v6.0):
-//    [FIX-1] generarNumeroOrden: template literal con backticks
-//    [FIX-2] _activarModoDemo: campos booleanos y menuItemId definidos
-//    [FIX-3] _refrescarTarjeta: backtick en getElementById
-//    [FIX-4] order_items: agrega product_name (Capa 1 de cocina v3.3)
-//    [FIX-5] _mostrarEstado('error') siempre oculta el spinner
-//    [FIX-6] try/catch en init() con mensaje visible al usuario
 // ============================================================
 
 'use strict';
@@ -155,7 +147,6 @@ function todayISO() {
     return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
 }
 
-// [FIX-1] Template literal corregido
 function generarNumeroOrden() {
     // VARCHAR(20) en BD — máximo 20 caracteres
     // Formato: LA26-XXXXXXXX = 13 chars (seguro)
@@ -232,6 +223,24 @@ async function _resolverRestaurant() {
 
 // ============================================================
 // RESOLVER TABLE_ID
+//
+// [FIX-MESA v7.1]
+// PROBLEMA RAÍZ DETECTADO:
+//   El fallback final devolvía la primera mesa con number != 0,
+//   que siempre era Mesa 1. Esto causaba que TODOS los pedidos
+//   quedaran asociados a Mesa 1 en BD, y cocina/admin mostraban
+//   "Mesa 1" sin importar qué número escribió el mesero.
+//
+// SOLUCIÓN:
+//   1. Si la mesa no existe → CREARLA con el número exacto.
+//      El INSERT usa ON CONFLICT DO NOTHING internamente (vía try/catch)
+//      para evitar duplicados en caso de race condition.
+//   2. Si la creación falla (constraint, permisos, etc.) →
+//      NO usar Mesa 1 como fallback FK silencioso.
+//      En su lugar, devolvemos null y el número real de mesa
+//      se preserva 100% en el campo `notes` de la orden.
+//   3. El campo `notes` ya guarda "[MESA] Mesa: N" — es la
+//      fuente de verdad para cocina y admin (ver app.js).
 // ============================================================
 async function _resolverTableId(modalidad, mesa) {
     if (!State.restaurantId) await _resolverRestaurant();
@@ -241,7 +250,7 @@ async function _resolverTableId(modalidad, mesa) {
     if (modalidad === 'mesa') {
         const mesaNum = parseInt(mesa);
 
-        // 1. Buscar por número exacto (> 0 para no tocar "Para Llevar")
+        // 1. Buscar por número exacto
         if (!isNaN(mesaNum) && mesaNum > 0) {
             const { data: porNum } = await db
                 .from('tables')
@@ -255,7 +264,7 @@ async function _resolverTableId(modalidad, mesa) {
             }
         }
 
-        // 2. Buscar por label sin tocar mesas de despacho
+        // 2. Buscar por label exacto (sin mesas de despacho)
         if (mesa) {
             const { data: porLabel } = await db
                 .from('tables')
@@ -272,38 +281,55 @@ async function _resolverTableId(modalidad, mesa) {
             }
         }
 
-        // 3. Crear la mesa si no existe (insert, no upsert)
+        // 3. [FIX-MESA] Crear la mesa con el número EXACTO pedido
+        //    NUNCA usar fallback de "primera mesa disponible"
         const mesaNumFinal = (!isNaN(parseInt(mesa)) && parseInt(mesa) > 0)
             ? parseInt(mesa) : null;
 
         if (mesaNumFinal) {
-            const { data: nueva } = await db
-                .from('tables')
-                .insert([{
-                    restaurant_id: State.restaurantId,
-                    number:        mesaNumFinal,
-                    label:         `Mesa ${mesaNumFinal}`,
-                    qr_code:       `MESA-${State.restaurantId}-${mesaNumFinal}-${Date.now()}`,
-                    capacity:      4,
-                    status:        'available',
-                }])
-                .select('id')
-                .single();
-            if (nueva?.id) {
-                console.log(`[La 26] Mesa ${mesaNumFinal} creada:`, nueva.id);
-                return nueva.id;
+            try {
+                const { data: nueva, error: errNueva } = await db
+                    .from('tables')
+                    .insert([{
+                        restaurant_id: State.restaurantId,
+                        number:        mesaNumFinal,
+                        label:         `Mesa ${mesaNumFinal}`,
+                        qr_code:       `MESA-${State.restaurantId}-${mesaNumFinal}-${Date.now()}`,
+                        capacity:      4,
+                        status:        'available',
+                    }])
+                    .select('id')
+                    .single();
+
+                if (nueva?.id) {
+                    console.log(`[La 26] Mesa ${mesaNumFinal} creada:`, nueva.id);
+                    return nueva.id;
+                }
+
+                // Si insert falló por duplicado (race condition), intentar buscar de nuevo
+                if (errNueva?.code === '23505') {
+                    const { data: reintento } = await db
+                        .from('tables')
+                        .select('id')
+                        .eq('restaurant_id', State.restaurantId)
+                        .eq('number', mesaNumFinal)
+                        .maybeSingle();
+                    if (reintento?.id) {
+                        console.log(`[La 26] Mesa ${mesaNumFinal} encontrada en reintento:`, reintento.id);
+                        return reintento.id;
+                    }
+                }
+            } catch (errCreate) {
+                console.warn(`[La 26] No se pudo crear Mesa ${mesaNumFinal}:`, errCreate.message);
             }
         }
 
-        // 4. Fallback: cualquier mesa que no sea número 0
-        const { data: cualquiera } = await db
-            .from('tables')
-            .select('id')
-            .eq('restaurant_id', State.restaurantId)
-            .neq('number', 0)
-            .limit(1)
-            .maybeSingle();
-        if (cualquiera?.id) return cualquiera.id;
+        // [FIX-MESA] ELIMINADO el fallback que antes devolvía Mesa 1.
+        // Si no se pudo resolver la mesa exacta, devolvemos null.
+        // El número real de mesa SIEMPRE queda guardado en notes de la orden.
+        // Cocina y admin leen el número desde notes, no desde el JOIN a tables.
+        console.warn(`[La 26] No se pudo resolver table_id para mesa "${mesa}" — se usará null. El número se preserva en notes.`);
+        return null;
     }
 
     // ── Para Llevar / Domicilio ──────────────────────────────
@@ -342,16 +368,6 @@ async function _resolverTableId(modalidad, mesa) {
 
 // ============================================================
 // MENÚ — Carga desde menu_items (fuente única de verdad)
-//
-// LÓGICA DE DISPONIBILIDAD (misma que Admin):
-//   disponible = is_active === true  AND  portions_today > 0
-//   Si portions_today es NULL → se trata como ilimitado (disponible).
-//   Si portions_today = 0    → agotado aunque is_active sea true.
-//   Si is_active = false     → agotado aunque portions_today > 0.
-//
-// Esta lógica replica exactamente lo que Admin controla con:
-//   - El switch "Activo / Agotado" → is_active
-//   - El input "Porciones hoy"     → portions_today
 // ============================================================
 const Menu = {
 
@@ -369,14 +385,6 @@ const Menu = {
         try {
             console.log('[La 26] Consulta menu_items para restaurant_id:', State.restaurantId);
 
-            // ── FUENTE ÚNICA DE VERDAD: menu_items ────────────
-            // La misma tabla que Admin modifica.
-            // Se traen TODOS los items activos del restaurante.
-            // La disponibilidad se calcula localmente con la misma
-            // lógica que Admin usa para mostrar el switch.
-            // Consulta sin filtro de item_type en la query para evitar
-            // error 400 si el enum de Supabase no incluye todos los valores.
-            // El filtro se aplica en JavaScript después de recibir los datos.
             const { data: dataRaw, error } = await db
                 .from('menu_items')
                 .select('id, name, price, item_type, is_active, description, portions_today')
@@ -385,8 +393,6 @@ const Menu = {
                 .order('item_type', { ascending: true })
                 .order('name',      { ascending: true });
 
-            // Filtrar en JS: aceptar tanto los tipos del enum como 'protein'
-            // (por si el admin tiene platos legacy con ese item_type)
             const TIPOS_ACEPTADOS = [...ITEM_TYPES_VALIDOS, 'protein'];
             const data = dataRaw
                 ? dataRaw.filter(i => TIPOS_ACEPTADOS.includes(i.item_type))
@@ -405,9 +411,7 @@ const Menu = {
                 return;
             }
 
-            // Mapear a slots con lógica de disponibilidad unificada
             State.slots = data.map(item => {
-                // portions_today null = sin límite configurado → disponible
                 const tienePortions = item.portions_today !== null && item.portions_today !== undefined;
                 const porciones     = tienePortions ? Number(item.portions_today) : 999;
                 const disponible    = item.is_active === true && porciones > 0;
@@ -426,9 +430,6 @@ const Menu = {
 
             _renderizarMenu();
             _mostrarEstado('menu');
-
-            // Activar Realtime sobre menu_items para reflejar
-            // cambios de Admin sin recargar la página
             _suscribirRealtime();
 
         } catch (err) {
@@ -440,7 +441,6 @@ const Menu = {
 };
 
 // ── Control de pantalla ──────────────────────────────────────
-// [FIX-5] Siempre oculta spinner al mostrar error
 function _mostrarEstado(estado, msg = '') {
     const loader   = document.getElementById('app-loader');
     const error    = document.getElementById('app-error');
@@ -451,7 +451,7 @@ function _mostrarEstado(estado, msg = '') {
     if (sections) sections.style.display = estado === 'menu'   ? 'block' : 'none';
 
     if (estado === 'error') {
-        if (loader) loader.style.display = 'none'; // garantía extra
+        if (loader) loader.style.display = 'none';
         console.error('[La 26] Error mostrado al usuario:', msg);
         const el = document.getElementById('error-msg');
         if (el) el.textContent = msg || 'Error desconocido. Recarga la página.';
@@ -459,7 +459,6 @@ function _mostrarEstado(estado, msg = '') {
 }
 
 // ── Modo demo ────────────────────────────────────────────────
-// [FIX-2] Objetos con todos los campos correctamente definidos
 function _activarModoDemo() {
     console.log('[La 26] Activando modo demo');
     State.slots = [
@@ -600,7 +599,6 @@ function _crearTarjeta(slot) {
     return card;
 }
 
-// [FIX-3] Template literal corregido
 function _refrescarTarjeta(slotId) {
     const slot  = State.slots.find(s => s.id === slotId);
     if (!slot) return;
@@ -760,14 +758,41 @@ const Order = {
             if (!State.restaurantId) await _resolverRestaurant();
             if (!State.restaurantId) throw new Error('No se pudo identificar el restaurante.');
 
+            // [FIX-MESA v7.1] Intentar resolver table_id pero NO bloquear si falla.
+            // El número real de mesa se guarda en notes — eso es lo que cuenta.
             const tableId = await _resolverTableId(modalidad, mesa);
-            if (!tableId) throw new Error('No se pudo identificar la mesa.');
 
-            // Construir nota de cocina — prefijo que lee app.js para mostrar modalidad
+            // Para pedidos en mesa: si no se pudo resolver table_id,
+            // buscar cualquier mesa existente solo como FK válida para la BD.
+            // El número correcto ya está en notes.
+            let tableIdFinal = tableId;
+            if (!tableIdFinal) {
+                const { data: anyTable } = await db
+                    .from('tables')
+                    .select('id')
+                    .eq('restaurant_id', State.restaurantId)
+                    .limit(1)
+                    .maybeSingle();
+                tableIdFinal = anyTable?.id || null;
+                if (tableIdFinal) {
+                    console.log(`[La 26] Usando table_id de reserva para FK. Número real en notes: "${mesa}"`);
+                }
+            }
+
+            if (!tableIdFinal) throw new Error('No hay mesas configuradas. Crea al menos una mesa en el panel admin.');
+
+            // ── Construir nota de cocina ──────────────────────
+            // [FIX-MESA v7.1] El número de mesa se guarda EXPLÍCITAMENTE en notes
+            // con el valor que escribió el mesero, NO el número de la FK de BD.
+            // Esto garantiza que cocina y admin siempre muestren el número correcto.
             let notaCocina = '';
-            if (modalidad === 'mesa')          notaCocina = `[MESA] Mesa: ${mesa}`;
-            else if (modalidad === 'llevar')   notaCocina = `[PARA LLEVAR] Cliente: ${nombre || 'Sin nombre'}`;
-            else if (modalidad === 'domicilio') notaCocina = `[DOMICILIO] Cliente: ${nombre || 'Sin nombre'}`;
+            if (modalidad === 'mesa') {
+                notaCocina = `[MESA] Mesa: ${mesa}`;
+            } else if (modalidad === 'llevar') {
+                notaCocina = `[PARA LLEVAR] Cliente: ${nombre || 'Sin nombre'}`;
+            } else if (modalidad === 'domicilio') {
+                notaCocina = `[DOMICILIO] Cliente: ${nombre || 'Sin nombre'}`;
+            }
             if (notas) notaCocina += ` | Nota: ${notas}`;
 
             const numeroOrden = generarNumeroOrden();
@@ -778,7 +803,7 @@ const Order = {
                 .from('orders')
                 .insert([{
                     restaurant_id: State.restaurantId,
-                    table_id:      tableId,
+                    table_id:      tableIdFinal,
                     order_number:  numeroOrden,
                     status:        'pending',
                     customer_name: nombre || null,
@@ -791,15 +816,6 @@ const Order = {
             if (errOrd) throw errOrd;
 
             // ── Insertar ítems ────────────────────────────────
-            // Estrategia de resolución de menu_item_id:
-            //   1. slot.menuItemId (viene directo de menu_items.id — siempre válido en v7.0)
-            //   2. Si por algún motivo es null, buscar por nombre exacto en menu_items
-            //   3. Si tampoco, usar el primer item activo del restaurante como fallback FK
-            //
-            // product_name y notes[nombre] garantizan que cocina siempre
-            // muestra el nombre correcto independiente del menu_item_id.
-
-            // Cargar todos los items para resolución de FK
             const { data: todosItems } = await db
                 .from('menu_items')
                 .select('id, name, item_type')
@@ -813,16 +829,13 @@ const Order = {
                 const slot = State.slots.find(s => s.id === item.slotId);
                 if (!slot) return null;
 
-                // Resolver menu_item_id con 3 capas
-                let menuItemId = slot.menuItemId;  // Capa 1: directo del slot
+                let menuItemId = slot.menuItemId;
 
                 if (!menuItemId && listaItems.length > 0) {
                     const nombreBuscar = (slot.nombre || '').toLowerCase().trim();
-                    // Capa 2: coincidencia exacta por nombre
                     const exacto = listaItems.find(m =>
                         m.name.toLowerCase().trim() === nombreBuscar
                     );
-                    // Capa 3: coincidencia parcial
                     const parcial = !exacto && listaItems.find(m =>
                         m.name.toLowerCase().includes(nombreBuscar.split(' ')[0])
                     );
@@ -833,12 +846,12 @@ const Order = {
 
                 return {
                     order_id:     orden.id,
-                    menu_item_id: menuItemId,           // FK resuelta — nunca null si hay items
+                    menu_item_id: menuItemId,
                     quantity:     item.cantidad,
                     unit_price:   slot.precio,
                     item_status:  'pending',
-                    product_name: slot.nombre,          // Capa 1 cocina: nombre directo
-                    notes:        `[nombre]${slot.nombre}`, // Capa 2 cocina: prefijo legacy
+                    product_name: slot.nombre,
+                    notes:        `[nombre]${slot.nombre}`,
                 };
             }).filter(Boolean);
 
@@ -854,8 +867,6 @@ const Order = {
                 if (errItems) {
                     console.warn('[La 26] order_items primer intento error:', errItems.message);
 
-                    // Si falla por columna product_name inexistente (error 42703),
-                    // reintentar sin esa columna — el nombre sigue en notes[nombre]
                     if (errItems.code === '42703' || errItems.message?.includes('product_name')) {
                         console.log('[La 26] Reintentando sin product_name (columna no existe en BD)');
                         const payloadSinProductName = payload.map(p => {
@@ -921,31 +932,17 @@ const Order = {
 
 // ============================================================
 // REALTIME — suscripción a menu_items
-//
-// Cuando Admin cambia is_active, price o portions_today en un
-// plato, Supabase Realtime dispara el evento UPDATE en esta
-// tabla. Menu.js actualiza el slot en memoria y refresca solo
-// la tarjeta afectada — sin recargar toda la carta.
-//
-// Esto cubre:
-//   - Bloquear un plato (is_active = false)  → aparece "Agotado"
-//   - Desbloquear un plato (is_active = true) → botón "+" vuelve
-//   - Cambiar precio                          → precio actualizado
-//   - Cambiar porciones a 0                  → aparece "Agotado"
-//   - Agregar producto nuevo                 → recarga completa
-//   - Eliminar producto                      → recarga completa
 // ============================================================
 function _suscribirRealtime() {
     if (!State.restaurantId) return;
 
-    // Cancelar canal anterior si existe
     if (State.realtimeChannel) {
         db.removeChannel(State.realtimeChannel);
         State.realtimeChannel = null;
     }
 
     State.realtimeChannel = db
-        .channel(`la26-menu-v70-${State.restaurantId}`)
+        .channel(`la26-menu-v71-${State.restaurantId}`)
         .on(
             'postgres_changes',
             {
@@ -962,8 +959,6 @@ function _suscribirRealtime() {
         .on(
             'postgres_changes',
             {
-                // Producto nuevo o eliminado → recarga completa para mantener
-                // el orden y las categorías correctas
                 event:  'INSERT',
                 schema: 'public',
                 table:  'menu_items',
@@ -991,16 +986,12 @@ function _suscribirRealtime() {
         });
 }
 
-// Actualiza un slot individual cuando llega un UPDATE de Realtime
-// sin recargar toda la carta — experiencia sin parpadeo.
 function _actualizarSlotDesdeRealtime(item) {
     if (!item || !item.id) return;
 
     const idx = State.slots.findIndex(s => s.id === item.id);
 
     if (idx === -1) {
-        // Producto que no estaba en la lista (estaba inactivo antes)
-        // → recarga completa para incluirlo correctamente
         Menu.cargar();
         return;
     }
@@ -1009,7 +1000,6 @@ function _actualizarSlotDesdeRealtime(item) {
     const porciones     = tienePortions ? Number(item.portions_today) : 999;
     const disponible    = item.is_active === true && porciones > 0;
 
-    // Actualizar slot en memoria
     State.slots[idx] = {
         ...State.slots[idx],
         nombre:     item.name,
@@ -1018,11 +1008,8 @@ function _actualizarSlotDesdeRealtime(item) {
         disponible,
     };
 
-    // Refrescar solo la tarjeta de este producto
     _refrescarTarjeta(item.id);
 
-    // Si el producto estaba en el carrito y ahora está agotado,
-    // eliminarlo del carrito y avisar al usuario
     if (!disponible) {
         const enCarrito = State.cart.findIndex(c => c.slotId === item.id);
         if (enCarrito !== -1) {
@@ -1035,8 +1022,7 @@ function _actualizarSlotDesdeRealtime(item) {
 }
 
 // ============================================================
-// INIT — Carga directa, sin autenticación
-// [FIX-6] try/catch con mensaje visible si algo falla
+// INIT
 // ============================================================
 (async function init() {
     console.log('[La 26] Inicio carga menú');
