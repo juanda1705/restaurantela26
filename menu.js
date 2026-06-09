@@ -56,7 +56,7 @@ const CATEGORIAS = {
     dessert:        { label: 'Postre',             icono: '🍮', orden: 6 },
 };
 
-const ITEM_TYPES_VALIDOS = ['protein','side','drink','a_la_carte','executive_lunch','dessert'];
+const ITEM_TYPES_VALIDOS = ['executive_lunch','a_la_carte','drink','dessert','side'];
 
 // ============================================================
 // ESTADO GLOBAL
@@ -306,13 +306,23 @@ const Menu = {
             // Se traen TODOS los items activos del restaurante.
             // La disponibilidad se calcula localmente con la misma
             // lógica que Admin usa para mostrar el switch.
-            const { data, error } = await db
+            // Consulta sin filtro de item_type en la query para evitar
+            // error 400 si el enum de Supabase no incluye todos los valores.
+            // El filtro se aplica en JavaScript después de recibir los datos.
+            const { data: dataRaw, error } = await db
                 .from('menu_items')
                 .select('id, name, price, item_type, is_active, description, portions_today')
                 .eq('restaurant_id', State.restaurantId)
-                .in('item_type', ITEM_TYPES_VALIDOS)
+                .eq('is_active', true)
                 .order('item_type', { ascending: true })
                 .order('name',      { ascending: true });
+
+            // Filtrar en JS: aceptar tanto los tipos del enum como 'protein'
+            // (por si el admin tiene platos legacy con ese item_type)
+            const TIPOS_ACEPTADOS = [...ITEM_TYPES_VALIDOS, 'protein'];
+            const data = dataRaw
+                ? dataRaw.filter(i => TIPOS_ACEPTADOS.includes(i.item_type))
+                : dataRaw;
 
             if (error) {
                 console.error('[La 26] Error Supabase en menu_items:', error);
