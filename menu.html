@@ -88,6 +88,64 @@
         .scale-in { animation: scaleIn 0.32s cubic-bezier(0.16,1,0.3,1) both; }
 
         /* ═══════════════════════════════════════════
+           OVERLAY DE SESIÓN
+        ═══════════════════════════════════════════ */
+        #sesion-overlay {
+            position: fixed; inset: 0; z-index: 200;
+            background: rgba(18,18,12,0.72);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            display: none;
+            align-items: center; justify-content: center;
+            padding: 24px;
+        }
+        .sesion-card {
+            background: #fff; border-radius: 24px;
+            padding: 36px 28px 30px; max-width: 340px; width: 100%;
+            text-align: center;
+            border: 1px solid var(--border);
+            box-shadow: 0 24px 64px rgba(0,0,0,0.14);
+            animation: scaleIn 0.32s cubic-bezier(0.16,1,0.3,1) both;
+        }
+        .sesion-icon { font-size: 42px; margin-bottom: 14px; }
+        .sesion-card h2 {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.65rem; font-weight: 400; color: var(--ink);
+            margin-bottom: 6px; line-height: 1.2;
+        }
+        .sesion-card p {
+            font-size: 13px; color: var(--ink-muted);
+            margin-bottom: 22px; line-height: 1.55;
+        }
+        #sesion-input {
+            width: 100%; padding: 13px 16px; border-radius: 12px;
+            border: 1.5px solid var(--border); background: var(--crema-bg);
+            font-family: 'DM Sans', sans-serif; font-size: 15px; color: var(--ink);
+            outline: none; text-align: center;
+            transition: border-color 0.22s, box-shadow 0.22s;
+            margin-bottom: 12px;
+        }
+        #sesion-input:focus {
+            border-color: var(--oliva);
+            box-shadow: 0 0 0 3px rgba(74,90,40,0.10);
+            background: #fff;
+        }
+        #sesion-input::placeholder { color: var(--ink-ghost); }
+        #sesion-btn {
+            width: 100%; padding: 15px 24px; border-radius: 9999px;
+            background: var(--oliva); color: #fff;
+            font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500;
+            letter-spacing: 0.04em; border: none; cursor: pointer;
+            transition: background 0.2s, transform 0.15s;
+        }
+        #sesion-btn:hover   { background: var(--oliva-lt); }
+        #sesion-btn:active  { transform: scale(0.97); }
+        #sesion-error {
+            display: none; color: var(--red);
+            font-size: 12.5px; margin-top: 10px; margin-bottom: 0;
+        }
+
+        /* ═══════════════════════════════════════════
            HEADER COMPARTIDO
         ═══════════════════════════════════════════ */
         .app-header {
@@ -119,6 +177,31 @@
             font-size: 10px; color: var(--ink-ghost);
             letter-spacing: 0.10em; text-transform: uppercase;
             margin-top: 2px; font-weight: 400;
+        }
+
+        /* Banner de mesero */
+        .mesero-banner {
+            display: flex; align-items: center; gap: 6px;
+            flex-shrink: 0;
+        }
+        .mesero-chip {
+            display: flex; align-items: center; gap: 6px;
+            background: var(--oliva-pale); border: 1px solid var(--oliva-bd);
+            border-radius: 9999px; padding: 5px 12px 5px 8px;
+            cursor: pointer; transition: background 0.2s;
+        }
+        .mesero-chip:hover { background: var(--oliva-pale2); }
+        .mesero-chip:active { transform: scale(0.96); }
+        .mesero-avatar {
+            width: 22px; height: 22px; border-radius: 50%;
+            background: var(--oliva); color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 700; flex-shrink: 0;
+        }
+        #mesero-nombre-display {
+            font-size: 12.5px; font-weight: 500; color: var(--oliva);
+            max-width: 90px; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap;
         }
 
         /* ── PESTAÑAS PRINCIPALES (Carta / Historial) ── */
@@ -315,16 +398,14 @@
            SECCIÓN HISTORIAL
         ═══════════════════════════════════════════ */
 
-        /* Stats del día */
+        /* Stats del día — solo 3 chips */
         .stats-row {
             display: flex; gap: 0;
             border-bottom: 1px solid var(--border);
             background: var(--oliva-pale);
-            overflow-x: auto; scrollbar-width: none;
         }
-        .stats-row::-webkit-scrollbar { display: none; }
         .stat-chip {
-            flex: 1; min-width: 80px;
+            flex: 1;
             display: flex; flex-direction: column; align-items: center;
             padding: 10px 8px; gap: 1px;
             border-right: 1px solid var(--oliva-bd);
@@ -418,11 +499,12 @@
             font-size: 10.5px; font-weight: 600;
             letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap;
         }
-        .status-badge.pending   { background: rgba(180,83,9,0.09);  color: #92400e; border: 1px solid rgba(180,83,9,0.20); }
-        .status-badge.preparing { background: rgba(29,95,168,0.09); color: #1d4e89; border: 1px solid rgba(29,95,168,0.20); }
-        .status-badge.ready     { background: rgba(46,125,50,0.09); color: #1b5e20; border: 1px solid rgba(46,125,50,0.20); }
-        .status-badge.delivered { background: rgba(74,90,40,0.09);  color: var(--oliva); border: 1px solid var(--oliva-bd); }
-        .status-badge.cancelled { background: rgba(184,50,50,0.08); color: var(--red);   border: 1px solid rgba(184,50,50,0.18); }
+        .status-badge.pending    { background: rgba(180,83,9,0.09);  color: #92400e; border: 1px solid rgba(180,83,9,0.20); }
+        .status-badge.confirmed  { background: rgba(29,95,168,0.09); color: #1d4e89; border: 1px solid rgba(29,95,168,0.20); }
+        .status-badge.preparing  { background: rgba(29,95,168,0.09); color: #1d4e89; border: 1px solid rgba(29,95,168,0.20); }
+        .status-badge.ready      { background: rgba(46,125,50,0.09); color: #1b5e20; border: 1px solid rgba(46,125,50,0.20); }
+        .status-badge.delivered  { background: rgba(74,90,40,0.09);  color: var(--oliva); border: 1px solid var(--oliva-bd); }
+        .status-badge.cancelled  { background: rgba(184,50,50,0.08); color: var(--red);   border: 1px solid rgba(184,50,50,0.18); }
 
         .card-chevron {
             font-size: 11px; color: var(--ink-ghost);
@@ -490,6 +572,21 @@
             letter-spacing: 0.12em; text-transform: uppercase; margin-top: 8px;
         }
 
+        /* Botón editar pedido en tarjeta */
+        .btn-editar-pedido {
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+            width: 100%; margin-top: 12px; padding: 11px 16px;
+            border-radius: 10px;
+            border: 1.5px solid var(--oliva-bd);
+            background: var(--oliva-pale);
+            color: var(--oliva);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 13px; font-weight: 500;
+            cursor: pointer; transition: all 0.2s;
+        }
+        .btn-editar-pedido:hover  { background: var(--oliva-pale2); }
+        .btn-editar-pedido:active { transform: scale(0.97); }
+
         /* Botón actualizar historial */
         #btn-refresh-hist {
             position: fixed;
@@ -508,7 +605,138 @@
         #btn-refresh-hist.spinning svg { animation: spin 0.7s linear infinite; }
 
         /* ═══════════════════════════════════════════
-           MODALES
+           MODAL EDITAR PEDIDO
+        ═══════════════════════════════════════════ */
+        #edit-modal {
+            position: fixed; inset: 0; display: none; z-index: 80;
+        }
+        #edit-modal.open { display: block; }
+
+        /* Panel igual que order-modal pero más largo */
+        #edit-modal .modal-panel {
+            max-height: 96svh;
+        }
+
+        /* Cuerpo del editor */
+        #edit-modal-body {
+            flex: 1; overflow-y: auto; padding: 16px 20px 0;
+        }
+
+        .edit-pedido-titulo {
+            display: flex; align-items: center; gap: 10px;
+            margin-bottom: 4px; flex-wrap: wrap;
+        }
+        .edit-order-no {
+            font-family: 'Courier New', monospace;
+            font-size: 11px; font-weight: 700; color: var(--ink-ghost);
+            letter-spacing: 0.12em; text-transform: uppercase;
+        }
+        .edit-destino-label {
+            font-size: 13px; color: var(--ink-muted); margin-bottom: 18px; margin-top: 2px;
+        }
+
+        .edit-section { margin-bottom: 20px; }
+        .edit-section-title {
+            font-size: 10.5px; font-weight: 600; color: var(--ink-muted);
+            text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px;
+        }
+
+        /* Fila de ítem en el editor */
+        .edit-item-row {
+            display: flex; align-items: center;
+            justify-content: space-between; gap: 8px;
+            padding: 9px 0; border-bottom: 1px solid var(--border-lt);
+        }
+        .edit-item-row:first-child { padding-top: 0; }
+        .edit-item-row:last-child  { border-bottom: none; padding-bottom: 0; }
+
+        .edit-item-info { flex: 1; min-width: 0; }
+        .edit-item-nombre {
+            font-size: 13.5px; font-weight: 500; color: var(--ink);
+            display: block; line-height: 1.3;
+        }
+        .edit-item-precio { font-size: 11px; color: var(--ink-ghost); }
+
+        .edit-item-ctrl {
+            display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+        }
+        .edit-qty-btn {
+            width: 28px; height: 28px; border-radius: 50%; border: none;
+            background: var(--oliva-pale); color: var(--oliva);
+            font-size: 16px; font-weight: 400; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.15s; flex-shrink: 0; line-height: 1;
+        }
+        .edit-qty-btn:hover  { background: var(--oliva-pale2); }
+        .edit-qty-btn:active { transform: scale(0.90); }
+        .edit-qty-btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+        .edit-qty-num {
+            min-width: 24px; text-align: center;
+            font-size: 14px; font-weight: 600; color: var(--ink);
+        }
+        .edit-item-subtotal {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1rem; font-weight: 500; color: var(--oliva);
+            min-width: 48px; text-align: right;
+        }
+        .edit-item-del {
+            width: 26px; height: 26px; border-radius: 50%; border: none;
+            background: rgba(184,50,50,0.08); color: var(--red);
+            font-size: 12px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.15s; flex-shrink: 0;
+        }
+        .edit-item-del:hover  { background: rgba(184,50,50,0.16); }
+        .edit-item-del:active { transform: scale(0.88); }
+        .edit-item-lock {
+            font-size: 14px; opacity: 0.5;
+            display: flex; align-items: center; justify-content: center;
+            width: 26px; height: 26px;
+        }
+
+        /* Agregar ítem */
+        .edit-agregar-row { display: flex; flex-direction: column; gap: 8px; }
+        .edit-select { font-size: 13.5px; }
+        .edit-qty-row {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .btn-agregar-item {
+            flex: 1; padding: 9px 14px; border-radius: 9999px;
+            background: var(--oliva); color: #fff;
+            font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500;
+            border: none; cursor: pointer; transition: background 0.18s, transform 0.14s;
+        }
+        .btn-agregar-item:hover  { background: var(--oliva-lt); }
+        .btn-agregar-item:active { transform: scale(0.96); }
+
+        /* Preview total */
+        .edit-total-preview {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 0 16px; border-top: 1px solid var(--border);
+            margin-top: 4px;
+        }
+        .edit-total-label {
+            font-size: 11px; font-weight: 600; color: var(--ink-muted);
+            text-transform: uppercase; letter-spacing: 0.07em;
+        }
+        .edit-total-monto {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.3rem; font-weight: 500; color: var(--oliva);
+        }
+
+        .edit-empty-items {
+            font-size: 12.5px; color: var(--ink-ghost); padding: 8px 0;
+        }
+
+        /* Footer del modal editar */
+        #edit-modal-footer {
+            display: flex; flex-direction: column; gap: 8px;
+            padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px));
+            border-top: 1px solid var(--border-lt); flex-shrink: 0;
+        }
+
+        /* ═══════════════════════════════════════════
+           MODALES COMPARTIDOS
         ═══════════════════════════════════════════ */
         #order-modal { position: fixed; inset: 0; display: none; z-index: 80; }
         #order-modal.open { display: block; }
@@ -657,6 +885,21 @@
 <body>
 
 <!-- ══════════════════════════════════════════
+     OVERLAY DE SESIÓN DE MESERO
+══════════════════════════════════════════ -->
+<div id="sesion-overlay">
+    <div class="sesion-card">
+        <div class="sesion-icon">👤</div>
+        <h2>¿Quién atiende?</h2>
+        <p>Ingresa tu nombre para identificar tus pedidos en el sistema.</p>
+        <input id="sesion-input" type="text" placeholder="Tu nombre…" autocomplete="off" autocapitalize="words">
+        <button id="sesion-btn">Entrar al turno</button>
+        <p id="sesion-error"></p>
+    </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
      HEADER + TABS PRINCIPALES
 ══════════════════════════════════════════ -->
 <header class="app-header z-content">
@@ -666,6 +909,13 @@
             <div class="logo-wordmark">
                 <h1>Restaurante <em>la 26</em></h1>
                 <p id="header-subtitle">Carta del día</p>
+            </div>
+        </div>
+        <!-- Chip de mesero activo -->
+        <div class="mesero-banner">
+            <div class="mesero-chip" onclick="Sesion.cambiar()" title="Cambiar mesero">
+                <div class="mesero-avatar" id="mesero-avatar-init">—</div>
+                <span id="mesero-nombre-display">—</span>
             </div>
         </div>
     </div>
@@ -708,12 +958,11 @@
 ══════════════════════════════════════════ -->
 <div id="vista-historial" class="z-content">
 
-    <!-- Stats en vivo -->
+    <!-- Stats en vivo — 3 chips (sin venta) -->
     <div class="stats-row">
         <div class="stat-chip"><span class="stat-num" id="st-total">—</span><span class="stat-lbl">Pedidos</span></div>
         <div class="stat-chip"><span class="stat-num" id="st-pendientes">—</span><span class="stat-lbl">Pendientes</span></div>
         <div class="stat-chip"><span class="stat-num" id="st-entregados">—</span><span class="stat-lbl">Entregados</span></div>
-        <div class="stat-chip"><span class="stat-num" id="st-venta">—</span><span class="stat-lbl">Venta</span></div>
     </div>
 
     <!-- Filtros -->
@@ -801,6 +1050,30 @@
 
 
 <!-- ══════════════════════════════════════════
+     MODAL EDITAR PEDIDO
+══════════════════════════════════════════ -->
+<div id="edit-modal">
+    <div class="modal-overlay" onclick="EditarPedido.cerrar()"></div>
+    <div class="modal-panel">
+        <div class="modal-handle"><div class="modal-handle-bar"></div></div>
+        <div class="modal-header">
+            <h3>Editar Pedido</h3>
+            <p>Agrega, modifica o elimina ítems del pedido</p>
+        </div>
+        <div id="edit-modal-body" style="flex:1;overflow-y:auto;padding:16px 20px 0;">
+            <!-- Renderizado dinámicamente por EditarPedido._renderEditor() -->
+        </div>
+        <div id="edit-modal-footer" style="display:none;">
+            <button id="edit-btn-guardar" class="btn-confirmar" onclick="EditarPedido.guardar()">
+                Guardar cambios
+            </button>
+            <button class="btn-secundario" onclick="EditarPedido.cerrar()">Cancelar</button>
+        </div>
+    </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
      MODAL DE ÉXITO
 ══════════════════════════════════════════ -->
 <div id="success-modal">
@@ -864,7 +1137,7 @@ const Tabs = {
         this.actual = tab;
         const esCarta = tab === 'carta';
 
-        document.getElementById('vista-carta').style.display    = esCarta ? 'block' : 'none';
+        document.getElementById('vista-carta').style.display     = esCarta ? 'block' : 'none';
         document.getElementById('vista-historial').style.display = esCarta ? 'none'  : 'block';
         document.getElementById('cats-bar').style.display        = esCarta ? 'flex'  : 'none';
         document.getElementById('cart-bar').style.display        = esCarta ? 'flex'  : 'none';
@@ -877,7 +1150,6 @@ const Tabs = {
         if (sub) sub.textContent = esCarta ? 'Carta del día' : 'Historial del día';
 
         if (!esCarta) {
-            // Cargar historial la primera vez o al volver
             Hist.cargarSiNecesario();
         }
     }
@@ -902,6 +1174,32 @@ const UI = {
         document.getElementById('form-direccion')?.classList.remove('error');
     }
 };
+
+// ══════════════════════════════════════════
+// Actualizar inicial del banner de mesero
+// (por si sessionStorage ya tenía sesión)
+// ══════════════════════════════════════════
+(function() {
+    const nombre = sessionStorage.getItem('la26_mesero_nombre') || '';
+    const dispEl = document.getElementById('mesero-nombre-display');
+    const initEl = document.getElementById('mesero-avatar-init');
+    if (dispEl) dispEl.textContent = nombre || '—';
+    if (initEl) initEl.textContent = nombre ? nombre.charAt(0).toUpperCase() : '—';
+})();
+
+// Escuchar actualizaciones del banner desde menu.js
+const _actualizarBannerOriginal = window._actualizarBannerMesero;
+(function patchBanner() {
+    const orig = window._actualizarBannerMesero;
+    window._actualizarBannerMesero = function() {
+        if (orig) orig();
+        const nombre = sessionStorage.getItem('la26_mesero_nombre') || '';
+        const initEl = document.getElementById('mesero-avatar-init');
+        if (initEl) initEl.textContent = nombre ? nombre.charAt(0).toUpperCase() : '—';
+        const dispEl = document.getElementById('mesero-nombre-display');
+        if (dispEl) dispEl.textContent = nombre || '—';
+    };
+})();
 
 // ══════════════════════════════════════════
 // ANIMACIÓN CHECK ÉXITO
