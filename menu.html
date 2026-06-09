@@ -10,7 +10,6 @@
     <link rel="shortcut icon" href="logo.png">
     <link rel="apple-touch-icon" href="logo.png">
 
-    <!-- Supabase JS v2 -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -19,7 +18,7 @@
 
     <style>
         /* ═══════════════════════════════════════════
-           VARIABLES DE DISEÑO
+           VARIABLES
         ═══════════════════════════════════════════ */
         :root {
             --oliva:        #4a5a28;
@@ -27,7 +26,6 @@
             --oliva-pale:   #f0f3e8;
             --oliva-pale2:  #e6ecda;
             --oliva-bd:     #c2d09c;
-            --crema:        #ffffff;
             --crema-bg:     #fafaf8;
             --crema-dk:     #f2f2ee;
             --ink:          #18180f;
@@ -38,6 +36,7 @@
             --border-lt:    #f0f0ea;
             --red:          #b83232;
             --amber:        #b45309;
+            --blue:         #1d5fa8;
             --safe-bottom:  env(safe-area-inset-bottom, 0px);
         }
 
@@ -50,6 +49,7 @@
             color: var(--ink);
             min-height: 100svh;
             -webkit-font-smoothing: antialiased;
+            overflow-x: hidden;
         }
 
         body::before {
@@ -59,16 +59,15 @@
             background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.78' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
         }
 
-        .font-display { font-family: 'Cormorant Garamond', Georgia, serif; }
-
         /* ═══════════════════════════════════════════
            ANIMACIONES
         ═══════════════════════════════════════════ */
-        @keyframes spin    { to { transform: rotate(360deg); } }
-        @keyframes fadeUp  { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
-        @keyframes slideUp { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
-        @keyframes scaleIn { from { transform:scale(0.90); opacity:0; } to { transform:scale(1); opacity:1; } }
-        @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.25} }
+        @keyframes spin     { to { transform: rotate(360deg); } }
+        @keyframes fadeUp   { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes slideUp  { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
+        @keyframes scaleIn  { from { transform:scale(0.90); opacity:0; } to { transform:scale(1); opacity:1; } }
+        @keyframes pulse    { 0%,100%{opacity:1} 50%{opacity:0.25} }
+        @keyframes slideIn  { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
 
         .spinner {
             width: 40px; height: 40px;
@@ -77,18 +76,20 @@
             border-radius: 50%;
             animation: spin 0.85s linear infinite;
         }
-        .fade-up        { animation: fadeUp  0.50s cubic-bezier(.22,.68,0,1.2) both; }
-        .slide-up-modal { animation: slideUp 0.38s cubic-bezier(0.16, 1, 0.3, 1) both; }
-        .scale-in       { animation: scaleIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
+        .spinner-sm {
+            width: 28px; height: 28px;
+            border: 2px solid rgba(74,90,40,0.10);
+            border-top-color: var(--oliva);
+            border-radius: 50%;
+            animation: spin 0.85s linear infinite;
+        }
+        .fade-up  { animation: fadeUp  0.50s cubic-bezier(.22,.68,0,1.2) both; }
+        .slide-up { animation: slideUp 0.38s cubic-bezier(0.16,1,0.3,1) both; }
+        .scale-in { animation: scaleIn 0.32s cubic-bezier(0.16,1,0.3,1) both; }
 
         /* ═══════════════════════════════════════════
-           APP PRINCIPAL
+           HEADER COMPARTIDO
         ═══════════════════════════════════════════ */
-        #app-main {
-            padding-bottom: calc(7.5rem + var(--safe-bottom));
-        }
-
-        /* ── HEADER ── */
         .app-header {
             position: sticky; top: 0; z-index: 40;
             background: rgba(255,255,255,0.97);
@@ -98,10 +99,9 @@
         }
 
         .header-top {
-            display: flex;
-            align-items: center;
+            display: flex; align-items: center;
             justify-content: space-between;
-            padding: 10px 18px 8px;
+            padding: 10px 18px 8px; gap: 10px;
         }
 
         .logo-lockup { display: flex; align-items: center; gap: 10px; }
@@ -121,7 +121,36 @@
             margin-top: 2px; font-weight: 400;
         }
 
-        /* ── BARRA DE CATEGORÍAS ── */
+        /* ── PESTAÑAS PRINCIPALES (Carta / Historial) ── */
+        .main-tabs {
+            display: flex; gap: 0;
+            border-bottom: 1px solid var(--border);
+            background: #fff;
+        }
+        .main-tab {
+            flex: 1; padding: 10px 8px 9px;
+            border: none; background: transparent;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 13px; font-weight: 400;
+            color: var(--ink-ghost); cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.22s ease;
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+        }
+        .main-tab.active {
+            color: var(--oliva); font-weight: 600;
+            border-bottom-color: var(--oliva);
+        }
+        .main-tab .tab-badge {
+            background: var(--oliva); color: #fff;
+            font-size: 10px; font-weight: 700;
+            border-radius: 9999px; padding: 1px 6px;
+            min-width: 18px; text-align: center;
+            display: none;
+        }
+        .main-tab .tab-badge.visible { display: inline-block; }
+
+        /* ── BARRA DE CATEGORÍAS (solo carta) ── */
         .cats-bar {
             display: flex; gap: 7px;
             overflow-x: auto; scroll-snap-type: x mandatory;
@@ -145,7 +174,17 @@
             box-shadow: 0 2px 12px rgba(74,90,40,0.22);
         }
 
-        /* ── ENCABEZADO DE SECCIÓN ── */
+        /* ═══════════════════════════════════════════
+           SECCIÓN CARTA
+        ═══════════════════════════════════════════ */
+        #vista-carta {
+            padding-bottom: calc(7.5rem + var(--safe-bottom));
+        }
+        #vista-historial {
+            display: none;
+            padding-bottom: calc(3rem + var(--safe-bottom));
+        }
+
         .section-label {
             display: flex; align-items: center; gap: 10px;
             padding: 0 18px; margin: 26px 0 10px;
@@ -186,9 +225,7 @@
             color: var(--oliva); background: var(--oliva-pale);
             border: 1px solid var(--oliva-bd); padding: 2px 9px; border-radius: 9999px;
         }
-        .plate-card.agotado {
-            opacity: 0.50; pointer-events: none; background: var(--crema-dk);
-        }
+        .plate-card.agotado { opacity: 0.50; pointer-events: none; background: var(--crema-dk); }
         .plate-card.agotado .plate-name { text-decoration: line-through; color: var(--ink-muted); }
 
         .badge-agotado {
@@ -203,7 +240,6 @@
             animation: pulse 2s ease-in-out infinite;
         }
 
-        /* ── CONTROL DE CANTIDAD ── */
         .qty-chip {
             display: flex; align-items: center;
             background: var(--oliva-pale); border: 1.5px solid var(--oliva-bd);
@@ -230,7 +266,7 @@
         }
         .btn-add:active { transform: scale(0.90); background: var(--oliva-pale2); }
 
-        /* ── BARRA DE CARRITO ── */
+        /* ── BARRA CARRITO ── */
         #cart-bar {
             position: fixed;
             bottom: calc(20px + var(--safe-bottom)); left: 50%;
@@ -244,10 +280,7 @@
             transition: transform 0.40s cubic-bezier(0.16,1,0.3,1), opacity 0.40s ease;
             opacity: 0; pointer-events: none;
         }
-        #cart-bar.visible {
-            transform: translateX(-50%) translateY(0);
-            opacity: 1; pointer-events: auto;
-        }
+        #cart-bar.visible { transform: translateX(-50%) translateY(0); opacity: 1; pointer-events: auto; }
         .cart-bar-left { display: flex; align-items: center; gap: 10px; }
         .cart-count-bubble {
             width: 28px; height: 28px; border-radius: 50%;
@@ -261,24 +294,15 @@
             font-size: 1.2rem; font-weight: 500; color: rgba(255,255,255,0.92);
         }
 
-        /* ── ESTADO VACÍO ── */
+        /* ── ESTADO VACÍO / LOADER / ERROR ── */
         .empty-state { text-align: center; padding: 56px 28px; }
         .empty-state .icon { font-size: 36px; margin-bottom: 14px; }
         .empty-state p { font-size: 13.5px; color: var(--ink-muted); line-height: 1.6; }
 
-        /* ── LOADER / ERROR ── */
-        #app-loader {
-            display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-            gap: 16px; padding: 80px 0;
-        }
+        #app-loader { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 80px 0; }
         #app-loader p { font-size: 13px; color: var(--ink-ghost); }
 
-        #app-error {
-            display: none; flex-direction: column;
-            align-items: center; justify-content: center;
-            gap: 16px; padding: 80px 28px; text-align: center;
-        }
+        #app-error { display: none; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 80px 28px; text-align: center; }
         #app-error .err-icon { font-size: 36px; }
         #app-error p { font-size: 13.5px; color: var(--ink-muted); line-height: 1.6; max-width: 280px; }
         #app-error button {
@@ -288,7 +312,203 @@
         }
 
         /* ═══════════════════════════════════════════
-           MODAL DE PEDIDO
+           SECCIÓN HISTORIAL
+        ═══════════════════════════════════════════ */
+
+        /* Stats del día */
+        .stats-row {
+            display: flex; gap: 0;
+            border-bottom: 1px solid var(--border);
+            background: var(--oliva-pale);
+            overflow-x: auto; scrollbar-width: none;
+        }
+        .stats-row::-webkit-scrollbar { display: none; }
+        .stat-chip {
+            flex: 1; min-width: 80px;
+            display: flex; flex-direction: column; align-items: center;
+            padding: 10px 8px; gap: 1px;
+            border-right: 1px solid var(--oliva-bd);
+        }
+        .stat-chip:last-child { border-right: none; }
+        .stat-num {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.45rem; font-weight: 500; color: var(--oliva); line-height: 1;
+        }
+        .stat-lbl {
+            font-size: 9px; color: var(--ink-muted);
+            text-transform: uppercase; letter-spacing: 0.08em; text-align: center;
+        }
+
+        /* Filtros historial */
+        .hist-filter-bar {
+            display: flex; gap: 7px; padding: 12px 18px 14px;
+            overflow-x: auto; scrollbar-width: none;
+        }
+        .hist-filter-bar::-webkit-scrollbar { display: none; }
+        .hfilt-btn {
+            flex-shrink: 0;
+            padding: 6px 14px; border-radius: 9999px;
+            border: 1.5px solid var(--border); background: #fff;
+            color: var(--ink-muted); font-family: 'DM Sans', sans-serif;
+            font-size: 12px; font-weight: 400; white-space: nowrap;
+            cursor: pointer; transition: all 0.22s ease;
+        }
+        .hfilt-btn:active { transform: scale(0.95); }
+        .hfilt-btn.active {
+            background: var(--oliva); border-color: var(--oliva);
+            color: #fff; font-weight: 500;
+            box-shadow: 0 2px 10px rgba(74,90,40,0.22);
+        }
+
+        /* Fecha */
+        .hist-fecha {
+            padding: 0 18px 10px;
+            font-size: 11px; color: var(--ink-ghost);
+            letter-spacing: 0.06em; text-transform: uppercase;
+        }
+
+        /* Loader historial */
+        .hist-loader {
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            gap: 14px; padding: 60px 0;
+        }
+        .hist-loader p { font-size: 13px; color: var(--ink-ghost); }
+
+        /* Tarjeta de pedido */
+        .order-card {
+            margin: 0 14px 10px;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            overflow: hidden;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 3px 10px rgba(0,0,0,0.025);
+            animation: slideIn 0.38s cubic-bezier(.22,.68,0,1.2) both;
+        }
+
+        .card-head {
+            display: flex; align-items: flex-start;
+            justify-content: space-between; gap: 10px;
+            padding: 14px 15px 12px 16px;
+            cursor: pointer; user-select: none;
+        }
+        .card-head-left { flex: 1; min-width: 0; }
+
+        .card-tipo {
+            display: flex; align-items: center; gap: 6px;
+            margin-bottom: 3px;
+        }
+        .tipo-text {
+            font-size: 10.5px; font-weight: 600;
+            letter-spacing: 0.07em; text-transform: uppercase;
+        }
+        .tipo-text.mesa      { color: var(--oliva); }
+        .tipo-text.llevar    { color: var(--amber); }
+        .tipo-text.domicilio { color: var(--blue);  }
+
+        .card-destino {
+            font-size: 15px; font-weight: 600; color: var(--ink);
+            line-height: 1.25; margin-bottom: 2px;
+        }
+        .card-cliente { font-size: 12px; color: var(--ink-muted); }
+        .card-hora    { font-size: 10.5px; color: var(--ink-ghost); margin-top: 2px; }
+
+        .status-badge {
+            flex-shrink: 0; padding: 4px 11px; border-radius: 9999px;
+            font-size: 10.5px; font-weight: 600;
+            letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap;
+        }
+        .status-badge.pending   { background: rgba(180,83,9,0.09);  color: #92400e; border: 1px solid rgba(180,83,9,0.20); }
+        .status-badge.preparing { background: rgba(29,95,168,0.09); color: #1d4e89; border: 1px solid rgba(29,95,168,0.20); }
+        .status-badge.ready     { background: rgba(46,125,50,0.09); color: #1b5e20; border: 1px solid rgba(46,125,50,0.20); }
+        .status-badge.delivered { background: rgba(74,90,40,0.09);  color: var(--oliva); border: 1px solid var(--oliva-bd); }
+        .status-badge.cancelled { background: rgba(184,50,50,0.08); color: var(--red);   border: 1px solid rgba(184,50,50,0.18); }
+
+        .card-chevron {
+            font-size: 11px; color: var(--ink-ghost);
+            transition: transform 0.22s ease; flex-shrink: 0; margin-top: 3px;
+        }
+        .card-chevron.open { transform: rotate(180deg); }
+
+        /* Cuerpo expandible */
+        .card-body { display: none; padding: 14px 16px; border-top: 1px solid var(--border-lt); }
+        .card-body.open { display: block; animation: slideIn 0.22s ease both; }
+
+        .card-direccion {
+            display: flex; align-items: flex-start; gap: 8px;
+            background: rgba(29,95,168,0.05);
+            border: 1px solid rgba(29,95,168,0.16);
+            border-radius: 10px; padding: 10px 12px; margin-bottom: 12px;
+        }
+        .card-direccion-text { font-size: 13px; color: var(--blue); line-height: 1.45; font-weight: 500; }
+
+        .card-nota {
+            display: flex; align-items: flex-start; gap: 8px;
+            background: rgba(180,83,9,0.05);
+            border: 1px solid rgba(180,83,9,0.16);
+            border-radius: 10px; padding: 10px 12px; margin-bottom: 12px;
+        }
+        .card-nota-text { font-size: 12.5px; color: #92400e; line-height: 1.5; }
+
+        .item-row {
+            display: flex; align-items: flex-start;
+            justify-content: space-between; gap: 8px;
+            padding: 8px 0; border-bottom: 1px solid var(--border-lt);
+        }
+        .item-row:first-child { padding-top: 0; }
+        .item-row:last-child  { border-bottom: none; padding-bottom: 0; }
+
+        .item-qty {
+            width: 22px; height: 22px; border-radius: 6px;
+            background: var(--oliva-pale); border: 1px solid var(--oliva-bd);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 700; color: var(--oliva);
+            flex-shrink: 0; margin-top: 1px;
+        }
+        .item-name { flex: 1; font-size: 13px; color: var(--ink); line-height: 1.35; }
+        .item-price {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1rem; font-weight: 500; color: var(--oliva);
+            white-space: nowrap; flex-shrink: 0;
+        }
+
+        .card-total-row {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 0 0; border-top: 1px solid var(--border); margin-top: 6px;
+        }
+        .card-total-label {
+            font-size: 11px; font-weight: 600; color: var(--ink-muted);
+            text-transform: uppercase; letter-spacing: 0.07em;
+        }
+        .card-total-monto {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1.25rem; font-weight: 500; color: var(--oliva);
+        }
+        .card-order-no {
+            font-family: 'Courier New', monospace;
+            font-size: 10px; font-weight: 700; color: var(--ink-ghost);
+            letter-spacing: 0.12em; text-transform: uppercase; margin-top: 8px;
+        }
+
+        /* Botón actualizar historial */
+        #btn-refresh-hist {
+            position: fixed;
+            bottom: calc(22px + var(--safe-bottom)); right: 18px;
+            z-index: 50;
+            width: 46px; height: 46px; border-radius: 50%;
+            background: var(--oliva); color: #fff;
+            border: none; font-size: 17px; cursor: pointer;
+            display: none; align-items: center; justify-content: center;
+            box-shadow: 0 4px 18px rgba(74,90,40,0.30);
+            transition: transform 0.18s, background 0.18s;
+        }
+        #btn-refresh-hist.show { display: flex; }
+        #btn-refresh-hist:hover  { background: var(--oliva-lt); }
+        #btn-refresh-hist:active { transform: scale(0.90); }
+        #btn-refresh-hist.spinning svg { animation: spin 0.7s linear infinite; }
+
+        /* ═══════════════════════════════════════════
+           MODALES
         ═══════════════════════════════════════════ */
         #order-modal { position: fixed; inset: 0; display: none; z-index: 80; }
         #order-modal.open { display: block; }
@@ -306,10 +526,7 @@
             overflow: hidden;
             animation: slideUp 0.38s cubic-bezier(0.16,1,0.3,1) both;
         }
-
-        .modal-handle {
-            display: flex; justify-content: center; padding: 12px 0 4px; flex-shrink: 0;
-        }
+        .modal-handle { display: flex; justify-content: center; padding: 12px 0 4px; flex-shrink: 0; }
         .modal-handle-bar { width: 36px; height: 4px; background: var(--border); border-radius: 9999px; }
 
         .modal-header { padding: 4px 20px 14px; border-bottom: 1px solid var(--border-lt); flex-shrink: 0; }
@@ -321,7 +538,6 @@
 
         .modal-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
 
-        /* Resumen de ítems */
         .summary-row {
             display: flex; align-items: flex-start; justify-content: space-between;
             gap: 10px; padding: 13px 0; border-bottom: 1px solid var(--border-lt);
@@ -342,17 +558,14 @@
         .modal-total-label { font-size: 12px; font-weight: 500; color: var(--oliva); text-transform: uppercase; letter-spacing: 0.06em; }
         .modal-total-monto { font-family: 'Cormorant Garamond', serif; font-size: 1.45rem; font-weight: 500; color: var(--oliva); }
 
-        /* Formulario del modal */
         .modal-form-section {
             padding: 16px 20px; border-top: 1px solid var(--border-lt);
             flex-shrink: 0; display: flex; flex-direction: column; gap: 14px;
         }
-
         .form-label {
             display: block; font-size: 10.5px; font-weight: 500; color: var(--ink-muted);
             text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;
         }
-
         .form-input {
             width: 100%; padding: 12px 15px; border-radius: 12px;
             border: 1.5px solid var(--border); background: var(--crema-bg);
@@ -364,10 +577,7 @@
         .form-input.error { border-color: var(--red); box-shadow: 0 0 0 3px rgba(184,50,50,0.08); }
         textarea.form-input { resize: none; min-height: 72px; line-height: 1.5; }
 
-        /* Selector de modalidad */
-        .modalidad-tabs {
-            display: flex; gap: 8px;
-        }
+        .modalidad-tabs { display: flex; gap: 8px; }
         .modalidad-tab {
             flex: 1; padding: 10px 6px; border-radius: 12px;
             border: 1.5px solid var(--border); background: var(--crema-bg);
@@ -381,13 +591,11 @@
             color: var(--oliva); font-weight: 500;
         }
 
-        /* Botones del modal */
         .modal-footer {
             padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px));
             border-top: 1px solid var(--border-lt); flex-shrink: 0;
             display: flex; flex-direction: column; gap: 8px;
         }
-
         .btn-confirmar {
             width: 100%; padding: 16px 24px; border-radius: 9999px;
             background: var(--oliva); color: #fff;
@@ -399,7 +607,6 @@
         .btn-confirmar:hover   { background: var(--oliva-lt); }
         .btn-confirmar:active  { transform: scale(0.975); }
         .btn-confirmar:disabled { opacity: 0.48; cursor: not-allowed; transform: none; box-shadow: none; }
-
         .btn-secundario {
             width: 100%; padding: 14px 24px; border-radius: 9999px;
             background: transparent; border: 1.5px solid var(--border);
@@ -408,9 +615,7 @@
         }
         .btn-secundario:hover { border-color: var(--ink-muted); color: var(--ink); }
 
-        /* ═══════════════════════════════════════════
-           MODAL DE ÉXITO
-        ═══════════════════════════════════════════ */
+        /* Modal éxito */
         #success-modal {
             position: fixed; inset: 0; display: none;
             align-items: center; justify-content: center;
@@ -419,7 +624,6 @@
             backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
         }
         #success-modal.open { display: flex; }
-
         .success-card {
             position: relative; background: #fff; border-radius: 24px;
             padding: 36px 28px 30px; max-width: 320px; width: 100%;
@@ -427,12 +631,10 @@
             box-shadow: 0 24px 64px rgba(0,0,0,0.12);
             animation: scaleIn 0.32s cubic-bezier(0.16,1,0.3,1) both;
         }
-
         .rule-oliva {
             display: block; width: 28px; height: 2px;
             background: var(--oliva); border-radius: 2px; margin: 0 auto 18px;
         }
-
         .check-path {
             stroke-dasharray: 100; stroke-dashoffset: 100;
             transition: stroke-dashoffset 0.65s 0.25s cubic-bezier(0.65,0,0.35,1);
@@ -440,141 +642,170 @@
         .check-path.drawn { stroke-dashoffset: 0; }
 
         .z-content { position: relative; z-index: 1; }
+
+        /* Toast */
+        #toast-wrap {
+            position: fixed; top: 20px; left: 50%;
+            transform: translateX(-50%); z-index: 9999;
+            display: flex; flex-direction: column;
+            gap: 8px; align-items: center;
+            pointer-events: none; width: max-content;
+            max-width: calc(100vw - 32px);
+        }
     </style>
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════════════════
-     APP PRINCIPAL — CARTA DIRECTA
-════════════════════════════════════════════════════════ -->
-<div id="app-main">
-
-    <header class="app-header z-content">
-        <div class="header-top">
-            <div class="logo-lockup">
-                <img src="logo.png" alt="Logo la 26">
-                <div class="logo-wordmark">
-                    <h1>Restaurante <em>la 26</em></h1>
-                    <p>Carta del día</p>
-                </div>
+<!-- ══════════════════════════════════════════
+     HEADER + TABS PRINCIPALES
+══════════════════════════════════════════ -->
+<header class="app-header z-content">
+    <div class="header-top">
+        <div class="logo-lockup">
+            <img src="logo.png" alt="Logo la 26">
+            <div class="logo-wordmark">
+                <h1>Restaurante <em>la 26</em></h1>
+                <p id="header-subtitle">Carta del día</p>
             </div>
         </div>
-        <div id="cats-bar" class="cats-bar z-content"></div>
-    </header>
+    </div>
 
-    <main id="app-content" class="z-content">
-        <div id="app-loader">
-            <div class="spinner"></div>
-            <p>Cargando carta…</p>
+    <!-- Pestañas Carta / Historial -->
+    <div class="main-tabs">
+        <button class="main-tab active" id="tab-carta" onclick="Tabs.ir('carta')">
+            🍽️ Carta
+        </button>
+        <button class="main-tab" id="tab-historial" onclick="Tabs.ir('historial')">
+            📋 Historial
+            <span class="tab-badge" id="badge-pendientes"></span>
+        </button>
+    </div>
+
+    <!-- Barra de categorías (solo visible en carta) -->
+    <div id="cats-bar" class="cats-bar z-content"></div>
+</header>
+
+
+<!-- ══════════════════════════════════════════
+     VISTA: CARTA
+══════════════════════════════════════════ -->
+<div id="vista-carta" class="z-content">
+    <div id="app-loader">
+        <div class="spinner"></div>
+        <p>Cargando carta…</p>
+    </div>
+    <div id="app-error">
+        <div class="err-icon">⚠️</div>
+        <p id="error-msg">Error al cargar el menú.</p>
+        <button onclick="Menu.cargar()">Reintentar</button>
+    </div>
+    <div id="menu-sections"></div>
+</div>
+
+
+<!-- ══════════════════════════════════════════
+     VISTA: HISTORIAL DEL DÍA
+══════════════════════════════════════════ -->
+<div id="vista-historial" class="z-content">
+
+    <!-- Stats en vivo -->
+    <div class="stats-row">
+        <div class="stat-chip"><span class="stat-num" id="st-total">—</span><span class="stat-lbl">Pedidos</span></div>
+        <div class="stat-chip"><span class="stat-num" id="st-pendientes">—</span><span class="stat-lbl">Pendientes</span></div>
+        <div class="stat-chip"><span class="stat-num" id="st-entregados">—</span><span class="stat-lbl">Entregados</span></div>
+        <div class="stat-chip"><span class="stat-num" id="st-venta">—</span><span class="stat-lbl">Venta</span></div>
+    </div>
+
+    <!-- Filtros -->
+    <div class="hist-filter-bar">
+        <button class="hfilt-btn active" onclick="Hist.filtrar('todos',this)">Todos</button>
+        <button class="hfilt-btn" onclick="Hist.filtrar('mesa',this)">🍽️ Mesa</button>
+        <button class="hfilt-btn" onclick="Hist.filtrar('llevar',this)">🛵 Para Llevar</button>
+        <button class="hfilt-btn" onclick="Hist.filtrar('domicilio',this)">📦 Domicilio</button>
+    </div>
+
+    <!-- Fecha -->
+    <p class="hist-fecha" id="hist-fecha"></p>
+
+    <!-- Lista de pedidos -->
+    <div id="hist-lista">
+        <div class="hist-loader">
+            <div class="spinner-sm"></div>
+            <p>Cargando pedidos…</p>
         </div>
-        <div id="app-error">
-            <div class="err-icon">⚠️</div>
-            <p id="error-msg">Error al cargar el menú.</p>
-            <button onclick="Menu.cargar()">Reintentar</button>
-        </div>
-        <div id="menu-sections"></div>
-    </main>
+    </div>
 
 </div>
 
 
-<!-- ═══════════════════════════════════════════════════════
+<!-- ══════════════════════════════════════════
      MODAL DE PEDIDO
-════════════════════════════════════════════════════════ -->
+══════════════════════════════════════════ -->
 <div id="order-modal">
     <div class="modal-overlay" onclick="Cart.cerrar()"></div>
-
     <div class="modal-panel">
         <div class="modal-handle"><div class="modal-handle-bar"></div></div>
-
         <div class="modal-header">
             <h3>Registrar Pedido</h3>
             <p>Revisa el pedido y completa los datos</p>
         </div>
-
-        <!-- Lista de ítems -->
         <div id="summary-items" class="modal-body"></div>
-
-        <!-- Total -->
         <div class="modal-total-row">
             <span class="modal-total-label">Total</span>
             <span id="summary-total" class="modal-total-monto">$0</span>
         </div>
-
-        <!-- Formulario -->
         <div class="modal-form-section">
-
-            <!-- Tipo de pedido -->
             <div>
                 <label class="form-label">Tipo de pedido</label>
                 <div class="modalidad-tabs">
-                    <button class="modalidad-tab active" onclick="UI.setModalidad('mesa', this)">
+                    <button class="modalidad-tab active" onclick="UI.setModalidad('mesa',this)">
                         <span class="tab-icon">🍽️</span>Mesa
                         <input type="radio" name="form-modalidad" value="mesa" checked style="display:none;">
                     </button>
-                    <button class="modalidad-tab" onclick="UI.setModalidad('llevar', this)">
+                    <button class="modalidad-tab" onclick="UI.setModalidad('llevar',this)">
                         <span class="tab-icon">🛵</span>Para Llevar
                         <input type="radio" name="form-modalidad" value="llevar" style="display:none;">
                     </button>
-                    <button class="modalidad-tab" onclick="UI.setModalidad('domicilio', this)">
+                    <button class="modalidad-tab" onclick="UI.setModalidad('domicilio',this)">
                         <span class="tab-icon">📦</span>Domicilio
                         <input type="radio" name="form-modalidad" value="domicilio" style="display:none;">
                     </button>
                 </div>
             </div>
-
-            <!-- Número de mesa (visible solo en modo mesa) -->
             <div id="campo-mesa-wrapper">
-                <label class="form-label" for="form-mesa">
-                    Número de mesa <span style="color:var(--red);">*</span>
-                </label>
+                <label class="form-label" for="form-mesa">Número de mesa <span style="color:var(--red);">*</span></label>
                 <input id="form-mesa" class="form-input" type="text" inputmode="numeric"
                     placeholder="Ej: 5, 12, Barra…" autocomplete="off">
             </div>
-
-            <!-- Dirección (visible solo en modo domicilio) -->
             <div id="campo-direccion-wrapper" style="display:none;">
-                <label class="form-label" for="form-direccion">
-                    Dirección de entrega <span style="color:var(--red);">*</span>
-                </label>
+                <label class="form-label" for="form-direccion">Dirección de entrega <span style="color:var(--red);">*</span></label>
                 <textarea id="form-direccion" class="form-input"
                     placeholder="Calle, barrio, punto de referencia…" rows="2"></textarea>
             </div>
-
-            <!-- Nombre del cliente -->
             <div>
                 <label class="form-label" for="form-nombre">Nombre del cliente</label>
-                <input id="form-nombre" class="form-input" type="text"
-                    placeholder="Para identificar el pedido…">
+                <input id="form-nombre" class="form-input" type="text" placeholder="Para identificar el pedido…">
             </div>
-
-            <!-- Notas -->
             <div>
                 <label class="form-label" for="form-notas">Notas / instrucciones</label>
                 <textarea id="form-notas" class="form-input"
                     placeholder="Sin picante, sin cebolla, alergia a…" rows="2"></textarea>
             </div>
         </div>
-
         <div class="modal-footer">
-            <button id="btn-enviar" class="btn-confirmar" onclick="Order.enviar()">
-                Enviar a cocina
-            </button>
-            <button class="btn-secundario" onclick="Cart.cerrar()">
-                Seguir agregando
-            </button>
+            <button id="btn-enviar" class="btn-confirmar" onclick="Order.enviar()">Enviar a cocina</button>
+            <button class="btn-secundario" onclick="Cart.cerrar()">Seguir agregando</button>
         </div>
     </div>
 </div>
 
 
-<!-- ═══════════════════════════════════════════════════════
+<!-- ══════════════════════════════════════════
      MODAL DE ÉXITO
-════════════════════════════════════════════════════════ -->
+══════════════════════════════════════════ -->
 <div id="success-modal">
     <div class="success-card">
         <span class="rule-oliva"></span>
-
         <div style="width:72px;height:72px;border-radius:50%;background:var(--oliva-pale);border:1.5px solid var(--oliva-bd);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;">
             <svg viewBox="0 0 52 52" style="width:36px;height:36px;">
                 <circle cx="26" cy="26" r="25" fill="none" stroke="rgba(74,90,40,0.12)" stroke-width="1.5"/>
@@ -584,25 +815,15 @@
                     stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
         </div>
-
-        <h3 class="font-display"
-            style="font-size:1.75rem;font-weight:400;color:var(--ink);margin-bottom:8px;line-height:1.18;">
+        <h3 style="font-family:'Cormorant Garamond',serif;font-size:1.75rem;font-weight:400;color:var(--ink);margin-bottom:8px;line-height:1.18;">
             ¡Pedido<br>en cocina!
         </h3>
-        <p style="font-size:12.5px;color:var(--ink-muted);line-height:1.65;margin-bottom:6px;">
-            La cocina ya recibió el pedido.
-        </p>
+        <p style="font-size:12.5px;color:var(--ink-muted);line-height:1.65;margin-bottom:6px;">La cocina ya recibió el pedido.</p>
         <p id="success-order-no"
-            style="font-family:'Courier New',monospace;font-size:11px;font-weight:700;color:var(--oliva);letter-spacing:0.13em;text-transform:uppercase;margin-bottom:24px;opacity:0.8;">
-        </p>
-
+            style="font-family:'Courier New',monospace;font-size:11px;font-weight:700;color:var(--oliva);letter-spacing:0.13em;text-transform:uppercase;margin-bottom:24px;opacity:0.8;"></p>
         <div style="display:flex;flex-direction:column;gap:8px;">
-            <button onclick="Order.nuevoPedido()" class="btn-confirmar">
-                Nuevo pedido
-            </button>
-            <button onclick="Order.cerrarExito()" class="btn-secundario">
-                Cerrar
-            </button>
+            <button onclick="Order.nuevoPedido()" class="btn-confirmar">Nuevo pedido</button>
+            <button onclick="Order.cerrarExito()" class="btn-secundario">Cerrar</button>
         </div>
     </div>
 </div>
@@ -617,52 +838,86 @@
     <span id="cart-total" class="cart-bar-total">$0</span>
 </div>
 
+<!-- Botón actualizar historial -->
+<button id="btn-refresh-hist" onclick="Hist.recargar()" title="Actualizar pedidos">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 4 23 10 17 10"></polyline>
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+    </svg>
+</button>
+
+<!-- Toast container -->
+<div id="toast-wrap"></div>
+
 
 <script src="menu.js"></script>
 
 <script>
-    // ── Animación del check de éxito ──
-    (function() {
-        const m = document.getElementById('success-modal');
-        const c = document.getElementById('success-check');
-        if (!m || !c) return;
-        new MutationObserver(function() {
-            if (m.classList.contains('open')) {
-                setTimeout(function() { c.classList.add('drawn'); }, 180);
-            } else {
-                c.classList.remove('drawn');
-            }
-        }).observe(m, { attributes: true, attributeFilter: ['class'] });
-    })();
+// ══════════════════════════════════════════
+// TABS — Carta ↔ Historial
+// ══════════════════════════════════════════
+const Tabs = {
+    actual: 'carta',
 
-    // ── Control de pestañas de modalidad ──
-    const UI = {
-        setModalidad(valor, btnClicado) {
-            // Activar tab
-            document.querySelectorAll('.modalidad-tab').forEach(b => b.classList.remove('active'));
-            btnClicado.classList.add('active');
+    ir(tab) {
+        this.actual = tab;
+        const esCarta = tab === 'carta';
 
-            // Marcar el radio oculto dentro del botón
-            const radio = btnClicado.querySelector('input[type="radio"]');
-            if (radio) radio.checked = true;
+        document.getElementById('vista-carta').style.display    = esCarta ? 'block' : 'none';
+        document.getElementById('vista-historial').style.display = esCarta ? 'none'  : 'block';
+        document.getElementById('cats-bar').style.display        = esCarta ? 'flex'  : 'none';
+        document.getElementById('cart-bar').style.display        = esCarta ? 'flex'  : 'none';
+        document.getElementById('btn-refresh-hist').classList.toggle('show', !esCarta);
 
-            // Mostrar / ocultar campo de mesa
-            const campoMesa = document.getElementById('campo-mesa-wrapper');
-            if (campoMesa) {
-                campoMesa.style.display = valor === 'mesa' ? 'block' : 'none';
-            }
+        document.getElementById('tab-carta').classList.toggle('active', esCarta);
+        document.getElementById('tab-historial').classList.toggle('active', !esCarta);
 
-            // Mostrar / ocultar campo de dirección
-            const campoDireccion = document.getElementById('campo-direccion-wrapper');
-            if (campoDireccion) {
-                campoDireccion.style.display = valor === 'domicilio' ? 'block' : 'none';
-            }
+        const sub = document.getElementById('header-subtitle');
+        if (sub) sub.textContent = esCarta ? 'Carta del día' : 'Historial del día';
 
-            // Limpiar errores al cambiar modalidad
-            document.getElementById('form-mesa')?.classList.remove('error');
-            document.getElementById('form-direccion')?.classList.remove('error');
+        if (!esCarta) {
+            // Cargar historial la primera vez o al volver
+            Hist.cargarSiNecesario();
         }
-    };
+    }
+};
+
+// ══════════════════════════════════════════
+// UI — Modalidad del formulario
+// ══════════════════════════════════════════
+const UI = {
+    setModalidad(valor, btnClicado) {
+        document.querySelectorAll('.modalidad-tab').forEach(b => b.classList.remove('active'));
+        btnClicado.classList.add('active');
+        const radio = btnClicado.querySelector('input[type="radio"]');
+        if (radio) radio.checked = true;
+
+        document.getElementById('campo-mesa-wrapper').style.display =
+            valor === 'mesa' ? 'block' : 'none';
+        document.getElementById('campo-direccion-wrapper').style.display =
+            valor === 'domicilio' ? 'block' : 'none';
+
+        document.getElementById('form-mesa')?.classList.remove('error');
+        document.getElementById('form-direccion')?.classList.remove('error');
+    }
+};
+
+// ══════════════════════════════════════════
+// ANIMACIÓN CHECK ÉXITO
+// ══════════════════════════════════════════
+(function() {
+    const m = document.getElementById('success-modal');
+    const c = document.getElementById('success-check');
+    if (!m || !c) return;
+    new MutationObserver(function() {
+        if (m.classList.contains('open')) {
+            setTimeout(() => c.classList.add('drawn'), 180);
+        } else {
+            c.classList.remove('drawn');
+        }
+    }).observe(m, { attributes: true, attributeFilter: ['class'] });
+})();
 </script>
 
 </body>
