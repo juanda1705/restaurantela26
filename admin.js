@@ -139,20 +139,13 @@ async function cargarDashboardReal() {
         const _inicioDia = `${_yyyy}-${_mm}-${_dd}T00:00:00-05:00`; // medianoche Bogotá
         const _finDia    = `${_yyyy}-${_mm}-${_dd}T23:59:59-05:00`; // fin del día Bogotá
 
-        // PROBLEMA 3 FIX: Si existe un timestamp de cierre de caja en la sesión,
-        // solo contar las órdenes POSTERIORES a ese cierre. Así los contadores
-        // arrancan desde $0 después de cada cierre sin importar que las órdenes
-        // del día anterior sigan existiendo en la BD.
-        const _cierdeDesde = sessionStorage.getItem('cierre_desde');
-        const _inicioDiaEfectivo = _cierdeDesde || _inicioDia;
-
         // payment_method ahora existe en BD (columna VARCHAR(20)) — se incluye en el SELECT
         // FILTRO DE FECHA: solo órdenes del día actual (reset a $0 cada mañana)
         const { data: orders, error } = await supabaseClient
             .from('orders')
             .select(`id, order_number, customer_name, total_amount, status, notes, payment_method,
                      table_id, order_items ( quantity, notes, unit_price )`)
-            .gte('created_at', _inicioDiaEfectivo)
+            .gte('created_at', _inicioDia)
             .lte('created_at', _finDia);
 
         if (error) throw error;
@@ -297,11 +290,11 @@ async function cargarDashboardReal() {
             }
         }
 
-        // Cargar egresos para KPI — solo del día actual (respetando cierre)
+        // Cargar egresos para KPI — solo del día actual
         const { data: gastos } = await supabaseClient
             .from('operating_expenses')
             .select('amount')
-            .gte('created_at', _inicioDiaEfectivo)
+            .gte('created_at', _inicioDia)
             .lte('created_at', _finDia);
         globalEgresos = (gastos || []).reduce(
             (acc, g) => acc + (parseFloat(g.amount) || 0), 0
@@ -1401,31 +1394,11 @@ async function realizarCierre() {
         Toast.ok('Cierre archivado localmente. Ejecuta el SQL de historial_cierres para persistir en la nube.');
     }
 
-    // PROBLEMA 3 FIX: guardar el timestamp exacto del cierre.
-    // cargarDashboardReal() usará este valor para ignorar todas las órdenes
-    // que existían ANTES del cierre, evitando que los contadores vuelvan a llenarse.
-    const ahoraCierre = new Date().toISOString();
-    sessionStorage.setItem('cierre_desde', ahoraCierre);
-
-    // Resetear contadores del día
+    // ── Resetear contadores del día ───────────────────────────
     ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(k));
     totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
-    // También resetear globales de ingresos/egresos para que el modal de cierre
-    // no muestre valores acumulados del ciclo anterior
-    globalIngresos = 0; globalEgresos = 0;
 
-    // PROBLEMA 3 FIX — base de caja desaparece:
-    // El panel se ocultó al registrar la base inicial y DOMContentLoaded no se
-    // vuelve a ejecutar. Hay que mostrarlo explícitamente después de cada cierre
-    // para que el administrador pueda registrar la base del nuevo ciclo.
-    const panelApertura = document.getElementById('panel-apertura-caja');
-    const inputBase     = document.getElementById('input-base-caja');
-    if (panelApertura) {
-        panelApertura.style.display = '';   // restaurar visibilidad (valor original del HTML)
-        if (inputBase) inputBase.value = ''; // limpiar el valor anterior
-    }
-
-    // Actualizar calendario si está visible
+    // ── Actualizar calendario si está visible ──────────────────
     if (document.getElementById('tab-calendario')?.style.display !== 'none') {
         cargarCalendarioCierres();
     }
@@ -1581,12 +1554,7 @@ document.addEventListener('DOMContentLoaded', () => {
             weekday: 'short', year: 'numeric', month: 'short', day: 'numeric'
         });
     }
-
-    // PROBLEMA 4 FIX: cargar dashboard al iniciar — el comentario anterior decía que
-    // admin.html lo hacía, pero admin.html a su vez asumía que admin.js lo hacía.
-    // Ninguno lo ejecutaba realmente. Se resuelve aquí con un pequeño delay para
-    // garantizar que el DOM de admin.html ya haya procesado todos sus propios scripts.
-    setTimeout(() => cargarDashboardReal(), 50);
+    // El dashboard se carga desde admin.html vía cambiarTab inicial
 });
 // ============================================================
 // MÓDULO A: CONTROL DE ACCESO — SISTEMA DE CIERRE DE PEDIDOS
