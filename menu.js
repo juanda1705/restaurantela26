@@ -1,6 +1,19 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE MESERO
-// menu.js · Versión 7.4
+// menu.js · Versión 7.4.1
+//
+// CAMBIOS v7.4.1 (patches aplicados sobre v7.4):
+//  [PATCH-1] Order.enviar(): llama La26Core.descontarPorcionesOrden
+//            y La26Core.ajustarInventarioPorItems después de insertar
+//            los order_items. Silencioso si La26Core no está disponible.
+//
+//  [PATCH-2] init(): se suscribe a La26Core.on('onMenuItemChange')
+//            y La26Core.on('onOrderChange') para actualizaciones
+//            en tiempo real sin recargar todo el menú.
+//
+//  [PATCH-3] EditarPedido.guardar(): delega a La26Core.guardarEdicionAdmin
+//            para control de inventario consistente con admin.
+//            Incluye _guardarLegacy() como fallback sin La26Core.
 //
 // CAMBIOS v7.4:
 //  [ADD-SESION]      Sesión de mesero por nombre (sessionStorage).
@@ -663,6 +676,7 @@ function _actualizarCartBar() {
 
 // ============================================================
 // ENVÍO DEL PEDIDO
+// [PATCH-1] Se agregan llamadas a La26Core después del bloque errItems
 // ============================================================
 const Order = {
     async enviar() {
@@ -767,6 +781,23 @@ const Order = {
                     } else {
                         Toast.error('Pedido registrado pero ítems fallaron. Avisa al admin.', 6000);
                     }
+                }
+
+                // [PATCH-1] Descuento automático de porciones e inventario via La26Core
+                // Silencioso: si La26Core no está disponible o falla, NO afecta el flujo principal
+                if (window.La26Core) {
+                    const _itemsParaDescuento = State.cart.map(item => ({
+                        menuItemId: State.slots.find(s => s.id === item.slotId)?.menuItemId || null,
+                        cantidad:   item.cantidad,
+                        nombre:     State.slots.find(s => s.id === item.slotId)?.nombre || '',
+                    })).filter(i => i.menuItemId);
+
+                    La26Core.descontarPorcionesOrden(_itemsParaDescuento).catch(e =>
+                        console.warn('[menu.js] Descuento porciones silencioso:', e.message));
+                    La26Core.ajustarInventarioPorItems(
+                        payload.map(p => ({ menu_item_id: p.menu_item_id, quantity: p.quantity, notes: p.notes })),
+                        1
+                    ).catch(e => console.warn('[menu.js] Descuento inventario silencioso:', e.message));
                 }
             }
 
@@ -1166,6 +1197,8 @@ function toggleHistCard(bodyId, chevId) {
 
 // ============================================================
 // ═══ MÓDULO EDITAR PEDIDO (v7.4) ═══
+// [PATCH-3] EditarPedido.guardar() delega a La26Core.guardarEdicionAdmin
+//           con _guardarLegacy() como fallback para compatibilidad total
 // ============================================================
 
 const EditarPedido = {
@@ -1462,6 +1495,9 @@ const EditarPedido = {
         if (el) el.textContent = formatCOP(this._calcularTotalEdit());
     },
 
+    // [PATCH-3] guardar() — delega a La26Core.guardarEdicionAdmin cuando está disponible.
+    // Si La26Core no existe, ejecuta _guardarLegacy() que replica la lógica original v7.4
+    // sin ningún cambio, garantizando compatibilidad total hacia atrás.
     async guardar() {
         if (this._guardando) return;
         if (!this._pedidoId || !this._pedido) return;
@@ -1471,105 +1507,35 @@ const EditarPedido = {
         if (btnGuardar) { btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando…'; }
 
         try {
-            const pedidoId  = this._pedidoId;
-            const pedido    = this._pedido;
             const notaInput = document.getElementById('edit-nota-input');
             const nuevaNota = (notaInput?.value || '').trim();
 
-            // ── 1. Reconstruir el campo notes conservando prefijo y mesero ──
-            const parsed = _parsearNota(pedido.notes);
-            let notaBase = pedido.notes || '';
-            // Reemplazar la parte de Nota: al final
+            // Reconstruir notes conservando prefijo y mesero
+            const parsed = _parsearNota(this._pedido.notes);
+            let notaBase = this._pedido.notes || '';
             notaBase = notaBase.replace(/\s*\|\s*Nota:\s*.+$/, '');
             if (nuevaNota) notaBase += ` | Nota: ${nuevaNota}`;
             const notaFinal = notaBase.trim();
 
-            // ── 2. Separar ítems: eliminar, actualizar, insertar ──
-            const itemsOriginales = pedido.order_items || [];
-            const idsOriginales   = new Set(itemsOriginales.map(i => i.id));
-
-            // Ítems a eliminar (existentes marcados como eliminados)
-            const aEliminar = this._itemsEdit
-                .filter(it => it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
-
-            // Ítems a actualizar cantidad (existentes no eliminados)
-            const aActualizar = this._itemsEdit
-                .filter(it => !it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
-
-            // Ítems nuevos
-            const aNuevos = this._itemsEdit.filter(it => it.esNuevo && !it.eliminado);
-
-            // Ejecutar eliminaciones
-            for (const it of aEliminar) {
-                const { error } = await db.from('order_items').delete().eq('id', it.id);
-                if (error) console.warn('[EditarPedido] Error eliminando ítem:', error.message);
-            }
-
-            // Ejecutar actualizaciones de cantidad
-            for (const it of aActualizar) {
-                const original = itemsOriginales.find(o => o.id === it.id);
-                if (original && original.quantity !== it.cantidad) {
-                    const { error } = await db.from('order_items')
-                        .update({ quantity: it.cantidad })
-                        .eq('id', it.id);
-                    if (error) console.warn('[EditarPedido] Error actualizando cantidad:', error.message);
+            // Delegar toda la lógica a La26Core si está disponible (incluye inventario)
+            if (window.La26Core) {
+                const resultado = await La26Core.guardarEdicionAdmin(
+                    this._pedidoId,
+                    this._itemsEdit,
+                    notaFinal,
+                    State.restaurantId
+                );
+                if (!resultado.ok) {
+                    Toast.error(resultado.error || 'No se pudo guardar.');
+                    return;
                 }
+            } else {
+                // Fallback: lógica original v7.4 sin control de inventario La26Core
+                await this._guardarLegacy(notaFinal);
             }
-
-            // Insertar nuevos ítems
-            if (aNuevos.length > 0) {
-                // Obtener fallback de menu_items si el slot es demo
-                const { data: todosMenuItems } = await db.from('menu_items')
-                    .select('id,name').eq('restaurant_id', State.restaurantId).eq('is_active', true);
-                const listaMenu = todosMenuItems || [];
-
-                const payloadNuevos = aNuevos.map(it => {
-                    let menuItemId = it.menuItemId;
-                    if (!menuItemId && listaMenu.length > 0) {
-                        const nb = (it.nombre || '').toLowerCase().trim();
-                        const ex = listaMenu.find(m => m.name.toLowerCase().trim() === nb);
-                        menuItemId = ex?.id || listaMenu[0]?.id || null;
-                    }
-                    return {
-                        order_id:     pedidoId,
-                        menu_item_id: menuItemId,
-                        quantity:     it.cantidad,
-                        unit_price:   it.precio,
-                        item_status:  'pending',
-                        product_name: it.nombre,
-                        notes:        `[nombre]${it.nombre}`,
-                    };
-                });
-
-                const { error: errNuevos } = await db.from('order_items').insert(payloadNuevos);
-                if (errNuevos) {
-                    // Reintentar sin product_name si la columna no existe
-                    if (errNuevos.code === '42703' || errNuevos.message?.includes('product_name')) {
-                        const p2 = payloadNuevos.map(({ product_name, ...rest }) => rest);
-                        const { error: err2 } = await db.from('order_items').insert(p2);
-                        if (err2) console.warn('[EditarPedido] Error insertando nuevos ítems:', err2.message);
-                    } else {
-                        console.warn('[EditarPedido] Error insertando nuevos ítems:', errNuevos.message);
-                    }
-                }
-            }
-
-            // ── 3. Recalcular total y actualizar orders ──
-            const nuevoTotal = this._calcularTotalEdit();
-            const { error: errUpdate } = await db.from('orders')
-                .update({
-                    total_amount: nuevoTotal,
-                    notes:        notaFinal,
-                    updated_at:   new Date().toISOString(),
-                })
-                .eq('id', pedidoId);
-            if (errUpdate) console.warn('[EditarPedido] Error actualizando orden:', errUpdate.message);
 
             Toast.ok('Pedido actualizado correctamente.');
             this.cerrar();
-
-            // Refrescar historial — el realtime en cocina/caja/dashboard
-            // se encarga automáticamente gracias al UPDATE en orders
             await Hist.cargar();
 
         } catch (err) {
@@ -1580,6 +1546,90 @@ const EditarPedido = {
             const btn = document.getElementById('edit-btn-guardar');
             if (btn) { btn.disabled = false; btn.textContent = 'Guardar cambios'; }
         }
+    },
+
+    // Fallback: lógica original de menu.js v7.4 — sin ninguna modificación.
+    // Se ejecuta únicamente cuando La26Core no está disponible en window.
+    async _guardarLegacy(notaFinal) {
+        const pedidoId        = this._pedidoId;
+        const pedido          = this._pedido;
+        const itemsOriginales = pedido.order_items || [];
+        const idsOriginales   = new Set(itemsOriginales.map(i => i.id));
+
+        // Ítems a eliminar (existentes marcados como eliminados)
+        const aEliminar = this._itemsEdit
+            .filter(it => it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
+
+        // Ítems a actualizar cantidad (existentes no eliminados)
+        const aActualizar = this._itemsEdit
+            .filter(it => !it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
+
+        // Ítems nuevos
+        const aNuevos = this._itemsEdit.filter(it => it.esNuevo && !it.eliminado);
+
+        // Ejecutar eliminaciones
+        for (const it of aEliminar) {
+            const { error } = await db.from('order_items').delete().eq('id', it.id);
+            if (error) console.warn('[EditarPedido] Error eliminando ítem:', error.message);
+        }
+
+        // Ejecutar actualizaciones de cantidad
+        for (const it of aActualizar) {
+            const original = itemsOriginales.find(o => o.id === it.id);
+            if (original && original.quantity !== it.cantidad) {
+                const { error } = await db.from('order_items')
+                    .update({ quantity: it.cantidad })
+                    .eq('id', it.id);
+                if (error) console.warn('[EditarPedido] Error actualizando cantidad:', error.message);
+            }
+        }
+
+        // Insertar nuevos ítems
+        if (aNuevos.length > 0) {
+            const { data: todosMenuItems } = await db.from('menu_items')
+                .select('id,name').eq('restaurant_id', State.restaurantId).eq('is_active', true);
+            const listaMenu = todosMenuItems || [];
+
+            const payloadNuevos = aNuevos.map(it => {
+                let menuItemId = it.menuItemId;
+                if (!menuItemId && listaMenu.length > 0) {
+                    const nb = (it.nombre || '').toLowerCase().trim();
+                    const ex = listaMenu.find(m => m.name.toLowerCase().trim() === nb);
+                    menuItemId = ex?.id || listaMenu[0]?.id || null;
+                }
+                return {
+                    order_id:     pedidoId,
+                    menu_item_id: menuItemId,
+                    quantity:     it.cantidad,
+                    unit_price:   it.precio,
+                    item_status:  'pending',
+                    product_name: it.nombre,
+                    notes:        `[nombre]${it.nombre}`,
+                };
+            });
+
+            const { error: errNuevos } = await db.from('order_items').insert(payloadNuevos);
+            if (errNuevos) {
+                if (errNuevos.code === '42703' || errNuevos.message?.includes('product_name')) {
+                    const p2 = payloadNuevos.map(({ product_name, ...rest }) => rest);
+                    const { error: err2 } = await db.from('order_items').insert(p2);
+                    if (err2) console.warn('[EditarPedido] Error insertando nuevos ítems:', err2.message);
+                } else {
+                    console.warn('[EditarPedido] Error insertando nuevos ítems:', errNuevos.message);
+                }
+            }
+        }
+
+        // Recalcular total y actualizar orders
+        const nuevoTotal = this._calcularTotalEdit();
+        const { error: errUpdate } = await db.from('orders')
+            .update({
+                total_amount: nuevoTotal,
+                notes:        notaFinal,
+                updated_at:   new Date().toISOString(),
+            })
+            .eq('id', pedidoId);
+        if (errUpdate) console.warn('[EditarPedido] Error actualizando orden:', errUpdate.message);
     },
 };
 
@@ -1611,6 +1661,11 @@ function _editSetError(msg) {
 
 // ============================================================
 // INIT
+// [PATCH-2] Se agrega suscripción a La26Core.on('onMenuItemChange')
+//           y La26Core.on('onOrderChange') después de Menu.cargar()
+//           para actualizaciones en tiempo real vía La26Core.
+//           La suscripción propia de Supabase (_suscribirRealtimeMenu)
+//           sigue activa — La26Core es un canal adicional, no un reemplazo.
 // ============================================================
 (async function init() {
     try {
@@ -1622,6 +1677,30 @@ function _editSetError(msg) {
 
         await _resolverRestaurant();
         await Menu.cargar();
+
+        // [PATCH-2] Realtime centralizado via La26Core (adicional al canal propio)
+        // Solo se activa si La26Core está disponible y hay restaurantId resuelto.
+        // No reemplaza ni interfiere con _suscribirRealtimeMenu().
+        if (window.La26Core && State.restaurantId) {
+            La26Core.suscribirRealtime(State.restaurantId);
+
+            // Cuando un menu_item cambia (porciones, disponibilidad, precio)
+            // actualizar el slot en memoria y refrescar solo esa tarjeta
+            La26Core.on('onMenuItemChange', ({ payload }) => {
+                const item = payload?.new;
+                if (!item?.id) return;
+                _actualizarSlotDesdeRealtime(item);
+            });
+
+            // Cuando cambia una orden (nuevo pedido, cambio de estado)
+            // refrescar historial si está visible
+            La26Core.on('onOrderChange', () => {
+                if (HistState.cargado) {
+                    setTimeout(() => Hist.cargar(), 600);
+                }
+            });
+        }
+
     } catch (err) {
         console.error('[La 26] Error crítico en init:', err);
         _mostrarEstado('error', `Error al iniciar la carta: ${err.message}`);
