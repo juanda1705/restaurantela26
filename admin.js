@@ -139,13 +139,20 @@ async function cargarDashboardReal() {
         const _inicioDia = `${_yyyy}-${_mm}-${_dd}T00:00:00-05:00`; // medianoche Bogotá
         const _finDia    = `${_yyyy}-${_mm}-${_dd}T23:59:59-05:00`; // fin del día Bogotá
 
+        // PROBLEMA 3 FIX: Si existe un timestamp de cierre de caja en la sesión,
+        // solo contar las órdenes POSTERIORES a ese cierre. Así los contadores
+        // arrancan desde $0 después de cada cierre sin importar que las órdenes
+        // del día anterior sigan existiendo en la BD.
+        const _cierdeDesde = sessionStorage.getItem('cierre_desde');
+        const _inicioDiaEfectivo = _cierdeDesde || _inicioDia;
+
         // payment_method ahora existe en BD (columna VARCHAR(20)) — se incluye en el SELECT
         // FILTRO DE FECHA: solo órdenes del día actual (reset a $0 cada mañana)
         const { data: orders, error } = await supabaseClient
             .from('orders')
             .select(`id, order_number, customer_name, total_amount, status, notes, payment_method,
                      table_id, order_items ( quantity, notes, unit_price )`)
-            .gte('created_at', _inicioDia)
+            .gte('created_at', _inicioDiaEfectivo)
             .lte('created_at', _finDia);
 
         if (error) throw error;
@@ -241,6 +248,12 @@ async function cargarDashboardReal() {
                                         onmouseout="this.style.background='var(--olive-lt)'">
                                         🧾 DIAN
                                     </button>
+                                    <button onclick="editarComandaAdmin('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
+                                        style="background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.28);color:var(--blue);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
+                                        onmouseover="this.style.background='rgba(37,99,168,.16)'"
+                                        onmouseout="this.style.background='var(--blue-lt)'">
+                                        ✏️ Editar
+                                    </button>
                                     <button onclick="eliminarComandaReal('${ord.id}', '${ord.order_number}')" class="btn-danger">
                                         🗑️
                                     </button>
@@ -290,11 +303,11 @@ async function cargarDashboardReal() {
             }
         }
 
-        // Cargar egresos para KPI — solo del día actual
+        // Cargar egresos para KPI — solo del día actual (respetando cierre)
         const { data: gastos } = await supabaseClient
             .from('operating_expenses')
             .select('amount')
-            .gte('created_at', _inicioDia)
+            .gte('created_at', _inicioDiaEfectivo)
             .lte('created_at', _finDia);
         globalEgresos = (gastos || []).reduce(
             (acc, g) => acc + (parseFloat(g.amount) || 0), 0
@@ -1394,11 +1407,31 @@ async function realizarCierre() {
         Toast.ok('Cierre archivado localmente. Ejecuta el SQL de historial_cierres para persistir en la nube.');
     }
 
-    // ── Resetear contadores del día ───────────────────────────
+    // PROBLEMA 3 FIX: guardar el timestamp exacto del cierre.
+    // cargarDashboardReal() usará este valor para ignorar todas las órdenes
+    // que existían ANTES del cierre, evitando que los contadores vuelvan a llenarse.
+    const ahoraCierre = new Date().toISOString();
+    sessionStorage.setItem('cierre_desde', ahoraCierre);
+
+    // Resetear contadores del día
     ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(k));
     totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
+    // También resetear globales de ingresos/egresos para que el modal de cierre
+    // no muestre valores acumulados del ciclo anterior
+    globalIngresos = 0; globalEgresos = 0;
 
-    // ── Actualizar calendario si está visible ──────────────────
+    // PROBLEMA 3 FIX — base de caja desaparece:
+    // El panel se ocultó al registrar la base inicial y DOMContentLoaded no se
+    // vuelve a ejecutar. Hay que mostrarlo explícitamente después de cada cierre
+    // para que el administrador pueda registrar la base del nuevo ciclo.
+    const panelApertura = document.getElementById('panel-apertura-caja');
+    const inputBase     = document.getElementById('input-base-caja');
+    if (panelApertura) {
+        panelApertura.style.display = '';   // restaurar visibilidad (valor original del HTML)
+        if (inputBase) inputBase.value = ''; // limpiar el valor anterior
+    }
+
+    // Actualizar calendario si está visible
     if (document.getElementById('tab-calendario')?.style.display !== 'none') {
         cargarCalendarioCierres();
     }
@@ -1554,7 +1587,44 @@ document.addEventListener('DOMContentLoaded', () => {
             weekday: 'short', year: 'numeric', month: 'short', day: 'numeric'
         });
     }
-    // El dashboard se carga desde admin.html vía cambiarTab inicial
+
+    // PROBLEMA 4 FIX: cargar dashboard al iniciar — el comentario anterior decía que
+    // admin.html lo hacía, pero admin.html a su vez asumía que admin.js lo hacía.
+    // Ninguno lo ejecutaba realmente. Se resuelve aquí con un pequeño delay para
+    // garantizar que el DOM de admin.html ya haya procesado todos sus propios scripts.
+    setTimeout(() => cargarDashboardReal(), 50);
+
+    // [PATCH-B] Realtime centralizado vía La26Core
+    (async () => {
+        if (!window.La26Core) return;
+        const { data: rest } = await supabaseClient
+            .from('restaurants').select('id').limit(1).maybeSingle();
+        const rId = rest?.id;
+        if (!rId) return;
+
+        La26Core.suscribirRealtime(rId);
+
+        La26Core.on('onOrderChange', () => {
+            const tabDash = document.getElementById('tab-dashboard');
+            if (tabDash && tabDash.style.display !== 'none') {
+                setTimeout(() => cargarDashboardReal(), 400);
+            }
+        });
+
+        La26Core.on('onMenuItemChange', () => {
+            const tabMenu = document.getElementById('tab-menu');
+            if (tabMenu && tabMenu.style.display !== 'none') {
+                setTimeout(() => cargarSlotsMenuReal(), 300);
+            }
+        });
+
+        La26Core.on('onInventoryChange', () => {
+            const tabInv = document.getElementById('tab-inventario');
+            if (tabInv && tabInv.style.display !== 'none') {
+                setTimeout(() => cargarInventarioReal(), 300);
+            }
+        });
+    })();
 });
 // ============================================================
 // MÓDULO A: CONTROL DE ACCESO — SISTEMA DE CIERRE DE PEDIDOS
@@ -2021,4 +2091,390 @@ async function descontarInsumos() {
     _supplyCache = []; // forzar recarga fresca
     cargarInventarioReal();
     cargarRecetas();
+}
+
+// ============================================================
+// [PATCH-A] BOTÓN ACTUALIZAR DASHBOARD
+// ============================================================
+async function actualizarDashboard() {
+    const btn = document.getElementById('btn-actualizar-dashboard');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Actualizando…';
+    }
+    try {
+        await cargarDashboardReal();
+        renderizarTotales();
+        if (typeof Toast !== 'undefined') Toast.ok('Dashboard actualizado correctamente.');
+    } catch (err) {
+        console.error('[Admin] Error actualizando dashboard:', err);
+        if (typeof Toast !== 'undefined') Toast.error('Error al actualizar. Revisa la consola.');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '🔄 Actualizar';
+        }
+    }
+}
+
+// ============================================================
+// [PATCH-C] EDICIÓN ADMIN DE COMANDAS
+// ============================================================
+
+const _adminEditor = {
+    orderId:    null,
+    pedido:     null,
+    itemsEdit:  [],
+    notaEdit:   '',
+    guardando:  false,
+};
+
+const ADMIN_ESTADOS_EDITABLES = ['pending', 'confirmed', 'in_kitchen', 'delivered', 'paid'];
+
+async function editarComandaAdmin(orderId, orderNo, totalBruto) {
+    _adminEditor.orderId   = orderId;
+    _adminEditor.guardando = false;
+
+    const modal = document.getElementById('modal-editar-comanda-admin');
+    if (!modal) {
+        console.error('[Admin] No existe el modal #modal-editar-comanda-admin');
+        Toast.error('Modal de edición no encontrado. Revisa admin.html.');
+        return;
+    }
+    modal.style.display = 'flex';
+    document.getElementById('eca-body').innerHTML = `
+        <div style="text-align:center;padding:40px 0;color:var(--text-3);">
+            <div style="width:32px;height:32px;border:2.5px solid var(--olive-bd);border-top-color:var(--olive);
+                border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px;"></div>
+            <p style="font-size:13px;">Cargando comanda…</p>
+        </div>`;
+
+    try {
+        const { data: pedido, error } = await supabaseClient
+            .from('orders')
+            .select(`id, order_number, status, notes, total_amount,
+                     order_items (
+                         id, quantity, unit_price, notes, item_status,
+                         menu_item_id,
+                         menu_items ( name )
+                     )`)
+            .eq('id', orderId)
+            .single();
+
+        if (error || !pedido) throw new Error(error?.message || 'Pedido no encontrado.');
+
+        if (!ADMIN_ESTADOS_EDITABLES.includes(pedido.status)) {
+            document.getElementById('eca-body').innerHTML = `
+                <p style="color:var(--text-3);padding:24px;font-size:13px;">
+                    Esta orden no se puede editar (estado: <strong>${pedido.status}</strong>).
+                </p>`;
+            document.getElementById('eca-footer').style.display = 'none';
+            return;
+        }
+
+        _adminEditor.pedido = pedido;
+
+        _adminEditor.itemsEdit = (pedido.order_items || []).map(it => {
+            let nombre = it.menu_items?.name || '';
+            if (!nombre && (it.notes || '').includes('[nombre]')) {
+                nombre = it.notes.split('[nombre]')[1].split('|')[0].trim();
+            }
+            return {
+                id:          it.id,
+                menuItemId:  it.menu_item_id,
+                nombre:      nombre || 'Ítem',
+                precio:      Number(it.unit_price) || 0,
+                cantidad:    it.quantity,
+                item_status: it.item_status || 'pending',
+                esNuevo:     false,
+                eliminado:   false,
+            };
+        });
+
+        _renderEditorAdmin();
+        document.getElementById('eca-footer').style.display = 'flex';
+
+    } catch (err) {
+        console.error('[Admin] Error abriendo editor comanda:', err);
+        document.getElementById('eca-body').innerHTML = `
+            <p style="color:var(--red);padding:24px;font-size:13px;">
+                Error: ${err.message}
+            </p>`;
+    }
+}
+
+async function _renderEditorAdmin() {
+    const pedido = _adminEditor.pedido;
+    if (!pedido) return;
+
+    const { data: menuItems } = await supabaseClient
+        .from('menu_items')
+        .select('id, name, price, item_type, is_active, portions_today')
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+
+    const itemsMenu = menuItems || [];
+
+    const opcionesMenu = itemsMenu.map(m => {
+        const porciones = m.portions_today !== null && m.portions_today !== undefined
+            ? ` (${m.portions_today} disp.)` : '';
+        return `<option value="${m.id}" data-precio="${m.price}" data-nombre="${m.name.replace(/"/g,'&quot;')}">
+            ${m.name} — ${formatCOP(m.price)}${porciones}
+        </option>`;
+    }).join('');
+
+    const filasItems = _adminEditor.itemsEdit
+        .filter(it => !it.eliminado)
+        .map(it => _renderFilaItemAdmin(it))
+        .join('');
+
+    const total = _calcularTotalAdmin();
+
+    document.getElementById('eca-body').innerHTML = `
+        <div style="margin-bottom:16px;">
+            <p style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:3px;">
+                Orden <span class="mono">${pedido.order_number}</span>
+            </p>
+            <span style="background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);
+                border-radius:999px;padding:2px 10px;font-size:10.5px;font-weight:700;">${pedido.status}</span>
+        </div>
+
+        <div style="border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px;">
+            <div style="background:var(--surface-2);padding:10px 14px;border-bottom:1.5px solid var(--border);">
+                <p style="font-size:11px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.6px;">
+                    Ítems de la comanda
+                </p>
+            </div>
+            <div id="eca-items-lista" style="padding:0;">
+                ${filasItems || '<p style="padding:16px;font-size:12.5px;color:var(--text-3);">Sin ítems.</p>'}
+            </div>
+        </div>
+
+        <div style="border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px;">
+            <div style="background:var(--surface-2);padding:10px 14px;border-bottom:1.5px solid var(--border);">
+                <p style="font-size:11px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.6px;">
+                    Agregar producto
+                </p>
+            </div>
+            <div style="padding:14px;display:flex;flex-direction:column;gap:10px;">
+                <select id="eca-sel-producto" style="border-radius:999px;font-size:13px;">
+                    <option value="">— Selecciona un producto —</option>
+                    ${opcionesMenu}
+                </select>
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <button onclick="_ecaDecQty()" style="width:30px;height:30px;border-radius:50%;border:1.5px solid var(--olive-bd);
+                        background:var(--olive-lt);color:var(--olive);font-size:16px;cursor:pointer;font-family:'DM Sans',sans-serif;">−</button>
+                    <span id="eca-nueva-qty" style="font-size:14px;font-weight:600;color:var(--text-1);min-width:24px;text-align:center;">1</span>
+                    <button onclick="_ecaIncQty()" style="width:30px;height:30px;border-radius:50%;border:1.5px solid var(--olive-bd);
+                        background:var(--olive-lt);color:var(--olive);font-size:16px;cursor:pointer;font-family:'DM Sans',sans-serif;">+</button>
+                    <button onclick="_ecaAgregarItem()" class="btn-olive" style="flex:1;min-width:120px;height:36px;">
+                        + Agregar al pedido
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;
+            background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:12px;padding:14px 16px;">
+            <span style="font-size:13px;font-weight:600;color:var(--olive);">Total estimado</span>
+            <span class="mono" id="eca-total-monto" style="font-size:15px;font-weight:700;color:var(--olive);">
+                ${formatCOP(total)}
+            </span>
+        </div>`;
+
+    window._ecaNuevaQty = 1;
+}
+
+function _renderFilaItemAdmin(it) {
+    const precioStr   = it.precio > 0 ? formatCOP(it.precio) : 'Incl.';
+    const subtotalStr = it.precio > 0 ? formatCOP(it.precio * it.cantidad) : '—';
+    const keyId = it.id;
+    return `<div id="eca-row-${keyId}" style="display:flex;align-items:center;padding:10px 14px;
+        border-bottom:1px solid var(--border);gap:8px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:120px;">
+            <p style="font-size:13px;font-weight:600;color:var(--text-1);">${it.nombre}</p>
+            <p style="font-size:11px;color:var(--text-3);">${precioStr} c/u</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+            <button onclick="_ecaCambiarCantidad('${keyId}',-1)"
+                style="width:26px;height:26px;border-radius:50%;border:1.5px solid var(--olive-bd);
+                background:var(--olive-lt);color:var(--olive);font-size:14px;cursor:pointer;
+                font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;">−</button>
+            <span id="eca-qty-${keyId}" style="font-size:13px;font-weight:600;color:var(--text-1);min-width:22px;text-align:center;">
+                ${it.cantidad}
+            </span>
+            <button onclick="_ecaCambiarCantidad('${keyId}',+1)"
+                style="width:26px;height:26px;border-radius:50%;border:1.5px solid var(--olive-bd);
+                background:var(--olive-lt);color:var(--olive);font-size:14px;cursor:pointer;
+                font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;">+</button>
+        </div>
+        <span class="mono" id="eca-sub-${keyId}" style="font-size:12.5px;font-weight:600;color:var(--olive);min-width:70px;text-align:right;">
+            ${subtotalStr}
+        </span>
+        <button onclick="_ecaEliminarItem('${keyId}')"
+            style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);
+            border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;
+            font-family:'DM Sans',sans-serif;white-space:nowrap;">
+            Quitar
+        </button>
+    </div>`;
+}
+
+window._ecaIncQty = function() {
+    window._ecaNuevaQty = (window._ecaNuevaQty || 1) + 1;
+    const el = document.getElementById('eca-nueva-qty');
+    if (el) el.textContent = window._ecaNuevaQty;
+};
+
+window._ecaDecQty = function() {
+    window._ecaNuevaQty = Math.max(1, (window._ecaNuevaQty || 1) - 1);
+    const el = document.getElementById('eca-nueva-qty');
+    if (el) el.textContent = window._ecaNuevaQty;
+};
+
+window._ecaAgregarItem = function() {
+    const sel = document.getElementById('eca-sel-producto');
+    if (!sel || !sel.value) { Toast.error('Selecciona un producto.'); return; }
+    const opt    = sel.options[sel.selectedIndex];
+    const nombre = opt.dataset.nombre || opt.text.split(' — ')[0].trim();
+    const precio = parseFloat(opt.dataset.precio) || 0;
+    const qty    = window._ecaNuevaQty || 1;
+    const existente = _adminEditor.itemsEdit.find(
+        it => !it.eliminado && it.menuItemId === sel.value && it.esNuevo
+    );
+    if (existente) {
+        existente.cantidad += qty;
+    } else {
+        _adminEditor.itemsEdit.push({
+            id:         `new-${Date.now()}`,
+            menuItemId: sel.value,
+            nombre, precio, cantidad: qty,
+            item_status: 'pending',
+            esNuevo:    true,
+            eliminado:  false,
+        });
+    }
+    sel.value = '';
+    window._ecaNuevaQty = 1;
+    const qtyEl = document.getElementById('eca-nueva-qty');
+    if (qtyEl) qtyEl.textContent = '1';
+    _ecaRefrescarLista();
+    Toast.ok(`"${nombre}" agregado.`);
+};
+
+window._ecaCambiarCantidad = function(itemId, delta) {
+    const it = _adminEditor.itemsEdit.find(i => i.id === itemId);
+    if (!it || it.eliminado) return;
+    const nueva = it.cantidad + delta;
+    if (nueva <= 0) { it.eliminado = true; } else { it.cantidad = nueva; }
+    _ecaRefrescarLista();
+};
+
+window._ecaEliminarItem = function(itemId) {
+    const it = _adminEditor.itemsEdit.find(i => i.id === itemId);
+    if (!it) return;
+    if (!confirm(`¿Quitar "${it.nombre}" del pedido?`)) return;
+    it.eliminado = true;
+    _ecaRefrescarLista();
+};
+
+function _calcularTotalAdmin() {
+    return _adminEditor.itemsEdit
+        .filter(i => !i.eliminado)
+        .reduce((acc, i) => acc + i.precio * i.cantidad, 0);
+}
+
+function _ecaRefrescarLista() {
+    const lista = document.getElementById('eca-items-lista');
+    if (!lista) return;
+    const activos = _adminEditor.itemsEdit.filter(i => !i.eliminado);
+    lista.innerHTML = activos.length > 0
+        ? activos.map(it => _renderFilaItemAdmin(it)).join('')
+        : '<p style="padding:16px;font-size:12.5px;color:var(--text-3);">Sin ítems.</p>';
+    const totalEl = document.getElementById('eca-total-monto');
+    if (totalEl) totalEl.textContent = formatCOP(_calcularTotalAdmin());
+}
+
+async function guardarEdicionAdmin() {
+    if (_adminEditor.guardando) return;
+    const btnGuardar = document.getElementById('eca-btn-guardar');
+    _adminEditor.guardando = true;
+    if (btnGuardar) { btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando…'; }
+
+    try {
+        const { data: rest } = await supabaseClient
+            .from('restaurants').select('id').limit(1).maybeSingle();
+        const restaurantId = rest?.id || null;
+
+        let resultado;
+        if (window.La26Core) {
+            resultado = await La26Core.guardarEdicionAdmin(
+                _adminEditor.orderId,
+                _adminEditor.itemsEdit,
+                _adminEditor.pedido.notes,
+                restaurantId
+            );
+        } else {
+            resultado = await _guardarEdicionLegacyAdmin();
+        }
+
+        if (!resultado.ok) { Toast.error(resultado.error || 'No se pudo guardar.'); return; }
+
+        Toast.ok('Comanda actualizada correctamente.');
+        cerrarModalEditarComanda();
+        await cargarDashboardReal();
+
+    } catch (err) {
+        console.error('[Admin] Error guardando edición:', err);
+        Toast.error('Error al guardar. Revisa la consola.');
+    } finally {
+        _adminEditor.guardando = false;
+        if (btnGuardar) { btnGuardar.disabled = false; btnGuardar.textContent = 'Guardar cambios'; }
+    }
+}
+
+async function _guardarEdicionLegacyAdmin() {
+    const pedido      = _adminEditor.pedido;
+    const orderId     = _adminEditor.orderId;
+    const idsOrig     = new Set((pedido.order_items || []).map(i => i.id));
+    const aEliminar   = _adminEditor.itemsEdit.filter(i => i.eliminado && !i.esNuevo && idsOrig.has(i.id));
+    const aActualizar = _adminEditor.itemsEdit.filter(i => !i.eliminado && !i.esNuevo && idsOrig.has(i.id));
+    const aNuevos     = _adminEditor.itemsEdit.filter(i => i.esNuevo && !i.eliminado);
+
+    for (const it of aEliminar) {
+        await supabaseClient.from('order_items').delete().eq('id', it.id);
+    }
+    for (const it of aActualizar) {
+        const orig = (pedido.order_items || []).find(o => o.id === it.id);
+        if (orig && orig.quantity !== it.cantidad) {
+            await supabaseClient.from('order_items').update({ quantity: it.cantidad }).eq('id', it.id);
+        }
+    }
+    if (aNuevos.length > 0) {
+        const payload = aNuevos.map(it => ({
+            order_id:     orderId,
+            menu_item_id: it.menuItemId,
+            quantity:     it.cantidad,
+            unit_price:   it.precio,
+            item_status:  'pending',
+            notes:        `[nombre]${it.nombre}`,
+        }));
+        await supabaseClient.from('order_items').insert(payload).catch(() => {});
+    }
+
+    const nuevoTotal = _calcularTotalAdmin();
+    const { error } = await supabaseClient
+        .from('orders')
+        .update({ total_amount: nuevoTotal, updated_at: new Date().toISOString() })
+        .eq('id', orderId);
+    return { ok: !error, error: error?.message, nuevoTotal };
+}
+
+function cerrarModalEditarComanda() {
+    const modal = document.getElementById('modal-editar-comanda-admin');
+    if (modal) modal.style.display = 'none';
+    _adminEditor.orderId   = null;
+    _adminEditor.pedido    = null;
+    _adminEditor.itemsEdit = [];
+    _adminEditor.guardando = false;
 }
