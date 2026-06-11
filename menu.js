@@ -1756,6 +1756,13 @@ function _editSetError(msg) {
     try {
         _programarResetMedianoche();
         await Sesion.requerir();
+
+        // ── Verificar si el sistema está habilitado ──
+        const _sistemaHabilitado = await _verificarSistemaHabilitado();
+        if (!_sistemaHabilitado) return;   // _verificarSistemaHabilitado muestra la pantalla
+
+        const _sistemaHabilitado = await _verificarSistemaHabilitado();
+        if (!_sistemaHabilitado) return;
         await _resolverRestaurant();
         await Menu.cargar();
 
