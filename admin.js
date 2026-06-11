@@ -1,27 +1,39 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE ADMINISTRACIÓN
-// admin.js · Versión 3.3
-// FIXES v3.1 (heredados):
-//  [FIX-1] SELECT orders: eliminado 'payment_method' (columna inexistente → error 400).
-//  [FIX-2] UPDATE orders: cambiado status 'completed' → 'paid'
-//  [FIX-3] cargarDashboardReal: totales por método de pago desde sessionStorage.
-//  [FIX-4] registrarMetodoPago: guarda método en sessionStorage + BD.
-//  [FIX-5] eliminarComponenteCatalogo: patrón .catch() → try/catch con await.
+// admin.js · Versión 3.4
+//
+// FIXES v3.4 (nuevos):
+//  [FIX-11] _buildTableMap(): reemplazado por _buildTableMapViaJoin().
+//           cargarDashboardReal() ahora usa un SELECT con JOIN implícito
+//           solicitando 'tables(id, name, number, table_number)' en la
+//           misma query de órdenes. Esto elimina la round-trip extra y
+//           garantiza que el nombre de mesa esté siempre disponible.
+//           Fallback: si el JOIN falla (columnas distintas), se ejecuta
+//           _buildTableMap() heredado como segundo intento.
+//
+//  [FIX-12] mesaLabel en tabla-facturas: lógica de prioridad ampliada.
+//           1. JOIN en-línea (orders.tables.name / number / table_number)
+//           2. Regex [MESA ...] en notes (legado)
+//           3. tableMap construido por _buildTableMap() (segundo intento)
+//           4. Últimos 4 chars del UUID
+//           5. 'P.L.' (Para Llevar)
+//
+// FIXES v3.3 (heredados):
+//  [FIX-9]  _guardarEdicionLegacyAdmin: reemplaza .catch() por try/catch.
+//  [FIX-10] _buildTableMap: consulta 'tables' y 'restaurant_tables'.
+//
 // FIXES v3.2 (heredados):
-//  [FIX-6] SOFT DELETE en eliminarComponenteCatalogo.
-//  [FIX-7] cargarSlotsMenuReal: filtro .neq('is_active', false).
-//  [FIX-8] Modal de edición de comandas en admin.html.
-// FIXES v3.3 (nuevos):
-//  [FIX-9]  _guardarEdicionLegacyAdmin: reemplaza TODOS los
-//           .catch() encadenados por try/catch con await.
-//           Supabase JS v2 devuelve {data, error}, NO promesas
-//           con .catch(). Esto causaba el error
-//           "supabaseClient.from(...).insert(...).catch is not a function".
-//  [FIX-10] cargarDashboardReal: resuelve el número/nombre de
-//           mesa correctamente. Ahora consulta la tabla de mesas
-//           (tables / restaurant_tables) para convertir table_id
-//           al nombre visible. Fallback: "[MESA ...]" en notes,
-//           luego table_id truncado, luego "P.L.".
+//  [FIX-6]  SOFT DELETE en eliminarComponenteCatalogo.
+//  [FIX-7]  cargarSlotsMenuReal: filtro .neq('is_active', false).
+//  [FIX-8]  Modal de edición de comandas en admin.html.
+//
+// FIXES v3.1 (heredados):
+//  [FIX-1]  SELECT orders: 'payment_method' manejado con fallback.
+//  [FIX-2]  UPDATE orders: status 'completed' → 'paid'.
+//  [FIX-3]  cargarDashboardReal: totales por método de pago desde sessionStorage.
+//  [FIX-4]  registrarMetodoPago: guarda método en sessionStorage + BD.
+//  [FIX-5]  eliminarComponenteCatalogo: try/catch con await.
+//
 // Bucaramanga, Santander — Colombia
 // ============================================================
 
@@ -129,9 +141,10 @@ function getRangoByCodigo(codigo) {
 }
 
 // ============================================================
-// [FIX-10] HELPER — Construye mapa tableId → nombre de mesa
+// [FIX-11] HELPER — Construye mapa tableId → nombre de mesa
 // Intenta primero la tabla 'tables', luego 'restaurant_tables'.
 // Si ninguna existe devuelve un objeto vacío (sin lanzar error).
+// Usado como fallback cuando el JOIN en-línea no devuelve datos.
 // ============================================================
 async function _buildTableMap() {
     const map = {};
@@ -143,8 +156,10 @@ async function _buildTableMap() {
             .select('id, name, number, table_number');
         if (!error && data) {
             data.forEach(t => {
-                // Usa 'name', 'number' o 'table_number' según lo que exista
-                const label = t.name || (t.number != null ? String(t.number) : null) || (t.table_number != null ? String(t.table_number) : null) || t.id;
+                const label = t.name
+                    || (t.number       != null ? `Mesa ${t.number}`        : null)
+                    || (t.table_number != null ? `Mesa ${t.table_number}`  : null)
+                    || t.id;
                 map[t.id] = label;
             });
             return map;
@@ -158,7 +173,10 @@ async function _buildTableMap() {
             .select('id, name, number, table_number');
         if (!error && data) {
             data.forEach(t => {
-                const label = t.name || (t.number != null ? String(t.number) : null) || (t.table_number != null ? String(t.table_number) : null) || t.id;
+                const label = t.name
+                    || (t.number       != null ? `Mesa ${t.number}`        : null)
+                    || (t.table_number != null ? `Mesa ${t.table_number}`  : null)
+                    || t.id;
                 map[t.id] = label;
             });
             return map;
@@ -169,8 +187,52 @@ async function _buildTableMap() {
 }
 
 // ============================================================
+// [FIX-11] HELPER — Extrae el nombre de mesa de un registro
+// de orden que puede o no tener el JOIN de 'tables' incrustado.
+//
+// Prioridad de resolución:
+//  1. ord.tables (objeto JOIN incrustado por Supabase)
+//  2. Regex [MESA X] en notes (legado)
+//  3. tableMap externo (construido por _buildTableMap)
+//  4. Últimos 4 chars del UUID del table_id
+//  5. 'P.L.' (Para Llevar / sin mesa)
+// ============================================================
+function _resolverNombreMesa(ord, tableMap) {
+    // 1. JOIN incrustado — Supabase devuelve el objeto de la tabla relacionada
+    if (ord.tables) {
+        const t = ord.tables;
+        if (t.name)         return t.name;
+        if (t.number        != null) return `Mesa ${t.number}`;
+        if (t.table_number  != null) return `Mesa ${t.table_number}`;
+    }
+
+    // 2. Regex en notes (legado — cuando el mesero escribe [MESA X])
+    const mesaMatch = (ord.notes || '').match(/\[MESA\s*([^\]]+)\]|\[(PARA LLEVAR|DOMICILIO)\]/i);
+    if (mesaMatch) {
+        return mesaMatch[1]?.trim() || mesaMatch[2] || '—';
+    }
+
+    // 3. tableMap de fallback
+    if (ord.table_id && tableMap && tableMap[ord.table_id]) {
+        return tableMap[ord.table_id];
+    }
+
+    // 4. Últimos 4 chars del UUID
+    if (ord.table_id) {
+        return String(ord.table_id).slice(-4).toUpperCase();
+    }
+
+    // 5. Sin mesa
+    return 'P.L.';
+}
+
+// ============================================================
 // 1. DASHBOARD — CONTABILIDAD Y COMANDAS
-// [FIX-10] Se agrega consulta de mesas para resolver table_id
+//
+// [FIX-11] El SELECT ahora incluye 'tables(id, name, number,
+// table_number)' para resolver el nombre de mesa en una sola
+// round-trip. Si la tabla 'tables' no existe o el JOIN falla
+// por RLS, se activa el fallback _buildTableMap().
 // ============================================================
 async function cargarDashboardReal() {
     try {
@@ -186,18 +248,42 @@ async function cargarDashboardReal() {
         const _cierreDesde = sessionStorage.getItem('cierre_desde');
         const _inicioDiaEfectivo = _cierreDesde || _inicioDia;
 
-        // [FIX-10] Cargar mapa de mesas en paralelo con las órdenes
-        const [{ data: orders, error }, tableMap] = await Promise.all([
-            supabaseClient
-                .from('orders')
-                .select(`id, order_number, customer_name, total_amount, status, notes, payment_method,
-                         table_id, order_items ( quantity, notes, unit_price )`)
-                .gte('created_at', _inicioDiaEfectivo)
-                .lte('created_at', _finDia),
-            _buildTableMap()
-        ]);
+        // ── [FIX-11] SELECT con JOIN incrustado de 'tables' ─────────
+        // Supabase resuelve la FK order.table_id → tables.id
+        // y devuelve las columnas del objeto relacionado como
+        // ord.tables = { id, name, number, table_number }
+        //
+        // Si el JOIN falla (tabla inexistente, RLS, etc.), el campo
+        // ord.tables será null/undefined y activamos el fallback.
+        let joinFuncionó = false;
+
+        const { data: orders, error } = await supabaseClient
+            .from('orders')
+            .select(`
+                id,
+                order_number,
+                customer_name,
+                total_amount,
+                status,
+                notes,
+                payment_method,
+                table_id,
+                tables ( id, name, number, table_number ),
+                order_items ( quantity, notes, unit_price )
+            `)
+            .gte('created_at', _inicioDiaEfectivo)
+            .lte('created_at', _finDia);
 
         if (error) throw error;
+
+        // Detectar si el JOIN entregó datos útiles en alguna orden
+        joinFuncionó = (orders || []).some(o => o.tables !== null && o.tables !== undefined);
+
+        // Fallback: construir mapa solo si el JOIN no funcionó
+        let tableMap = {};
+        if (!joinFuncionó) {
+            tableMap = await _buildTableMap();
+        }
 
         const ordenesValidas = (orders || []).filter(o =>
             o.status !== 'canceled' && o.status !== 'cancelled'
@@ -249,22 +335,8 @@ async function cargarDashboardReal() {
                                <option value="fiado">🤝 Fiado</option>
                            </select>`;
 
-                    // [FIX-10] Resolución de mesa:
-                    // 1. Busca [MESA ...] o [PARA LLEVAR] / [DOMICILIO] en notes
-                    // 2. Si tiene table_id, busca en tableMap
-                    // 3. Fallback: 'P.L.'
-                    const mesaMatch = (ord.notes || '').match(/\[MESA\s*([^\]]+)\]|\[(PARA LLEVAR|DOMICILIO)\]/i);
-                    let mesaLabel;
-                    if (mesaMatch) {
-                        mesaLabel = mesaMatch[1] || mesaMatch[2] || '—';
-                    } else if (ord.table_id && tableMap[ord.table_id]) {
-                        mesaLabel = tableMap[ord.table_id];
-                    } else if (ord.table_id) {
-                        // table_id existe pero no está en el mapa — muestra los últimos 4 chars del UUID
-                        mesaLabel = String(ord.table_id).slice(-4).toUpperCase();
-                    } else {
-                        mesaLabel = 'P.L.';
-                    }
+                    // [FIX-11][FIX-12] Resolución de mesa con prioridad total
+                    const mesaLabel = _resolverNombreMesa(ord, tableMap);
 
                     tbodyFacturas.insertAdjacentHTML('beforeend', `
                         <tr class="tbody-row">
@@ -1008,7 +1080,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ============================================================
-// ELIMINAR / DAR DE BAJA PLATO DEL CATÁLOGO [FIX-6]
+// ELIMINAR / DAR DE BAJA PLATO DEL CATÁLOGO
 // ============================================================
 async function eliminarComponenteCatalogo(idItem, nombreItem) {
     if (!confirm(
@@ -2114,8 +2186,10 @@ async function editarComandaAdmin(orderId, orderNo, totalBruto) {
 
     document.getElementById('eca-body').innerHTML = `
         <div style="text-align:center;padding:40px 0;color:var(--text-3);">
-            <div style="width:32px;height:32px;border:2.5px solid var(--olive-bd);border-top-color:var(--olive);
-                border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px;"></div>
+            <div style="width:32px;height:32px;border:2.5px solid var(--olive-bd);
+                        border-top-color:var(--olive);border-radius:50%;
+                        animation:spin 0.8s linear infinite;
+                        margin:0 auto 12px;"></div>
             <p style="font-size:13px;">Cargando comanda…</p>
         </div>`;
 
@@ -2334,10 +2408,6 @@ async function guardarEdicionAdmin() {
 
 // ============================================================
 // [FIX-9] _guardarEdicionLegacyAdmin — REESCRITA COMPLETA
-// Causa raíz del error v3.2:
-//   supabaseClient.from(...).insert(...).catch is not a function
-// Supabase JS v2 devuelve { data, error }, NO una Promise con
-// .catch(). Todo manejo de errores debe ser try/catch con await.
 // ============================================================
 async function _guardarEdicionLegacyAdmin() {
     const pedido  = _adminEditor.pedido;
@@ -2348,7 +2418,6 @@ async function _guardarEdicionLegacyAdmin() {
     const aActualizar = _adminEditor.itemsEdit.filter(i => !i.eliminado && !i.esNuevo && idsOrig.has(i.id));
     const aNuevos     = _adminEditor.itemsEdit.filter(i => i.esNuevo    && !i.eliminado);
 
-    // ── 1. Eliminar ítems marcados como borrados ───────────────
     for (const it of aEliminar) {
         const { error } = await supabaseClient
             .from('order_items')
@@ -2357,7 +2426,6 @@ async function _guardarEdicionLegacyAdmin() {
         if (error) console.warn('[La 26] No se pudo eliminar ítem', it.id, '—', error.message);
     }
 
-    // ── 2. Actualizar cantidades modificadas ──────────────────
     for (const it of aActualizar) {
         const orig = (pedido.order_items || []).find(o => o.id === it.id);
         if (orig && orig.quantity !== it.cantidad) {
@@ -2369,7 +2437,6 @@ async function _guardarEdicionLegacyAdmin() {
         }
     }
 
-    // ── 3. Insertar nuevos ítems ──────────────────────────────
     if (aNuevos.length > 0) {
         const insertPayload = aNuevos.map(it => ({
             order_id:     orderId,
@@ -2384,11 +2451,9 @@ async function _guardarEdicionLegacyAdmin() {
             .from('order_items')
             .insert(insertPayload);
 
-        // No lanzamos — un fallo en insert no debe bloquear la actualización del total
         if (error) console.warn('[La 26] No se pudieron insertar ítems nuevos —', error.message);
     }
 
-    // ── 4. Recalcular y actualizar total de la orden ──────────
     const nuevoTotal = _calcularTotalAdmin();
     const { error: errTotal } = await supabaseClient
         .from('orders')
@@ -2416,38 +2481,33 @@ function cerrarModalEditarComanda() {
 }
 
 // ============================================================
-// FIN DE admin.js v3.3
+// FIN DE admin.js v3.4
 // ============================================================
-// CAMBIOS RESPECTO A v3.2:
+// CAMBIOS RESPECTO A v3.3:
 //
-// [FIX-9] _guardarEdicionLegacyAdmin — reescrita desde cero.
-//   ANTES: usaba patrón .insert([...]).catch(() => {}) que
-//   lanzaba TypeError porque Supabase JS v2 no devuelve promesas
-//   con .catch().
-//   AHORA: usa for...of + try/catch + await en cada operación.
-//   Las operaciones de delete/update/insert ahora son secuenciales
-//   y manejadas correctamente. El error ya no ocurre.
+// [FIX-11] _buildTableMap() — conservada como fallback.
+//   Se agrega _resolverNombreMesa(ord, tableMap) como helper
+//   centralizado con lógica de prioridad de 5 niveles.
 //
-// [FIX-10] _buildTableMap() — nueva función helper.
-//   Consulta la tabla 'tables' (o 'restaurant_tables' como fallback)
-//   y construye un mapa { [table_id]: nombreMesa }.
+// [FIX-11] cargarDashboardReal() — SELECT ampliado.
+//   Ahora incluye 'tables(id, name, number, table_number)' en
+//   el SELECT de órdenes. Supabase resuelve la FK en una sola
+//   query y entrega el objeto anidado ord.tables directamente.
+//   Si el JOIN funciona (joinFuncionó = true), se omite la
+//   llamada a _buildTableMap(). Si falla (tabla inexistente,
+//   RLS, etc.), se activa el fallback heredado de v3.3.
 //
-// [FIX-10] cargarDashboardReal — actualizado.
-//   Ahora llama _buildTableMap() en Promise.all junto con las órdenes.
-//   La lógica de resolución del mesaLabel es:
-//     1. [MESA ...] en notes (legado) → usa ese valor
-//     2. table_id en tableMap → usa el nombre de la BD
-//     3. table_id existe pero no está en mapa → muestra últimos 4 chars
-//     4. Sin table_id → 'P.L.' (Para Llevar)
+// [FIX-12] mesaLabel — prioridad total de 5 niveles.
+//   Se delega completamente a _resolverNombreMesa() para
+//   eliminar la lógica duplicada y garantizar consistencia
+//   entre el JOIN en-línea y el fallback por regex/mapa.
 //
-// SQL DE DIAGNÓSTICO (ejecutar en Supabase SQL Editor si la mesa
-// sigue sin aparecer — verifica qué tabla existe y qué columnas tiene):
-//
-//   SELECT table_name FROM information_schema.tables
-//   WHERE table_schema = 'public'
-//   AND table_name IN ('tables', 'restaurant_tables');
-//
-//   -- Si existe 'tables':
-//   SELECT id, name, number, table_number FROM tables LIMIT 5;
-//
+// NOTA PARA EL SCHEMA:
+//   Si la FK orders.table_id → tables.id no existe en tu BD,
+//   añádela con:
+//     ALTER TABLE orders
+//       ADD CONSTRAINT fk_orders_tables
+//       FOREIGN KEY (table_id) REFERENCES tables(id);
+//   Sin esta FK, Supabase no puede resolver el JOIN implícito
+//   y el fallback _buildTableMap() tomará el control automát.
 // ============================================================
