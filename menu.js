@@ -1011,6 +1011,7 @@ const HistState = {
     pedidos:         [],
     filtro:          'todos',
     cargado:         false,
+    cargando:        false,   // <-- agregar esta línea
     realtimeChannel: null,
 };
 
@@ -1055,10 +1056,13 @@ function _horaCorta(isoStr) {
 const Hist = {
 
     async cargar() {
+        if (HistState.cargando) return;   // semáforo — evita concurrencia
+        HistState.cargando = true;
         _histSetLoader(true);
         if (!State.restaurantId) await _resolverRestaurant();
         if (!State.restaurantId) {
             _histSetError('No se pudo identificar el restaurante.');
+            HistState.cargando = false;
             return;
         }
         try {
@@ -1095,6 +1099,8 @@ const Hist = {
         } catch (err) {
             console.error('[Hist] Error:', err);
             _histSetError(`No se pudo cargar el historial: ${err.message}`);
+        } finally {
+            HistState.cargando = false;   // liberar semáforo siempre
         }
     },
 
@@ -1171,18 +1177,22 @@ const Hist = {
 
     _suscribirRealtime() {
         if (!State.restaurantId) return;
-        if (HistState.realtimeChannel) {
-            db.removeChannel(HistState.realtimeChannel);
-            HistState.realtimeChannel = null;
-        }
+
+        // No recrear el canal si ya está activo — evita duplicados
+        if (HistState.realtimeChannel) return;
+
         HistState.realtimeChannel = db
             .channel(`la26-hist-v742-${State.restaurantId}`)
             .on('postgres_changes', {
-                event:'*', schema:'public', table:'orders',
-                filter:`restaurant_id=eq.${State.restaurantId}`,
+                event: '*', schema: 'public', table: 'orders',
+                filter: `restaurant_id=eq.${State.restaurantId}`,
             }, (payload) => {
+                // Ignorar si ya hay una carga en curso
+                if (HistState.cargando) return;
+
+                const esNueva = payload.eventType === 'INSERT';
                 Hist.cargar().then(() => {
-                    if (payload.eventType === 'INSERT') Toast.ok('Nuevo pedido registrado');
+                    if (esNueva) Toast.ok('Nuevo pedido registrado');
                 });
             })
             .subscribe();
