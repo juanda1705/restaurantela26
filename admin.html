@@ -17,6 +17,8 @@
         <!-- jsPDF — cargado con crossorigin para evitar el warning de Tracking Prevention -->
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
             crossorigin="anonymous"></script>
+        <!-- Lucide Icons — librería de iconos SVG vía CDN -->
+        <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
         <style>
             :root {
                 --olive: #4a6741;
@@ -828,12 +830,16 @@
                 }
 
                 .bnav-icon {
-                    font-size: 20px;
+                    width: 22px;
+                    height: 22px;
                     line-height: 1;
                     transition: transform .18s;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
                 }
 
-                .bnav-item.bnav-active .bnav-icon {
+            .bnav-item.bnav-active .bnav-icon {
                     transform: translateY(-1px);
                 }
 
@@ -869,6 +875,29 @@
                     grid-template-columns: 1fr !important;
                 }
             }
+
+            /* ── Lucide Icons — estilos globales ── */
+            .ic {
+                display: inline-block;
+                vertical-align: middle;
+                flex-shrink: 0;
+                line-height: 1;
+            }
+            .ic svg {
+                display: block;
+            }
+            /* Tamaño por defecto inline (texto) */
+            .ic-sm svg { width: 14px; height: 14px; }
+            /* Tamaño para botones y labels */
+            .ic-md svg { width: 16px; height: 16px; }
+            /* Tamaño para KPI cards y banners */
+            .ic-lg svg { width: 20px; height: 20px; }
+            /* Tamaño para banners de sección */
+            .ic-xl svg { width: 26px; height: 26px; }
+            /* Tamaño para bottom-nav */
+            .ic-nav svg { width: 22px; height: 22px; }
+            /* Stroke heredado del color del contenedor */
+            .ic svg { stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
         </style>
     </head>
 
@@ -885,12 +914,12 @@
                 Panel Administrativo</span>
         </div>
         <div class="gnav-sep"></div>
-        <a href="admin.html" class="gnav-btn gnav-active">📊 Panel Admin</a>
-        <a href="index.html" class="gnav-btn">🍳 Pantalla Cocina</a>
-        <a href="menu.html" class="gnav-btn">📱 Vista Cliente</a>
+        <a href="admin.html" class="gnav-btn gnav-active"><span class="ic ic-sm"><i data-lucide="layout-dashboard"></i></span> Panel Admin</a>
+        <a href="index.html" class="gnav-btn"><span class="ic ic-sm"><i data-lucide="utensils"></i></span> Pantalla Cocina</a>
+        <a href="menu.html" class="gnav-btn"><span class="ic ic-sm"><i data-lucide="smartphone"></i></span> Vista Cliente</a>
         <div style="flex:1;"></div>
         <span
-            style="font-size:10.5px;font-weight:700;color:var(--olive);background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;">👤
+            style="font-size:10.5px;font-weight:700;color:var(--olive);background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;display:inline-flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="shield-check"></i></span>
             Administrador</span>
     </nav>
 
@@ -914,7 +943,7 @@
                 style="background:var(--red-lt);color:var(--red);border:1.5px solid var(--red-bd);border-radius:999px;padding:7px 18px;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .2s;"
                 onmouseover="this.style.background='rgba(192,57,43,.16)'"
                 onmouseout="this.style.background='var(--red-lt)'">
-                🔒 Cierre de Caja (Z)
+                <span class="ic ic-sm" style="margin-right:4px;"><i data-lucide="lock"></i></span> Cierre de Caja (Z)
             </button>
         </div>
     </header>
@@ -929,42 +958,42 @@
                 Control del Negocio</p>
             <button onclick="cambiarTab('dashboard')" id="btn-tab-dashboard" class="tab-active w-full text-left"
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;border:1.5px solid transparent;">
-                📊 Dashboard Contable
+                <span class="ic ic-md"><i data-lucide="layout-dashboard"></i></span> Dashboard Contable
             </button>
             <button onclick="cambiarTab('menu')" id="btn-tab-menu" class="tab-inactive w-full text-left"
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
-                🍳 Control de Menú
+                <span class="ic ic-md"><i data-lucide="book-open"></i></span> Control de Menú
             </button>
             <button onclick="cambiarTab('personal')" id="btn-tab-personal" class="tab-inactive w-full text-left"
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
-                👥 Control de Personal
+                <span class="ic ic-md"><i data-lucide="users"></i></span> Control de Personal
             </button>
             <button onclick="cambiarTab('nomina')" id="btn-tab-nomina" class="tab-inactive w-full text-left"
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
-                💵 Gastos Operativos
+                <span class="ic ic-md"><i data-lucide="banknote"></i></span> Gastos Operativos
             </button>
             <button onclick="cambiarTab('inventario')" id="btn-tab-inventario" class="tab-inactive w-full text-left"
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
-                📦 Inventario General
+                <span class="ic ic-md"><i data-lucide="package"></i></span> Inventario General
             </button>
             <div style="height:1.5px;background:var(--border);margin:6px 8px;"></div>
             <button onclick="cambiarTab('dian')" id="btn-tab-dian" class="tab-inactive w-full text-left"
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
-                🧾 Facturación DIAN
+                <span class="ic ic-md"><i data-lucide="file-text"></i></span> Facturación DIAN
             </button>
             <div style="height:1.5px;background:var(--border);margin:6px 8px;"></div>
             <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:1.2px;padding:4px 8px 2px;">Gestión Avanzada</p>
             <button onclick="cambiarTab('calendario')" id="btn-tab-calendario" class="tab-inactive w-full text-left"
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
-                📅 Calendario de Cierres
+                <span class="ic ic-md"><i data-lucide="calendar"></i></span> Calendario de Cierres
             </button>
             <button onclick="cambiarTab('permisos')" id="btn-tab-permisos" class="tab-inactive w-full text-left"
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
-                🔐 Permisos de Acceso
+                <span class="ic ic-md"><i data-lucide="shield"></i></span> Permisos de Acceso
             </button>
             <button onclick="cambiarTab('produccion')" id="btn-tab-produccion" class="tab-inactive w-full text-left"
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
-                🧪 Producción / Recetario
+                <span class="ic ic-md"><i data-lucide="flask-conical"></i></span> Producción / Recetario
             </button>
 
         </aside>
@@ -980,15 +1009,15 @@
                     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
                         <div>
                             <p
-                                style="font-size:11px;font-weight:700;color:var(--olive);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">
-                                🏦 Apertura de Caja</p>
+                                style="font-size:11px;font-weight:700;color:var(--olive);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;display:flex;align-items:center;gap:6px;">
+                                <span class="ic ic-sm"><i data-lucide="vault"></i></span> Apertura de Caja</p>
                             <p style="font-size:12px;color:var(--text-2);">Registra el efectivo base con el que arranca
                                 la jornada.</p>
                         </div>
                         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                             <input id="input-base-caja" type="number" placeholder="Ej: 50000" min="0"
                                 style="width:160px;border-radius:999px;background:#fff;">
-                            <button onclick="registrarAperturaCaja()" class="btn-olive" style="white-space:nowrap;">✅
+                            <button onclick="registrarAperturaCaja()" class="btn-olive" style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px;"><span class="ic ic-sm"><i data-lucide="check-circle"></i></span>
                                 Registrar Base</button>
                         </div>
                     </div>
@@ -1004,7 +1033,7 @@
                             <h3 id="gros-ventas" class="mono"
                                 style="font-size:22px;font-weight:700;color:var(--olive);margin-top:4px;">$0</h3>
                         </div>
-                        <div class="kpi-icon" style="background:var(--olive-lt);">💰</div>
+                        <div class="kpi-icon" style="background:var(--olive-lt);color:var(--olive);"><span class="ic ic-lg"><i data-lucide="trending-up"></i></span></div>
                     </div>
                     <div class="kpi-card">
                         <div>
@@ -1014,7 +1043,7 @@
                             <h3 id="total-pedidos" class="mono"
                                 style="font-size:22px;font-weight:700;color:var(--blue);margin-top:4px;">0</h3>
                         </div>
-                        <div class="kpi-icon" style="background:var(--blue-lt);">📋</div>
+                        <div class="kpi-icon" style="background:var(--blue-lt);color:var(--blue);"><span class="ic ic-lg"><i data-lucide="clipboard-list"></i></span></div>
                     </div>
                     <div class="kpi-card">
                         <div>
@@ -1024,7 +1053,7 @@
                             <h3 id="total-gastos" class="mono"
                                 style="font-size:22px;font-weight:700;color:var(--red);margin-top:4px;">$0</h3>
                         </div>
-                        <div class="kpi-icon" style="background:var(--red-lt);">📉</div>
+                        <div class="kpi-icon" style="background:var(--red-lt);color:var(--red);"><span class="ic ic-lg"><i data-lucide="trending-down"></i></span></div>
                     </div>
                     <div class="kpi-card">
                         <div>
@@ -1035,7 +1064,7 @@
                                 style="font-size:22px;font-weight:700;color:var(--amber);margin-top:4px;">$0</h3>
                             <p style="font-size:9.5px;color:var(--text-3);margin-top:2px;">Tarifa 6.9‰ — BGA</p>
                         </div>
-                        <div class="kpi-icon" style="background:var(--amber-lt);">🏛️</div>
+                        <div class="kpi-icon" style="background:var(--amber-lt);color:var(--amber);"><span class="ic ic-lg"><i data-lucide="landmark"></i></span></div>
                     </div>
                 </div>
 
@@ -1044,32 +1073,32 @@
                     <div class="kpi-card" style="border-color:var(--olive-bd);">
                         <div>
                             <p
-                                style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;">
-                                💵 Efectivo</p>
+                                style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;display:flex;align-items:center;gap:5px;">
+                                <span class="ic ic-sm" style="color:var(--olive);"><i data-lucide="banknote"></i></span> Efectivo</p>
                             <h3 id="kpi-efectivo" class="mono"
                                 style="font-size:20px;font-weight:700;color:var(--olive);margin-top:4px;">$0</h3>
                         </div>
-                        <div class="kpi-icon" style="background:var(--olive-lt);">🏦</div>
+                        <div class="kpi-icon" style="background:var(--olive-lt);color:var(--olive);"><span class="ic ic-lg"><i data-lucide="vault"></i></span></div>
                     </div>
                     <div class="kpi-card" style="border-color:rgba(37,99,168,.22);">
                         <div>
                             <p
-                                style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;">
-                                📲 Transferencia</p>
+                                style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;display:flex;align-items:center;gap:5px;">
+                                <span class="ic ic-sm" style="color:var(--blue);"><i data-lucide="smartphone"></i></span> Transferencia</p>
                             <h3 id="kpi-transferencia" class="mono"
                                 style="font-size:20px;font-weight:700;color:var(--blue);margin-top:4px;">$0</h3>
                         </div>
-                        <div class="kpi-icon" style="background:var(--blue-lt);">📱</div>
+                        <div class="kpi-icon" style="background:var(--blue-lt);color:var(--blue);"><span class="ic ic-lg"><i data-lucide="send"></i></span></div>
                     </div>
                     <div class="kpi-card" style="border-color:rgba(154,108,26,.22);">
                         <div>
                             <p
-                                style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;">
-                                🤝 Fiado (Pendiente)</p>
+                                style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.7px;display:flex;align-items:center;gap:5px;">
+                                <span class="ic ic-sm" style="color:var(--amber);"><i data-lucide="handshake"></i></span> Fiado (Pendiente)</p>
                             <h3 id="kpi-fiado" class="mono"
                                 style="font-size:20px;font-weight:700;color:var(--amber);margin-top:4px;">$0</h3>
                         </div>
-                        <div class="kpi-icon" style="background:var(--amber-lt);">⏳</div>
+                        <div class="kpi-icon" style="background:var(--amber-lt);color:var(--amber);"><span class="ic ic-lg"><i data-lucide="clock"></i></span></div>
                     </div>
                     <div class="kpi-card" style="border-color:var(--olive-bd);">
                         <div>
@@ -1080,7 +1109,7 @@
                                 style="font-size:20px;font-weight:700;color:var(--olive);margin-top:4px;">$0</h3>
                             <p style="font-size:9.5px;color:var(--text-3);margin-top:2px;">Base + Efectivo + Transf.</p>
                         </div>
-                        <div class="kpi-icon" style="background:var(--olive-lt);">💼</div>
+                        <div class="kpi-icon" style="background:var(--olive-lt);color:var(--olive);"><span class="ic ic-lg"><i data-lucide="wallet"></i></span></div>
                     </div>
                 </div>
 
@@ -1088,7 +1117,7 @@
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;" class="tables-grid">
                     <div class="card" style="padding:0;overflow:hidden;">
                         <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
-                            <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">🧾 Historial de Facturación
+                            <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="receipt"></i></span> Historial de Facturación
                             </h3>
                         </div>
                         <div style="overflow-x:auto;">
@@ -1115,7 +1144,7 @@
                     </div>
                     <div class="card" style="padding:0;overflow:hidden;">
                         <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
-                            <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">🔥 Platos Más Solicitados
+                            <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md" style="color:var(--red);"><i data-lucide="flame"></i></span> Platos Más Solicitados
                             </h3>
                         </div>
                         <div style="overflow-x:auto;">
@@ -1143,20 +1172,20 @@
             <section id="tab-menu" style="display:none;flex-direction:column;gap:20px;">
                 <div class="card" style="background:var(--surface-2);border-style:dashed;">
                     <p
-                        style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.9px;margin-bottom:12px;">
-                        📐 Estructura de Códigos del Catálogo</p>
+                        style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.9px;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+                        <span class="ic ic-sm"><i data-lucide="hash"></i></span> Estructura de Códigos del Catálogo</p>
                     <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                        <span class="range-badge range-01">🌿 01–10 · Vegetales, Salsas e Ingredientes Base</span>
-                        <span class="range-badge range-11">🥩 11–30 · Carnes, Proteínas y Cortes</span>
-                        <span class="range-badge range-31">🍲 31–50 · Acompañamientos y Principios</span>
-                        <span class="range-badge range-51">🍹 51–70 · Bebidas y Jugos</span>
-                        <span class="range-badge range-71">✨ 71+ · Platos a la Carta y Especiales</span>
+                        <span class="range-badge range-01"><span class="ic ic-sm"><i data-lucide="leaf"></i></span> 01–10 · Vegetales, Salsas e Ingredientes Base</span>
+                        <span class="range-badge range-11"><span class="ic ic-sm"><i data-lucide="beef"></i></span> 11–30 · Carnes, Proteínas y Cortes</span>
+                        <span class="range-badge range-31"><span class="ic ic-sm"><i data-lucide="soup"></i></span> 31–50 · Acompañamientos y Principios</span>
+                        <span class="range-badge range-51"><span class="ic ic-sm"><i data-lucide="cup-soda"></i></span> 51–70 · Bebidas y Jugos</span>
+                        <span class="range-badge range-71"><span class="ic ic-sm"><i data-lucide="star"></i></span> 71+ · Platos a la Carta y Especiales</span>
                     </div>
                 </div>
 
                 <div class="card">
                     <div style="margin-bottom:18px;">
-                        <h3 style="font-size:15px;font-weight:700;color:var(--text-1);">🍳 Editor Modular del Catálogo
+                        <h3 style="font-size:15px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="utensils-crossed"></i></span> Editor Modular del Catálogo
                         </h3>
                         <p style="font-size:12px;color:var(--text-3);margin-top:3px;">Asigna un código único según la
                             estructura de rangos. Las proteínas ya incluyen su salsa. Porciones en 0 → se bloquea
@@ -1180,11 +1209,11 @@
                         <div>
                             <label>Tipo de Componente</label>
                             <select id="menu-tipo">
-                                <option value="executive_lunch">🥩 Proteína con Salsa</option>
-                                <option value="side">🍲 Principio / Acompañamiento</option>
-                                <option value="drink">🍹 Bebida / Refresco</option>
-                                <option value="a_la_carte">✨ Plato a la Carta</option>
-                                <option value="dessert">🍮 Postre</option>
+                                <option value="executive_lunch">Proteína con Salsa</option>
+                                <option value="side">Principio / Acompañamiento</option>
+                                <option value="drink">Bebida / Refresco</option>
+                                <option value="a_la_carte">Plato a la Carta</option>
+                                <option value="dessert">Postre</option>
                             </select>
                         </div>
                         <div>
@@ -1193,7 +1222,7 @@
                         </div>
                         <div>
                             <label>&nbsp;</label>
-                            <button type="submit" class="btn-olive" style="height:40px;width:100%;">💾
+                            <button type="submit" class="btn-olive" style="height:40px;width:100%;display:inline-flex;align-items:center;justify-content:center;gap:6px;"><span class="ic ic-sm"><i data-lucide="save"></i></span>
                                 Registrar</button>
                         </div>
                     </form>
@@ -1203,15 +1232,15 @@
                     <button type="button" onclick="filtrarMenuComponente('todos')" id="btn-comp-todos"
                         class="filter-btn filter-active btn-comp">Todo el Catálogo</button>
                     <button type="button" onclick="filtrarMenuComponente('executive_lunch')"
-                        id="btn-comp-executive_lunch" class="filter-btn btn-comp">🥩 Proteínas</button>
+                        id="btn-comp-executive_lunch" class="filter-btn btn-comp" style="display:inline-flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="beef"></i></span> Proteínas</button>
                     <button type="button" onclick="filtrarMenuComponente('side')" id="btn-comp-side"
-                        class="filter-btn btn-comp">🍲 Principios</button>
+                        class="filter-btn btn-comp" style="display:inline-flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="soup"></i></span> Principios</button>
                     <button type="button" onclick="filtrarMenuComponente('a_la_carte')" id="btn-comp-a_la_carte"
-                        class="filter-btn btn-comp">✨ A la Carta</button>
+                        class="filter-btn btn-comp" style="display:inline-flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="star"></i></span> A la Carta</button>
                     <button type="button" onclick="filtrarMenuComponente('drink')" id="btn-comp-drink"
-                        class="filter-btn btn-comp">🍹 Bebidas</button>
+                        class="filter-btn btn-comp" style="display:inline-flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="cup-soda"></i></span> Bebidas</button>
                     <button type="button" onclick="filtrarMenuComponente('dessert')" id="btn-comp-dessert"
-                        class="filter-btn btn-comp">🍮 Postres</button>
+                        class="filter-btn btn-comp" style="display:inline-flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="cake-slice"></i></span> Postres</button>
                 </div>
 
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;" id="contenedor-slots-menu">
@@ -1224,7 +1253,7 @@
             <section id="tab-personal" style="display:none;flex-direction:column;gap:24px;">
                 <div class="card" style="background:var(--olive-lt);border-color:var(--olive-bd);">
                     <div style="display:flex;gap:12px;align-items:flex-start;">
-                        <span style="font-size:24px;margin-top:2px;">👥</span>
+                        <span style="font-size:24px;margin-top:2px;color:var(--olive);"><span class="ic ic-xl"><i data-lucide="users"></i></span></span>
                         <div>
                             <h3 style="font-size:15px;font-weight:700;color:var(--olive);margin-bottom:4px;">Control de
                                 Personal y Nómina — Ley Laboral Colombiana 2026</h3>
@@ -1241,7 +1270,7 @@
                 <div style="display:grid;grid-template-columns:320px 1fr;gap:20px;align-items:start;"
                     class="personal-grid">
                     <div class="card" style="flex-shrink:0;">
-                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);margin-bottom:18px;">➕ Registrar
+                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);margin-bottom:18px;display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="user-plus"></i></span> Registrar
                             Empleado</h3>
                         <form id="form-empleado" style="display:flex;flex-direction:column;gap:14px;">
                             <div><label>Nombre Completo</label><input type="text" id="emp-nombre"
@@ -1259,14 +1288,14 @@
                                     placeholder="Ej: 1423500" required></div>
                             <div><label>Días Trabajados (este mes)</label><input type="number" id="emp-dias"
                                     placeholder="Ej: 26" min="1" max="30" value="30" required></div>
-                            <button type="submit" class="btn-olive">💾 Añadir al Personal</button>
+                            <button type="submit" class="btn-olive" style="display:inline-flex;align-items:center;gap:6px;"><span class="ic ic-sm"><i data-lucide="save"></i></span> Añadir al Personal</button>
                         </form>
                     </div>
 
                     <div class="card" style="padding:0;overflow:hidden;">
                         <div
                             style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-                            <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📋 Nómina del Personal</h3>
+                            <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="clipboard-list"></i></span> Nómina del Personal</h3>
                             <span id="emp-count-badge"
                                 style="background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;">0
                                 empleados</span>
@@ -1294,7 +1323,7 @@
                         </div>
                         <div id="emp-costo-total"
                             style="display:none;padding:16px 20px;border-top:1.5px solid var(--border);background:var(--surface-2);justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-                            <span style="font-size:12px;font-weight:600;color:var(--text-2);">💼 Costo total del
+                            <span style="font-size:12px;font-weight:600;color:var(--text-2);display:inline-flex;align-items:center;gap:6px;"><span class="ic ic-sm"><i data-lucide="briefcase"></i></span> Costo total del
                                 restaurante (empleador)</span>
                             <span id="emp-costo-total-valor" class="mono"
                                 style="font-size:16px;font-weight:700;color:var(--amber);">$0</span>
@@ -1307,7 +1336,7 @@
             <section id="tab-nomina" style="display:none;grid-template-columns:1fr 2fr;gap:20px;align-items:start;"
                 class="gastos-grid">
                 <div class="card">
-                    <h3 style="font-size:14px;font-weight:700;color:var(--text-1);margin-bottom:18px;">📝 Registrar
+                    <h3 style="font-size:14px;font-weight:700;color:var(--text-1);margin-bottom:18px;display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="file-pen-line"></i></span> Registrar
                         Salida de Caja</h3>
                     <form id="form-gasto" style="display:flex;flex-direction:column;gap:14px;">
                         <div>
@@ -1323,13 +1352,13 @@
                                 placeholder="Ej: Pago diario Carlos Torres" required></div>
                         <div><label>Valor ($ COP)</label><input type="number" id="gasto-monto" placeholder="Ej: 60000"
                                 required></div>
-                        <button type="submit" class="btn-olive">💾 Registrar Movimiento</button>
+                        <button type="submit" class="btn-olive" style="display:inline-flex;align-items:center;gap:6px;"><span class="ic ic-sm"><i data-lucide="save"></i></span> Registrar Movimiento</button>
                     </form>
                 </div>
 
                 <div class="card" style="padding:0;overflow:hidden;">
                     <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
-                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📉 Historial de Salidas de Caja
+                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md" style="color:var(--red);"><i data-lucide="arrow-down-circle"></i></span> Historial de Salidas de Caja
                         </h3>
                     </div>
                     <div style="overflow-x:auto;">
@@ -1357,7 +1386,7 @@
             <!-- TAB: INVENTARIO -->
             <section id="tab-inventario" style="display:none;flex-direction:column;gap:20px;">
                 <div class="card">
-                    <h3 style="font-size:14px;font-weight:700;color:var(--text-1);margin-bottom:18px;">➕ Registrar Nuevo
+                    <h3 style="font-size:14px;font-weight:700;color:var(--text-1);margin-bottom:18px;display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="plus-circle"></i></span> Registrar Nuevo
                         Insumo</h3>
                     <form id="form-nuevo-insumo"
                         style="display:grid;grid-template-columns:1fr 1fr 120px 140px auto;gap:12px;align-items:end;">
@@ -1387,13 +1416,13 @@
                             </select>
                         </div>
                         <div><label>&nbsp;</label><button type="submit" class="btn-olive"
-                                style="height:40px;width:100%;">💾 Añadir</button></div>
+                                style="height:40px;width:100%;display:inline-flex;align-items:center;justify-content:center;gap:6px;"><span class="ic ic-sm"><i data-lucide="plus"></i></span> Añadir</button></div>
                     </form>
                 </div>
 
                 <div class="card" style="padding:0;overflow:hidden;">
                     <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
-                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📦 Kárdex de Suministros</h3>
+                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="package-open"></i></span> Kárdex de Suministros</h3>
                     </div>
                     <div style="overflow-x:auto;">
                         <table style="width:100%;border-collapse:collapse;">
@@ -1479,8 +1508,8 @@
                             </div>
                         </div>
                         <button type="button" onclick="emitirFacturaDian()" class="btn-olive"
-                            style="width:100%;height:46px;font-size:14px;letter-spacing:.3px;">
-                            📤 Emitir Factura Electrónica
+                            style="width:100%;height:46px;font-size:14px;letter-spacing:.3px;display:inline-flex;align-items:center;justify-content:center;gap:8px;">
+                            <span class="ic ic-md"><i data-lucide="send"></i></span> Emitir Factura Electrónica
                         </button>
                         <div id="dian-resultado"
                             style="display:none;background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px;">
@@ -1491,7 +1520,7 @@
                 <div class="card" style="padding:0;overflow:hidden;">
                     <div
                         style="padding:16px 18px 12px;border-bottom:1.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📋 Facturas Emitidas Hoy</h3>
+                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="clipboard-check"></i></span> Facturas Emitidas Hoy</h3>
                         <span id="dian-contador-badge"
                             style="background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;">0
                             facturas</span>
@@ -1520,7 +1549,7 @@
                 <details class="card" style="padding:0;overflow:hidden;cursor:pointer;">
                     <summary
                         style="padding:16px 18px;display:flex;align-items:center;gap:10px;list-style:none;-webkit-appearance:none;">
-                        <span style="font-size:16px;">🏛️</span>
+                        <span style="font-size:16px;color:var(--amber);display:inline-flex;align-items:center;"><span class="ic ic-lg"><i data-lucide="landmark"></i></span></span>
                         <span style="font-size:13px;font-weight:700;color:var(--olive);flex:1;">Marco Legal —
                             Facturación Electrónica</span>
                         <span style="font-size:11px;color:var(--text-3);font-weight:500;">ver más ▾</span>
@@ -1543,7 +1572,7 @@
                 <!-- Banner de estado global -->
                 <div class="card" style="background:var(--olive-lt);border-color:var(--olive-bd);">
                     <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
-                        <span style="font-size:28px;">🔐</span>
+                        <span style="font-size:28px;color:var(--olive);"><span class="ic ic-xl"><i data-lucide="shield-check"></i></span></span>
                         <div style="flex:1;min-width:200px;">
                             <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap;">
                                 <h3 style="font-size:15px;font-weight:700;color:var(--olive);">Gestión de Usuarios y Permisos</h3>
@@ -1553,15 +1582,15 @@
                         </div>
                         <button id="btn-toggle-sistema" data-estado="true"
                             onclick="toggleEstadoSistema()" class="sw-on"
-                            style="flex-shrink:0;padding:10px 22px;font-size:13px;font-weight:700;">
-                            🟢 Pedidos Habilitados
+                            style="flex-shrink:0;padding:10px 22px;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:8px;">
+                            <span class="ic ic-sm"><i data-lucide="check-circle-2"></i></span> Pedidos Habilitados
                         </button>
                     </div>
                 </div>
 
                 <!-- Explicación de la lógica -->
                 <div class="card" style="background:var(--surface-2);border-style:dashed;">
-                    <p style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.9px;margin-bottom:10px;">🔒 ¿Cómo funciona el Cierre de Pedidos?</p>
+                    <p style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.9px;margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span class="ic ic-sm"><i data-lucide="lock"></i></span> ¿Cómo funciona el Cierre de Pedidos?</p>
                     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;" class="tables-grid">
                         <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px;">
                             <p style="font-size:13px;font-weight:700;color:var(--olive);margin-bottom:6px;">1 · Admin desactiva</p>
@@ -1586,7 +1615,7 @@
                 <!-- ═══ EXPLICACIÓN DEL SISTEMA ═══ -->
                 <div class="card" style="background:var(--olive-lt);border-color:var(--olive-bd);">
                     <div style="display:flex;gap:14px;align-items:flex-start;">
-                        <span style="font-size:28px;flex-shrink:0;">🧪</span>
+                        <span style="font-size:28px;flex-shrink:0;color:var(--olive);"><span class="ic ic-xl"><i data-lucide="flask-conical"></i></span></span>
                         <div>
                             <h3 style="font-size:15px;font-weight:700;color:var(--olive);margin-bottom:6px;">¿Cómo funciona el Recetario de Producción?</h3>
                             <p style="font-size:12.5px;color:var(--text-2);line-height:1.8;">
@@ -1604,15 +1633,15 @@
                     </div>
                     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px;" class="tables-grid">
                         <div style="background:var(--surface);border:1.5px solid var(--olive-bd);border-radius:12px;padding:12px;">
-                            <p style="font-size:11px;font-weight:700;color:var(--olive);margin-bottom:4px;">📖 Ejemplo real</p>
+                            <p style="font-size:11px;font-weight:700;color:var(--olive);margin-bottom:4px;display:flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="book-open"></i></span> Ejemplo real</p>
                             <p style="font-size:11.5px;color:var(--text-2);line-height:1.6;">Stock: 5 Kg pollo · 24 Kg arroz<br>Receta: 200g pollo + 150g arroz por plato<br>→ Pollo: 25 platos · Arroz: 160 platos<br><strong>→ Estimado: ~25 platos</strong></p>
                         </div>
                         <div style="background:var(--surface);border:1.5px solid rgba(154,108,26,.3);border-radius:12px;padding:12px;">
-                            <p style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:4px;">⚠️ Factor merme</p>
+                            <p style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:4px;display:flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="alert-triangle"></i></span> Factor merme</p>
                             <p style="font-size:11.5px;color:var(--text-2);line-height:1.6;">En cocina real se pierde un 10–20% por limpieza, cocción y porcionado. Ingresa la cantidad <strong>ya limpia y lista</strong> para cocinar, o define la receta incluyendo el merme.</p>
                         </div>
                         <div style="background:var(--surface);border:1.5px solid rgba(37,99,168,.25);border-radius:12px;padding:12px;">
-                            <p style="font-size:11px;font-weight:700;color:var(--blue);margin-bottom:4px;">🔗 Flujo completo</p>
+                            <p style="font-size:11px;font-weight:700;color:var(--blue);margin-bottom:4px;display:flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="git-merge"></i></span> Flujo completo</p>
                             <p style="font-size:11.5px;color:var(--text-2);line-height:1.6;">Calcular → ver estimado → ir a Control de Menú → poner ese número en "Porciones del día" → al llegar a 0 el plato se bloquea automáticamente.</p>
                         </div>
                     </div>
@@ -1621,7 +1650,7 @@
                 <!-- ═══ FORMULARIO NUEVA RECETA ═══ -->
                 <div class="card">
                     <div style="margin-bottom:16px;">
-                        <h3 style="font-size:15px;font-weight:700;color:var(--text-1);">📖 Registrar Nueva Receta Base</h3>
+                        <h3 style="font-size:15px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="notebook-pen"></i></span> Registrar Nueva Receta Base</h3>
                         <p style="font-size:12px;color:var(--text-3);margin-top:3px;">
                             Define cuánto insumo consume <strong>un solo plato</strong>. Usa gramos o la unidad más precisa posible.
                         </p>
@@ -1635,7 +1664,7 @@
                     <div style="border:1.5px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:12px;">
                         <div style="padding:12px 16px;background:var(--surface-2);border-bottom:1.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
                             <div>
-                                <p style="font-size:12px;font-weight:700;color:var(--text-2);">🧂 Ingredientes — consumo por <strong>1 plato</strong></p>
+                                <p style="font-size:12px;font-weight:700;color:var(--text-2);display:flex;align-items:center;gap:6px;"><span class="ic ic-sm"><i data-lucide="test-tube-2"></i></span> Ingredientes — consumo por <strong>1 plato</strong></p>
                                 <p style="font-size:11px;color:var(--text-3);">Usa la misma unidad que en el inventario (Kg, Libras, Unidades…)</p>
                             </div>
                             <button onclick="agregarFilaIngrediente()" class="btn-ghost" style="padding:5px 14px;font-size:12px;">+ Agregar</button>
@@ -1654,21 +1683,22 @@
                             </table>
                         </div>
                         <div style="padding:10px 16px;background:var(--surface-2);border-top:1.5px solid var(--border);">
-                            <p style="font-size:11px;color:var(--text-3);">
-                                ⚡ Selecciona del inventario para que el descuento sea automático. Si escribes un nombre manual no se descontará stock (solo aparece en el informe).
+                            <p style="font-size:11px;color:var(--text-3);display:flex;align-items:flex-start;gap:5px;">
+                                <span class="ic ic-sm" style="margin-top:1px;flex-shrink:0;"><i data-lucide="info"></i></span>
+                                Selecciona del inventario para que el descuento sea automático. Si escribes un nombre manual no se descontará stock (solo aparece en el informe).
                             </p>
                         </div>
                     </div>
 
                     <div style="display:flex;justify-content:flex-end;">
-                        <button onclick="guardarReceta()" class="btn-olive" style="padding:10px 26px;">💾 Guardar Receta</button>
+                        <button onclick="guardarReceta()" class="btn-olive" style="padding:10px 26px;display:inline-flex;align-items:center;gap:6px;"><span class="ic ic-sm"><i data-lucide="save"></i></span> Guardar Receta</button>
                     </div>
                 </div>
 
                 <!-- ═══ CALCULADORA DE PRODUCCIÓN ═══ -->
                 <div class="card" style="border-color:var(--olive-bd);">
                     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
-                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);flex:1;">🧮 Calcular Producción del Día</h3>
+                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);flex:1;display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="calculator"></i></span> Calcular Producción del Día</h3>
                         <span style="font-size:11px;color:var(--text-3);">Lee el stock actual del inventario</span>
                     </div>
                     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
@@ -1695,7 +1725,7 @@
                 <!-- ═══ TABLA DE RECETAS ═══ -->
                 <div class="card" style="padding:0;overflow:hidden;">
                     <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📋 Recetas Registradas</h3>
+                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="list"></i></span> Recetas Registradas</h3>
                         <span id="badge-recetas-count" style="background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;">0 recetas</span>
                     </div>
                     <div style="overflow-x:auto;">
@@ -1722,7 +1752,7 @@
 
                 <div class="card" style="background:var(--blue-lt);border-color:rgba(37,99,168,.25);">
                     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                        <span style="font-size:28px;">📅</span>
+                        <span style="font-size:28px;color:var(--olive);"><span class="ic ic-xl"><i data-lucide="calendar-days"></i></span></span>
                         <div style="flex:1;">
                             <h3 style="font-size:15px;font-weight:700;color:var(--blue);margin-bottom:3px;">Historial de Cierres de Caja</h3>
                             <p style="font-size:12px;color:var(--text-2);">Cada vez que ejecutas el Cierre de Caja (Z), el ciclo queda registrado aquí para auditoría contable.</p>
@@ -1736,7 +1766,7 @@
                 <!-- Tabla de cierres -->
                 <div class="card" style="padding:0;overflow:hidden;">
                     <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
-                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);">📋 Registro de Ciclos Contables</h3>
+                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="archive"></i></span> Registro de Ciclos Contables</h3>
                     </div>
                     <div style="overflow-x:auto;">
                         <table style="width:100%;border-collapse:collapse;min-width:640px;">
@@ -1765,36 +1795,35 @@
     <!-- ════ BOTTOM NAV (móvil) ════ -->
     <nav id="bottom-nav" aria-label="Navegación principal">
         <button class="bnav-item bnav-active" id="bnav-dashboard" onclick="cambiarTab('dashboard')">
-            <span class="bnav-icon">📊</span><span class="bnav-label">Dashboard</span>
+            <span class="bnav-icon ic-nav"><i data-lucide="layout-dashboard"></i></span><span class="bnav-label">Dashboard</span>
         </button>
         <button class="bnav-item" id="bnav-menu" onclick="cambiarTab('menu')">
-            <span class="bnav-icon">🔍</span><span class="bnav-label">Productos</span>
+            <span class="bnav-icon ic-nav"><i data-lucide="book-open"></i></span><span class="bnav-label">Productos</span>
         </button>
         <button class="bnav-item" id="bnav-personal" onclick="cambiarTab('personal')">
-            <span class="bnav-icon">👥</span><span class="bnav-label">Nómina</span>
+            <span class="bnav-icon ic-nav"><i data-lucide="users"></i></span><span class="bnav-label">Nómina</span>
         </button>
         <button class="bnav-item" id="bnav-nomina" onclick="cambiarTab('nomina')">
-            <span class="bnav-icon">💵</span><span class="bnav-label">Gastos</span>
+            <span class="bnav-icon ic-nav"><i data-lucide="banknote"></i></span><span class="bnav-label">Gastos</span>
         </button>
         <button class="bnav-item" id="bnav-inventario" onclick="cambiarTab('inventario')">
-            <span class="bnav-icon">📦</span><span class="bnav-label">Inventario</span>
+            <span class="bnav-icon ic-nav"><i data-lucide="package"></i></span><span class="bnav-label">Inventario</span>
         </button>
         <button class="bnav-item" id="bnav-dian" onclick="cambiarTab('dian')">
-            <span class="bnav-icon">🧾</span><span class="bnav-label">Factura</span>
+            <span class="bnav-icon ic-nav"><i data-lucide="file-text"></i></span><span class="bnav-label">Factura</span>
         </button>
         <button class="bnav-item" id="bnav-permisos" onclick="cambiarTab('permisos')">
-            <span class="bnav-icon">🔐</span><span class="bnav-label">Permisos</span>
+            <span class="bnav-icon ic-nav"><i data-lucide="shield"></i></span><span class="bnav-label">Permisos</span>
         </button>
         <button class="bnav-item" id="bnav-produccion" onclick="cambiarTab('produccion')">
-            <span class="bnav-icon">🧪</span><span class="bnav-label">Recetario</span>
+            <span class="bnav-icon ic-nav"><i data-lucide="flask-conical"></i></span><span class="bnav-label">Recetario</span>
         </button>
         <button class="bnav-item" id="bnav-calendario" onclick="cambiarTab('calendario')">
-            <span class="bnav-icon">📅</span><span class="bnav-label">Cierres</span>
+            <span class="bnav-icon ic-nav"><i data-lucide="calendar"></i></span><span class="bnav-label">Cierres</span>
         </button>
         <a class="bnav-item" href="index.html">
-            <span class="bnav-icon">🔥</span><span class="bnav-label">Cocina</span>
+            <span class="bnav-icon ic-nav"><i data-lucide="utensils"></i></span><span class="bnav-label">Cocina</span>
         </a>
-
     </nav>
 
     <!-- ════ MODAL CIERRE DE CAJA ════ -->
@@ -1804,7 +1833,7 @@
             <!-- Header -->
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px;">
                 <div>
-                    <h2 style="font-size:17px;font-weight:700;color:var(--text-1);">🔒 Cierre de Caja — Informe Z</h2>
+                    <h2 style="font-size:17px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:8px;"><span class="ic ic-md" style="color:var(--red);"><i data-lucide="lock"></i></span> Cierre de Caja — Informe Z</h2>
                     <p style="font-size:11.5px;color:var(--text-3);margin-top:2px;">Restaurante la 26 · Bucaramanga, Santander</p>
                 </div>
                 <button onclick="cerrarModalCierre()"
@@ -1839,28 +1868,28 @@
             <!-- Métodos de pago -->
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;">
                 <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:12px;padding:12px;text-align:center;">
-                    <p style="font-size:10px;font-weight:700;color:var(--olive);text-transform:uppercase;margin-bottom:4px;">💵 Efectivo</p>
+                    <p style="font-size:10px;font-weight:700;color:var(--olive);text-transform:uppercase;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;"><span class="ic ic-sm"><i data-lucide="banknote"></i></span> Efectivo</p>
                     <p class="mono" id="cierre-ef" style="font-size:14px;font-weight:700;color:var(--olive);">$0</p>
                 </div>
                 <div style="background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.25);border-radius:12px;padding:12px;text-align:center;">
-                    <p style="font-size:10px;font-weight:700;color:var(--blue);text-transform:uppercase;margin-bottom:4px;">📲 Transferencia</p>
+                    <p style="font-size:10px;font-weight:700;color:var(--blue);text-transform:uppercase;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;"><span class="ic ic-sm"><i data-lucide="smartphone"></i></span> Transferencia</p>
                     <p class="mono" id="cierre-tr" style="font-size:14px;font-weight:700;color:var(--blue);">$0</p>
                 </div>
                 <div style="background:var(--amber-lt);border:1.5px solid rgba(154,108,26,.25);border-radius:12px;padding:12px;text-align:center;">
-                    <p style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;margin-bottom:4px;">🤝 Fiado</p>
+                    <p style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;"><span class="ic ic-sm"><i data-lucide="handshake"></i></span> Fiado</p>
                     <p class="mono" id="cierre-fi" style="font-size:14px;font-weight:700;color:var(--amber);">$0</p>
                 </div>
             </div>
 
             <!-- Saldo final -->
             <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:12px;padding:14px 16px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-size:13px;font-weight:700;color:var(--olive);">💼 Saldo Final en Caja</span>
+                <span style="font-size:13px;font-weight:700;color:var(--olive);display:flex;align-items:center;gap:6px;"><span class="ic ic-sm"><i data-lucide="wallet"></i></span> Saldo Final en Caja</span>
                 <span class="mono" id="cierre-saldo" style="font-size:17px;font-weight:800;color:var(--olive);">$0</span>
             </div>
 
             <!-- Advertencia -->
             <div style="background:var(--red-lt);border:1.5px solid var(--red-bd);border-radius:12px;padding:12px 14px;margin-bottom:18px;display:flex;gap:10px;align-items:flex-start;">
-                <span style="font-size:18px;flex-shrink:0;">⚠️</span>
+                <span style="font-size:18px;flex-shrink:0;color:var(--red);"><span class="ic ic-lg"><i data-lucide="triangle-alert"></i></span></span>
                 <p style="font-size:12px;color:var(--red);line-height:1.6;">Esta acción archivará el ciclo contable y <strong>reseteará el dashboard a $0</strong>. Los datos quedan guardados en el Calendario de Cierres. No se puede deshacer.</p>
             </div>
 
@@ -1868,10 +1897,10 @@
             <div style="display:flex;gap:10px;justify-content:flex-end;">
                 <button onclick="cerrarModalCierre()" class="btn-ghost">Cancelar</button>
                 <button id="btn-confirmar-cierre" onclick="realizarCierre()"
-                    style="background:var(--red);color:#fff;border:none;border-radius:999px;padding:10px 24px;font-size:13px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .2s;"
+                    style="background:var(--red);color:#fff;border:none;border-radius:999px;padding:10px 24px;font-size:13px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .2s;display:inline-flex;align-items:center;gap:7px;"
                     onmouseover="this.style.background='#a93226'"
                     onmouseout="this.style.background='var(--red)'">
-                    🔒 Confirmar Cierre Z
+                    <span class="ic ic-sm"><i data-lucide="lock"></i></span> Confirmar Cierre Z
                 </button>
             </div>
         </div>
@@ -1889,20 +1918,20 @@
                 <button onclick="cerrarModalNomina()"
                     style="background:var(--surface-3);border:none;border-radius:999px;width:32px;height:32px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text-2);">×</button>
             </div>
-            <p class="section-sep">📥 Devengados</p>
+            <p class="section-sep" style="display:flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="arrow-down-to-line"></i></span> Devengados</p>
             <div id="modal-devengados"></div>
-            <p class="section-sep" style="margin-top:14px;">📤 Deducciones (cargo empleado)</p>
+            <p class="section-sep" style="margin-top:14px;display:flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="arrow-up-from-line"></i></span> Deducciones (cargo empleado)</p>
             <div id="modal-deducciones"></div>
             <div
                 style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:16px 18px;margin-top:16px;display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-size:14px;font-weight:700;color:var(--olive);">💵 Neto a Pagar al Empleado</span>
+                <span style="font-size:14px;font-weight:700;color:var(--olive);display:flex;align-items:center;gap:6px;"><span class="ic ic-sm"><i data-lucide="banknote"></i></span> Neto a Pagar al Empleado</span>
                 <span class="mono" id="modal-neto" style="font-size:20px;font-weight:700;color:var(--olive);">$0</span>
             </div>
-            <p class="section-sep" style="margin-top:16px;">🏢 Provisiones a cargo del Restaurante (Empleador)</p>
+            <p class="section-sep" style="margin-top:16px;display:flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="building-2"></i></span> Provisiones a cargo del Restaurante (Empleador)</p>
             <div id="modal-provisiones"></div>
             <div
                 style="background:var(--amber-lt);border:1.5px solid rgba(154,108,26,.3);border-radius:14px;padding:16px 18px;margin-top:14px;display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-size:13px;font-weight:700;color:var(--amber);">💼 Costo Real para el
+                <span style="font-size:13px;font-weight:700;color:var(--amber);display:flex;align-items:center;gap:6px;"><span class="ic ic-sm"><i data-lucide="briefcase"></i></span> Costo Real para el
                     Restaurante</span>
                 <span class="mono" id="modal-costo-total"
                     style="font-size:18px;font-weight:700;color:var(--amber);">$0</span>
@@ -1918,7 +1947,7 @@
         <div class="modal-box" style="max-width:480px;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
                 <div>
-                    <h2 style="font-size:16px;font-weight:700;color:var(--text-1);">🧾 Factura Electrónica</h2>
+                    <h2 style="font-size:16px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="file-check"></i></span> Factura Electrónica</h2>
                     <p style="font-size:11.5px;color:var(--text-3);margin-top:2px;">Ref: <span id="fe-orden-no"
                             class="mono">—</span></p>
                 </div>
@@ -1953,7 +1982,7 @@
             </div>
             <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">
                 <button onclick="cerrarModalFactura()" class="btn-ghost">Cancelar</button>
-                <button onclick="generarFacturaElectronica()" class="btn-olive">📤 Generar CUFE</button>
+                <button onclick="generarFacturaElectronica()" class="btn-olive" style="display:inline-flex;align-items:center;gap:6px;"><span class="ic ic-sm"><i data-lucide="send"></i></span> Generar CUFE</button>
             </div>
         </div>
     </div>
@@ -2066,7 +2095,7 @@
             res.style.display = 'block';
             res.innerHTML = `
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-            <span style="font-size:18px;">✅</span>
+            <span style="color:var(--olive);display:inline-flex;"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></span>
             <span style="font-size:13px;font-weight:700;color:var(--olive);">Factura registrada</span>
         </div>
         <p style="font-size:12px;color:var(--text-2);line-height:1.7;">
@@ -2169,8 +2198,8 @@
             <td style="text-align:right;font-weight:700;color:var(--olive);" class="mono">${FORMATO_COP(n.netoPagar)}</td>
             <td style="text-align:center;">
                 <div style="display:flex;justify-content:center;gap:6px;">
-                    <button onclick="abrirModalNomina(${idx})" class="btn-amber" style="padding:5px 12px;font-size:11px;">🧮 Ver Desglose</button>
-                    <button onclick="eliminarEmpleado(${idx})" class="btn-danger">✕</button>
+                    <button onclick="abrirModalNomina(${idx})" class="btn-amber" style="padding:5px 12px;font-size:11px;display:inline-flex;align-items:center;gap:5px;"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" x2="8" y1="21" y2="17"/><line x1="16" x2="16" y1="21" y2="17"/><line x1="12" x2="12" y1="17" y2="21"/></svg> Ver Desglose</button>
+                    <button onclick="eliminarEmpleado(${idx})" class="btn-danger" style="display:inline-flex;align-items:center;justify-content:center;padding:5px 10px;"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg></button>
                 </div>
             </td>
         </tr>`;
@@ -2256,8 +2285,9 @@
                     padding:20px 24px;border-bottom:1.5px solid var(--border);
                     background:var(--surface-2);">
             <div>
-                <h2 style="font-size:16px;font-weight:700;color:var(--text-1);line-height:1.2;">
-                    ✏️ Editar Comanda
+                <h2 style="font-size:16px;font-weight:700;color:var(--text-1);line-height:1.2;display:flex;align-items:center;gap:7px;">
+                    <span style="color:var(--olive);display:inline-flex;"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
+                    Editar Comanda
                 </h2>
                 <p style="font-size:11.5px;color:var(--text-3);margin-top:2px;">
                     Modifica ítems, cantidades o agrega productos al pedido.
@@ -2295,8 +2325,8 @@
             <button id="eca-btn-guardar"
                     onclick="guardarEdicionAdmin()"
                     class="btn-olive"
-                    style="min-width:140px;">
-                💾 Guardar cambios
+                    style="min-width:140px;display:inline-flex;align-items:center;justify-content:center;gap:6px;">
+                <span class="ic ic-sm"><i data-lucide="save"></i></span> Guardar cambios
             </button>
         </div>
 
@@ -2310,7 +2340,21 @@
         to   { transform: rotate(360deg); }
     }
 </style>
-    
-</body>
 
+<script>
+    // Inicializar Lucide Icons al cargar la página
+    document.addEventListener('DOMContentLoaded', function() {
+        if (window.lucide) lucide.createIcons();
+    });
+    // Re-renderizar iconos tras cada cambio de tab (por si el DOM cambia)
+    const _origCambiarTab = window.cambiarTab;
+    if (typeof _origCambiarTab === 'function') {
+        window.cambiarTab = function(dest) {
+            _origCambiarTab(dest);
+            if (window.lucide) lucide.createIcons();
+        };
+    }
+</script>
+
+</body>
 </html>
