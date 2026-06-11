@@ -11,6 +11,8 @@
     <link rel="apple-touch-icon" href="logo.png">
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Lucide Icons — librería de iconos SVG vía CDN -->
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -880,6 +882,33 @@
             pointer-events: none; width: max-content;
             max-width: calc(100vw - 32px);
         }
+
+        /* ── Lucide Icons ── */
+        .ic {
+            display: inline-flex; align-items: center; justify-content: center;
+            vertical-align: middle; flex-shrink: 0; line-height: 1;
+        }
+        .ic svg { display: block; fill: none; stroke: currentColor;
+                  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+        .ic-sm  svg { width: 14px; height: 14px; }
+        .ic-md  svg { width: 16px; height: 16px; }
+        .ic-lg  svg { width: 20px; height: 20px; }
+        .ic-xl  svg { width: 26px; height: 26px; }
+
+        /* Icono grande de sesión */
+        .sesion-icon { margin-bottom: 14px; color: var(--oliva); }
+        .sesion-icon svg { width: 44px; height: 44px; }
+
+        /* Icono de error */
+        .err-icon { font-size: 0; margin-bottom: 12px; color: var(--amber); }
+        .err-icon svg { width: 40px; height: 40px; }
+
+        /* tab-icon dentro de modalidad-tab */
+        .tab-icon { display: flex; align-items: center; justify-content: center;
+                    margin-bottom: 3px; font-size: 0; }
+        .tab-icon svg { width: 20px; height: 20px; stroke: currentColor;
+                        fill: none; stroke-width: 1.8;
+                        stroke-linecap: round; stroke-linejoin: round; }
     </style>
 </head>
 <body>
@@ -889,7 +918,7 @@
 ══════════════════════════════════════════ -->
 <div id="sesion-overlay">
     <div class="sesion-card">
-        <div class="sesion-icon">👤</div>
+        <div class="sesion-icon"><i data-lucide="user-circle"></i></div>
         <h2>¿Quién atiende?</h2>
         <p>Ingresa tu nombre para identificar tus pedidos en el sistema.</p>
         <input id="sesion-input" type="text" placeholder="Tu nombre…" autocomplete="off" autocapitalize="words">
@@ -923,10 +952,10 @@
     <!-- Pestañas Carta / Historial -->
     <div class="main-tabs">
         <button class="main-tab active" id="tab-carta" onclick="Tabs.ir('carta')">
-            🍽️ Carta
+            <span class="ic ic-sm"><i data-lucide="utensils"></i></span> Carta
         </button>
         <button class="main-tab" id="tab-historial" onclick="Tabs.ir('historial')">
-            📋 Historial
+            <span class="ic ic-sm"><i data-lucide="clock"></i></span> Historial
             <span class="tab-badge" id="badge-pendientes"></span>
         </button>
     </div>
@@ -945,7 +974,7 @@
         <p>Cargando carta…</p>
     </div>
     <div id="app-error">
-        <div class="err-icon">⚠️</div>
+        <div class="err-icon"><i data-lucide="triangle-alert"></i></div>
         <p id="error-msg">Error al cargar el menú.</p>
         <button onclick="Menu.cargar()">Reintentar</button>
     </div>
@@ -968,9 +997,9 @@
     <!-- Filtros -->
     <div class="hist-filter-bar">
         <button class="hfilt-btn active" onclick="Hist.filtrar('todos',this)">Todos</button>
-        <button class="hfilt-btn" onclick="Hist.filtrar('mesa',this)">🍽️ Mesa</button>
-        <button class="hfilt-btn" onclick="Hist.filtrar('llevar',this)">🛵 Para Llevar</button>
-        <button class="hfilt-btn" onclick="Hist.filtrar('domicilio',this)">📦 Domicilio</button>
+        <button class="hfilt-btn" onclick="Hist.filtrar('mesa',this)"><span class="ic ic-sm"><i data-lucide="utensils"></i></span> Mesa</button>
+        <button class="hfilt-btn" onclick="Hist.filtrar('llevar',this)"><span class="ic ic-sm"><i data-lucide="shopping-bag"></i></span> Para Llevar</button>
+        <button class="hfilt-btn" onclick="Hist.filtrar('domicilio',this)"><span class="ic ic-sm"><i data-lucide="map-pin"></i></span> Domicilio</button>
     </div>
 
     <!-- Fecha -->
@@ -1008,15 +1037,15 @@
                 <label class="form-label">Tipo de pedido</label>
                 <div class="modalidad-tabs">
                     <button class="modalidad-tab active" onclick="UI.setModalidad('mesa',this)">
-                        <span class="tab-icon">🍽️</span>Mesa
+                        <span class="tab-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2"/><path d="M18 15h3"/><path d="M21 2c0 4.4-3.6 8-8 8"/></svg></span>Mesa
                         <input type="radio" name="form-modalidad" value="mesa" checked style="display:none;">
                     </button>
                     <button class="modalidad-tab" onclick="UI.setModalidad('llevar',this)">
-                        <span class="tab-icon">🛵</span>Para Llevar
+                        <span class="tab-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" x2="21" y1="6" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg></span>Para Llevar
                         <input type="radio" name="form-modalidad" value="llevar" style="display:none;">
                     </button>
                     <button class="modalidad-tab" onclick="UI.setModalidad('domicilio',this)">
-                        <span class="tab-icon">📦</span>Domicilio
+                        <span class="tab-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg></span>Domicilio
                         <input type="radio" name="form-modalidad" value="domicilio" style="display:none;">
                     </button>
                 </div>
