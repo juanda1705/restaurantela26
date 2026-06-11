@@ -1750,6 +1750,55 @@ function _editSetError(msg) {
 }
 
 // ============================================================
+// VERIFICAR SI EL SISTEMA ESTÁ HABILITADO
+// ============================================================
+async function _verificarSistemaHabilitado() {
+    try {
+        const { data, error } = await db
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'orders_enabled')
+            .maybeSingle();
+
+        if (error || !data) return true;
+
+        const habilitado = data.value === 'true';
+        if (!habilitado) _mostrarPantallaFueraDeServicio();
+        return habilitado;
+    } catch (_) {
+        return true;
+    }
+}
+
+function _mostrarPantallaFueraDeServicio() {
+    const carta     = document.getElementById('vista-carta');
+    const historial = document.getElementById('vista-historial');
+    const cartBar   = document.getElementById('cart-bar');
+    const catsBar   = document.getElementById('cats-bar');
+    if (carta)     carta.style.display     = 'none';
+    if (historial) historial.style.display = 'none';
+    if (cartBar)   cartBar.style.display   = 'none';
+    if (catsBar)   catsBar.style.display   = 'none';
+
+    const loader = document.getElementById('app-loader');
+    if (loader) {
+        loader.style.display = 'flex';
+        loader.innerHTML = `
+            <div style="text-align:center;padding:40px 20px;max-width:300px;">
+                <div style="font-size:48px;margin-bottom:20px;">🔒</div>
+                <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.8rem;
+                           font-weight:400;color:var(--ink);margin-bottom:12px;line-height:1.2;">
+                    Sistema fuera<br>de servicio
+                </h2>
+                <p style="font-size:13px;color:var(--ink-muted);line-height:1.65;">
+                    El restaurante no está recibiendo pedidos en este momento.<br>
+                    Consulta con el administrador.
+                </p>
+            </div>`;
+    }
+}
+
+// ============================================================
 // INIT
 // ============================================================
 (async function init() {
@@ -1759,7 +1808,7 @@ function _editSetError(msg) {
 
         // ── Verificar si el sistema está habilitado ──
         const _sistemaHabilitado = await _verificarSistemaHabilitado();
-        if (!_sistemaHabilitado) return;   // _verificarSistemaHabilitado muestra la pantalla
+        if (!_sistemaHabilitado) return;
 
         await _resolverRestaurant();
         await Menu.cargar();
