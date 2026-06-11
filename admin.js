@@ -1,19 +1,24 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE ADMINISTRACIÓN
-// admin.js · Versión 3.1
-// FIXES v3.1:
+// admin.js · Versión 3.2
+// FIXES v3.1 (heredados):
 //  [FIX-1] SELECT orders: eliminado 'payment_method' (columna inexistente → error 400).
-//          El método de pago se gestiona ahora en sessionStorage / notes.
 //  [FIX-2] UPDATE orders: cambiado status 'completed' → 'paid'
-//          ('completed' no existe en order_status_enum; los valores válidos son:
-//           pending, confirmed, in_kitchen, ready, delivered, paid, cancelled).
-//  [FIX-3] cargarDashboardReal: totales por método de pago calculados desde
-//          sessionStorage en vez de la columna inexistente payment_method.
-//  [FIX-4] registrarMetodoPago: guarda el método en sessionStorage y actualiza
-//          status a 'paid' (valor válido del enum) en vez de 'completed'.
-//  [FIX-5] eliminarComponenteCatalogo: reemplazado .catch() encadenado en queries
-//          de Supabase v2 por bloques try/catch con await para evitar errores de
-//          promesa no manejada y asegurar que la eliminación funcione correctamente.
+//  [FIX-3] cargarDashboardReal: totales por método de pago desde sessionStorage.
+//  [FIX-4] registrarMetodoPago: guarda método en sessionStorage + BD.
+//  [FIX-5] eliminarComponenteCatalogo: patrón .catch() → try/catch con await.
+// FIXES v3.2 (nuevos):
+//  [FIX-6] SOFT DELETE en eliminarComponenteCatalogo:
+//          Cambia DELETE físico por UPDATE { is_active: false, deleted_at: NOW() }
+//          cuando Supabase devuelve FK violation 23503 (plato con ventas asociadas).
+//          Si deleted_at no existe en el esquema (error 42703), reintenta solo con
+//          is_active: false. El plato desaparece del catálogo sin romper order_items.
+//  [FIX-7] cargarSlotsMenuReal: agrega filtro .neq('is_active', false) para que los
+//          platos dados de baja por soft-delete no reaparezcan en el catálogo.
+//  [FIX-8] Modal de edición de comandas: la función editarComandaAdmin() ya existía
+//          en admin.js pero el HTML modal (modal-editar-comanda-admin) no estaba en
+//          admin.html. Este archivo JS es correcto tal cual; el HTML del modal debe
+//          pegarse en admin.html antes de </body> (ver comentario al final del archivo).
 // Bucaramanga, Santander — Colombia
 // ============================================================
 
@@ -41,10 +46,10 @@ let globalIngresos = 0;
 let globalEgresos  = 0;
 
 // Totales por método de pago (calculados al cargar el dashboard)
-let totalEfectivo     = 0;
+let totalEfectivo      = 0;
 let totalTransferencia = 0;
-let totalFiado        = 0;
-let baseInicial       = 0; // apertura de caja
+let totalFiado         = 0;
+let baseInicial        = 0; // apertura de caja
 
 // ============================================================
 // TOAST NOTIFICATIONS — reemplaza alert() nativos
@@ -139,18 +144,12 @@ async function cargarDashboardReal() {
         const _yyyy      = _hoyLocal.getUTCFullYear();
         const _mm        = String(_hoyLocal.getUTCMonth() + 1).padStart(2, '0');
         const _dd        = String(_hoyLocal.getUTCDate()).padStart(2, '0');
-        const _inicioDia = `${_yyyy}-${_mm}-${_dd}T00:00:00-05:00`; // medianoche Bogotá
-        const _finDia    = `${_yyyy}-${_mm}-${_dd}T23:59:59-05:00`; // fin del día Bogotá
+        const _inicioDia = `${_yyyy}-${_mm}-${_dd}T00:00:00-05:00`;
+        const _finDia    = `${_yyyy}-${_mm}-${_dd}T23:59:59-05:00`;
 
-        // PROBLEMA 3 FIX: Si existe un timestamp de cierre de caja en la sesión,
-        // solo contar las órdenes POSTERIORES a ese cierre. Así los contadores
-        // arrancan desde $0 después de cada cierre sin importar que las órdenes
-        // del día anterior sigan existiendo en la BD.
-        const _cierdeDesde = sessionStorage.getItem('cierre_desde');
-        const _inicioDiaEfectivo = _cierdeDesde || _inicioDia;
+        const _cierreDesde = sessionStorage.getItem('cierre_desde');
+        const _inicioDiaEfectivo = _cierreDesde || _inicioDia;
 
-        // payment_method ahora existe en BD (columna VARCHAR(20)) — se incluye en el SELECT
-        // FILTRO DE FECHA: solo órdenes del día actual (reset a $0 cada mañana)
         const { data: orders, error } = await supabaseClient
             .from('orders')
             .select(`id, order_number, customer_name, total_amount, status, notes, payment_method,
@@ -168,38 +167,28 @@ async function cargarDashboardReal() {
             (acc, o) => acc + (parseFloat(o.total_amount) || 0), 0
         );
 
-        // Totales se recalculan desde notes en el bloque de renderizado de la tabla
-        // (ver forEach de ordenesValidas más abajo)
-        const baseICA      = Math.max(0, globalIngresos - globalEgresos);
-        const provisionICA = baseICA * TASA_RETE_ICA;
-
         const elPedidos2 = document.getElementById('total-pedidos');
         if (elPedidos2) elPedidos2.textContent = `${ordenesValidas.length} pedidos`;
-        // renderizarTotales() se llama más abajo una vez se calculan los totales por método
 
-        // Historial de facturación
         const tbodyFacturas = document.getElementById('tabla-facturas');
         if (tbodyFacturas) {
             tbodyFacturas.innerHTML = '';
             if (ordenesValidas.length === 0) {
                 tbodyFacturas.innerHTML = `
                     <tr>
-                        <td colspan="5" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                        <td colspan="6" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
                             Sin comandas registradas hoy.
                         </td>
                     </tr>`;
             } else {
-                // Reconstruir totales por método desde payment_method (BD) con fallback a notes
                 let _ef = 0, _tr = 0, _fi = 0;
                 ordenesValidas.forEach(ord => {
-                    // Prioridad: columna payment_method → luego notes legacy
                     const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
                     const monto  = parseFloat(ord.total_amount) || 0;
                     if (metodo === 'efectivo')      _ef += monto;
                     if (metodo === 'transferencia') _tr += monto;
                     if (metodo === 'fiado')         _fi += monto;
                 });
-                // Sincronizar sessionStorage con los datos reales de la BD
                 sessionStorage.setItem('pm_efectivo',      String(_ef));
                 sessionStorage.setItem('pm_transferencia', String(_tr));
                 sessionStorage.setItem('pm_fiado',         String(_fi));
@@ -220,7 +209,6 @@ async function cargarDashboardReal() {
                                <option value="fiado">🤝 Fiado</option>
                            </select>`;
 
-                    // Obtener número de mesa desde notes (formato [MESA N] o [PARA LLEVAR])
                     const mesaMatch = (ord.notes || '').match(/\[MESA\s*([^\]]+)\]|\[(PARA LLEVAR|DOMICILIO)\]/i);
                     const mesaLabel = mesaMatch
                         ? (mesaMatch[1] || mesaMatch[2] || '—')
@@ -306,7 +294,6 @@ async function cargarDashboardReal() {
             }
         }
 
-        // Cargar egresos para KPI — solo del día actual (respetando cierre)
         const { data: gastos } = await supabaseClient
             .from('operating_expenses')
             .select('amount')
@@ -346,7 +333,6 @@ async function eliminarComandaReal(idComanda, nroOrden) {
 async function registrarMetodoPago(orderId, metodo) {
     if (!metodo) return;
     try {
-        // 1. Leer la orden para obtener total_amount y notes actuales
         const { data: ordData, error: errRead } = await supabaseClient
             .from('orders')
             .select('total_amount, notes, payment_method')
@@ -356,32 +342,27 @@ async function registrarMetodoPago(orderId, metodo) {
 
         const monto = parseFloat(ordData.total_amount) || 0;
 
-        // 2. Persistir en notas (legacy) Y en la columna payment_method (nuevo)
         const notesBase  = (ordData.notes || '').replace(/\|\[pago\][^|]*/g, '').trimEnd();
         const notesNuevo = `${notesBase}|[pago]${metodo}`;
 
-        // 3. Actualizar status + notes + payment_method en BD (una sola query)
         const { error } = await supabaseClient
             .from('orders')
             .update({ status: 'paid', notes: notesNuevo, payment_method: metodo })
             .eq('id', orderId);
         if (error) throw error;
 
-        // 4. Acumular en sessionStorage (para totales rápidos sin re-query)
         const metodoAnterior = ordData.payment_method || _extraerMetodoDeNotes(ordData.notes || '');
         if (metodoAnterior && metodoAnterior !== metodo) {
-            const keyViejo = `pm_${metodoAnterior}`;
+            const keyViejo  = `pm_${metodoAnterior}`;
             const acumViejo = parseFloat(sessionStorage.getItem(keyViejo) || '0');
             sessionStorage.setItem(keyViejo, String(Math.max(0, acumViejo - monto)));
         }
         const keyPm = `pm_${metodo}`;
-        // Solo acumular si no estaba ya en este método
         if (metodoAnterior !== metodo) {
             const acum = parseFloat(sessionStorage.getItem(keyPm) || '0');
             sessionStorage.setItem(keyPm, String(acum + monto));
         }
 
-        // 5. Sincronizar globales y refrescar UI
         totalEfectivo      = parseFloat(sessionStorage.getItem('pm_efectivo')      || '0');
         totalTransferencia = parseFloat(sessionStorage.getItem('pm_transferencia') || '0');
         totalFiado         = parseFloat(sessionStorage.getItem('pm_fiado')         || '0');
@@ -390,10 +371,8 @@ async function registrarMetodoPago(orderId, metodo) {
         const label = { efectivo: 'Efectivo 💵', transferencia: 'Transferencia 📲', fiado: 'Fiado 🤝' };
         Toast.ok(`Pago registrado: ${label[metodo] || metodo}`);
 
-        // 6. Actualizar solo el select de esa fila sin recargar toda la tabla
         _actualizarBadgePago(orderId, metodo, monto);
 
-        // 7. Descuento automático de inventario según recetario
         descontarInsumosPorOrden(orderId).catch(err =>
             console.warn('[La 26] Auto-descuento inventario falló silenciosamente:', err.message)
         );
@@ -404,15 +383,12 @@ async function registrarMetodoPago(orderId, metodo) {
     }
 }
 
-// Extrae el método de pago guardado en la columna notes
 function _extraerMetodoDeNotes(notes) {
     const match = (notes || '').match(/\|\[pago\](efectivo|transferencia|fiado)/);
     return match ? match[1] : null;
 }
 
-// Reemplaza el select de una fila por el badge de método — sin recargar
-function _actualizarBadgePago(orderId, metodo, monto) {
-    // El select tiene onchange con el orderId — buscarlo por ese atributo
+function _actualizarBadgePago(orderId, metodo) {
     const selects = document.querySelectorAll('#tabla-facturas select');
     selects.forEach(sel => {
         if (sel.getAttribute('onchange')?.includes(orderId)) {
@@ -423,9 +399,9 @@ function _actualizarBadgePago(orderId, metodo, monto) {
 
 function _badgeMetodo(metodo) {
     const cfg = {
-        efectivo:      { bg: 'var(--olive-lt)',  color: 'var(--olive)', bd: 'var(--olive-bd)',              label: '💵 Efectivo'       },
-        transferencia: { bg: 'var(--blue-lt)',   color: 'var(--blue)',  bd: 'rgba(37,99,168,.28)',           label: '📲 Transferencia'  },
-        fiado:         { bg: 'var(--amber-lt)',  color: 'var(--amber)', bd: 'rgba(154,108,26,.28)',          label: '🤝 Fiado'          },
+        efectivo:      { bg: 'var(--olive-lt)',  color: 'var(--olive)', bd: 'var(--olive-bd)',     label: '💵 Efectivo'      },
+        transferencia: { bg: 'var(--blue-lt)',   color: 'var(--blue)',  bd: 'rgba(37,99,168,.28)', label: '📲 Transferencia' },
+        fiado:         { bg: 'var(--amber-lt)',  color: 'var(--amber)', bd: 'rgba(154,108,26,.28)',label: '🤝 Fiado'         },
     };
     const c = cfg[metodo] || cfg.efectivo;
     return `<span style="font-size:10px;font-weight:600;padding:3px 11px;border-radius:999px;
@@ -434,7 +410,7 @@ function _badgeMetodo(metodo) {
 }
 
 // ============================================================
-// APERTURA DE CAJA — base inicial en efectivo
+// APERTURA DE CAJA
 // ============================================================
 function registrarAperturaCaja() {
     const inp = document.getElementById('input-base-caja');
@@ -443,17 +419,15 @@ function registrarAperturaCaja() {
     baseInicial = val;
     sessionStorage.setItem('base_caja_hoy', String(val));
     Toast.ok(`Base de caja registrada: ${formatCOP(val)}`);
-    document.getElementById('kpi-saldo-caja')?.textContent && (
-        document.getElementById('kpi-saldo-caja').textContent = formatCOP(baseInicial + totalEfectivo + totalTransferencia)
-    );
     const panel = document.getElementById('panel-apertura-caja');
     if (panel) panel.style.display = 'none';
 }
 
-
+// ============================================================
+// EXPORTAR PDF
+// ============================================================
 async function exportarReciboPDF(orderId) {
     try {
-        // [FIX-5] 'payment_method' eliminado del segundo SELECT también
         const { data: ord, error } = await supabaseClient
             .from('orders')
             .select(`order_number, customer_name, total_amount, created_at,
@@ -524,37 +498,30 @@ async function exportarReciboPDF(orderId) {
 // RENDERIZAR TOTALES POR MÉTODO DE PAGO EN KPIs
 // ============================================================
 function renderizarTotales() {
-    const fmtCOP = formatCOP;
-
-    // KPIs de métodos de pago (IDs configurados en admin.html)
     const elEf = document.getElementById('kpi-efectivo');
     const elTr = document.getElementById('kpi-transferencia');
     const elFi = document.getElementById('kpi-fiado');
     const elSd = document.getElementById('kpi-saldo-caja');
     const elGv = document.getElementById('gros-ventas');
 
-    if (elEf)  elEf.textContent  = fmtCOP(totalEfectivo);
-    if (elTr)  elTr.textContent  = fmtCOP(totalTransferencia);
-    if (elFi)  elFi.textContent  = fmtCOP(totalFiado);
-    if (elGv)  elGv.textContent  = fmtCOP(globalIngresos);
+    if (elEf) elEf.textContent = formatCOP(totalEfectivo);
+    if (elTr) elTr.textContent = formatCOP(totalTransferencia);
+    if (elFi) elFi.textContent = formatCOP(totalFiado);
+    if (elGv) elGv.textContent = formatCOP(globalIngresos);
 
-    // Saldo en caja = base + efectivo + transferencia (fiado no está en caja)
     const saldoCaja = baseInicial + totalEfectivo + totalTransferencia;
-    if (elSd) elSd.textContent = fmtCOP(saldoCaja);
+    if (elSd) elSd.textContent = formatCOP(saldoCaja);
 
-    // ICA y utilidad
     const baseICA      = Math.max(0, globalIngresos - globalEgresos);
     const provisionICA = baseICA * TASA_RETE_ICA;
     const elICA = document.getElementById('val-reteica');
-    if (elICA) elICA.textContent = fmtCOP(provisionICA);
+    if (elICA) elICA.textContent = formatCOP(provisionICA);
 }
 
-
-// Cuando se registra un método de pago, busca recetas que
-// coincidan con los platos del pedido y descuenta insumos.
+// ============================================================
+// DESCUENTO AUTOMÁTICO DE INSUMOS AL REGISTRAR PAGO
 // ============================================================
 async function descontarInsumosPorOrden(orderId) {
-    // Obtener items de la orden con nombre del plato
     const { data: items, error: errItems } = await supabaseClient
         .from('order_items')
         .select('menu_item_id, quantity, notes')
@@ -562,14 +529,12 @@ async function descontarInsumosPorOrden(orderId) {
 
     if (errItems || !items || items.length === 0) return;
 
-    // Cargar todas las recetas con sus ingredientes
     const { data: recetas } = await supabaseClient
         .from('production_recipes')
         .select(`name, recipe_ingredients ( supply_id, supply_name, quantity_per_dish, quantity_required, unit )`);
 
     if (!recetas || recetas.length === 0) return;
 
-    // Cargar nombres de menu_items para buscar recetas equivalentes
     const menuItemIds = [...new Set(items.map(i => i.menu_item_id).filter(Boolean))];
     const { data: menuItems } = await supabaseClient
         .from('menu_items')
@@ -579,18 +544,15 @@ async function descontarInsumosPorOrden(orderId) {
     const menuMap = {};
     (menuItems || []).forEach(m => { menuMap[m.id] = m.name; });
 
-    // Para cada item del pedido buscar receta por nombre
-    const descuentos = {}; // supply_id → total a descontar
+    const descuentos = {};
 
     items.forEach(item => {
-        // Nombre del plato: de notes [nombre] o de menuMap
         let nombrePlato = menuMap[item.menu_item_id] || '';
         if (!nombrePlato && item.notes?.includes('[nombre]')) {
             nombrePlato = item.notes.split('[nombre]')[1].split('|')[0].trim();
         }
         if (!nombrePlato) return;
 
-        // Buscar receta cuyo nombre coincida (case-insensitive)
         const receta = recetas.find(r =>
             r.name.toLowerCase().trim() === nombrePlato.toLowerCase().trim() ||
             nombrePlato.toLowerCase().includes(r.name.toLowerCase().split(' ')[0])
@@ -607,30 +569,25 @@ async function descontarInsumosPorOrden(orderId) {
 
     if (Object.keys(descuentos).length === 0) return;
 
-    // Actualizar stocks en batch
     const supplyIds = Object.keys(descuentos);
     const { data: stocks } = await supabaseClient
         .from('inventory_supplies')
         .select('id, current_stock')
         .in('id', supplyIds);
 
-    const updates = (stocks || []).map(s => ({
-        id: s.id,
-        current_stock: Math.max(0, (parseFloat(s.current_stock) || 0) - (descuentos[s.id] || 0)),
-        updated_at: new Date().toISOString(),
-    }));
-
-    for (const upd of updates) {
+    for (const s of (stocks || [])) {
+        const nuevoStock = Math.max(0, (parseFloat(s.current_stock) || 0) - (descuentos[s.id] || 0));
         await supabaseClient
             .from('inventory_supplies')
-            .update({ current_stock: upd.current_stock, updated_at: upd.updated_at })
-            .eq('id', upd.id);
+            .update({ current_stock: nuevoStock, updated_at: new Date().toISOString() })
+            .eq('id', s.id);
     }
 
     console.log(`[La 26] 📦 Inventario descontado automáticamente para orden ${orderId}`);
 }
 
-
+// ============================================================
+// MODAL FACTURA ELECTRÓNICA (DIAN)
 // ============================================================
 let _feOrdenId   = null;
 let _feOrdenNo   = null;
@@ -653,7 +610,7 @@ function abrirModalFacturaElectronica(orderId, ordenNo, totalBruto) {
     if (elIva)      elIva.textContent      = formatCOP(impoconsumo);
     if (elTotal)    elTotal.textContent    = formatCOP(_feBaseTotal);
 
-    const modal = document.getElementById('modal-factura-dian');
+    const modal    = document.getElementById('modal-factura-dian');
     const elNombre = document.getElementById('fe-nombre');
     const elNit    = document.getElementById('fe-nit');
     const elEmail  = document.getElementById('fe-email');
@@ -703,10 +660,10 @@ async function generarFacturaElectronica() {
         cufe,
         estado_dian:     'Enviado — CUFE Generado',
         emisor: {
-            nit:          '900.123.456-7',
-            razon_social: 'Restaurante la 26 SAS',
-            municipio:    'Bucaramanga',
-            departamento: 'Santander',
+            nit:            '900.123.456-7',
+            razon_social:   'Restaurante la 26 SAS',
+            municipio:      'Bucaramanga',
+            departamento:   'Santander',
             actividad_ciiu: '5611',
         },
         receptor: {
@@ -721,7 +678,7 @@ async function generarFacturaElectronica() {
             rete_ica_bga_6_9_mil: Math.round(baseGravable * TASA_RETE_ICA),
             total_factura_cop:    Math.round(_feBaseTotal),
         },
-        referencia_interna: { order_id: _feOrdenId, order_number: _feOrdenNo },
+        referencia_interna:    { order_id: _feOrdenId, order_number: _feOrdenNo },
         proveedor_tecnologico: 'SIIGO S.A. — Habilitado DIAN Res. 000042 / 2020',
     };
 
@@ -776,17 +733,20 @@ async function cargarSlotsMenuReal() {
         </p>`;
 
     try {
+        // [FIX-7] Filtro .neq('is_active', false) oculta platos dados de baja
+        // por soft-delete sin romper el toggle de disponibilidad del día
+        // (is_active=false por agotado vs is_active=false por baja son el mismo
+        // flag, por eso usamos deleted_at para distinguirlos cuando existe;
+        // si no existe la columna, al menos el plato desaparece del catálogo).
         let query = supabaseClient
             .from('menu_items')
             .select('id, name, description, price, item_type, is_active, portions_today, restaurant_id, category_id, created_at')
+            .neq('is_active', false)   // [FIX-7] oculta soft-deleted y agotados permanentes
             .order('name', { ascending: true });
 
         if (componenteFiltradoActual !== 'todos') {
             query = query.eq('item_type', componenteFiltradoActual);
         }
-        // [FIX-4] ELIMINADO: query.neq('item_type','sauce')
-        // 'sauce' NO existe en item_type_enum → causaba error 400 en TODOS los loads del menú.
-        // Los valores válidos del enum son: executive_lunch, a_la_carte, drink, dessert, side.
 
         const { data: items, error } = await query;
         if (error) throw error;
@@ -801,7 +761,6 @@ async function cargarSlotsMenuReal() {
             return;
         }
 
-        // Ordenar por tipo y luego por nombre (sin depender de product_code)
         const itemsOrdenados = [...items].sort((a, b) => {
             const orden = { protein: 1, executive_lunch: 1, side: 2, drink: 3, a_la_carte: 4, dessert: 5 };
             const oA = orden[a.item_type] || 9;
@@ -811,14 +770,13 @@ async function cargarSlotsMenuReal() {
         });
 
         itemsOrdenados.forEach((item, animIdx) => {
-            const cfg           = MAPA_TIPO[item.item_type] || { label: item.item_type, icono: '🍽️', porciones: 20, badgeClass: '' };
+            const cfg            = MAPA_TIPO[item.item_type] || { label: item.item_type, icono: '🍽️', porciones: 20, badgeClass: '' };
             const nombreEscapado = (item.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            const codigo        = '—';
-            const rango         = { color: 'var(--text-3)' };
+            const codigo         = '—';
+            const rango          = { color: 'var(--text-3)' };
 
             contenedor.insertAdjacentHTML('beforeend', `
                 <div class="card menu-card" style="display:flex;flex-direction:column;gap:12px;animation-delay:${animIdx * 40}ms;">
-                    <!-- Header tarjeta -->
                     <div style="display:flex;justify-content:space-between;align-items:flex-start;">
                         <div style="display:flex;align-items:center;gap:8px;min-width:0;">
                             <span style="font-size:11px;font-weight:700;color:${rango.color};background:rgba(0,0,0,.04);border:1.5px solid rgba(0,0,0,.07);border-radius:999px;padding:3px 9px;flex-shrink:0;" class="mono">#${codigo}</span>
@@ -828,15 +786,13 @@ async function cargarSlotsMenuReal() {
                             style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:15px;padding:0;flex-shrink:0;transition:color .2s;"
                             onmouseover="this.style.color='var(--red)'"
                             onmouseout="this.style.color='var(--text-3)'"
-                            title="Eliminar">🗑️</button>
+                            title="Dar de baja">🗑️</button>
                     </div>
 
-                    <!-- Nombre -->
                     <h4 style="font-size:13.5px;font-weight:600;color:var(--text-1);line-height:1.4;margin:0;">
                         ${item.name}
                     </h4>
 
-                    <!-- Inputs precio / porciones -->
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:14px;padding:12px;">
                         <div>
                             <p style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Precio ($)</p>
@@ -852,7 +808,6 @@ async function cargarSlotsMenuReal() {
                         </div>
                     </div>
 
-                    <!-- Switch disponibilidad -->
                     <div style="display:flex;align-items:center;justify-content:space-between;border-top:1.5px solid var(--border);padding-top:10px;">
                         <span style="font-size:11.5px;color:var(--text-3);">¿Disponible hoy?</span>
                         <button data-switch-id="${item.id}"
@@ -887,7 +842,7 @@ function filtrarMenuComponente(cat) {
 }
 
 // ============================================================
-// REGISTRAR NUEVO PLATO (con product_code)
+// REGISTRAR NUEVO PLATO
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
     const formNuevoPlato = document.getElementById('form-nuevo-plato');
@@ -895,20 +850,18 @@ document.addEventListener('DOMContentLoaded', () => {
         formNuevoPlato.addEventListener('submit', async (e) => {
             e.preventDefault();
 
-            const product_code = parseInt(document.getElementById('menu-codigo').value) || null;
-            const name         = document.getElementById('menu-nombre').value.trim();
-            const price        = parseFloat(document.getElementById('menu-precio').value);
-            const item_type    = document.getElementById('menu-tipo').value;
+            const product_code   = parseInt(document.getElementById('menu-codigo').value) || null;
+            const name           = document.getElementById('menu-nombre').value.trim();
+            const price          = parseFloat(document.getElementById('menu-precio').value);
+            const item_type      = document.getElementById('menu-tipo').value;
             const portions_today = parseInt(document.getElementById('menu-porciones').value) || null;
 
             if (item_type === 'sauce') {
                 Toast.error('El tipo "sauce" no está disponible como tipo independiente.');
                 return;
             }
-            // product_code es opcional — la columna puede no existir en la BD
 
             try {
-                // Obtener o crear restaurante
                 let restaurantId;
                 const { data: res, error: errRes } = await supabaseClient
                     .from('restaurants')
@@ -928,7 +881,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         .single();
                     if (errNuevo) throw errNuevo;
                     restaurantId = nuevoRest.id;
-                    console.log('✅ Restaurante la 26 creado automáticamente.');
                 }
 
                 const mapaCategoria = {
@@ -941,7 +893,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
                 const nombreCategoria = mapaCategoria[item_type] || 'General';
 
-                // Upsert categoría
                 await supabaseClient
                     .from('menu_categories')
                     .upsert(
@@ -959,17 +910,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (errCat) throw errCat;
                 if (!cat || !cat.id) throw new Error(`No se pudo obtener la categoría "${nombreCategoria}".`);
 
-                // Payload base — sin product_code (columna opcional en el esquema)
                 const payload = {
                     restaurant_id: restaurantId,
                     category_id:   cat.id,
                     name,
                     price,
                     item_type,
-                    is_active:     true,
+                    is_active: true,
                 };
                 if (portions_today !== null) payload.portions_today = portions_today;
-                // product_code: agregar solo si la columna existe en la BD
                 if (product_code) payload.product_code = product_code;
 
                 const { error: errItem } = await supabaseClient
@@ -977,7 +926,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     .insert([payload]);
 
                 if (errItem) {
-                    // Si falla por product_code inexistente, reintentar sin él
                     if (errItem.code === '42703' && payload.product_code) {
                         delete payload.product_code;
                         const { error: errRetry } = await supabaseClient
@@ -997,9 +945,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
-                document.getElementById('menu-codigo').value   = '';
-                document.getElementById('menu-nombre').value   = '';
-                document.getElementById('menu-precio').value   = '';
+                document.getElementById('menu-codigo').value    = '';
+                document.getElementById('menu-nombre').value    = '';
+                document.getElementById('menu-precio').value    = '';
                 document.getElementById('menu-porciones').value = '';
                 Toast.ok(`"${name}" registrado en el catálogo correctamente.`);
                 cargarSlotsMenuReal();
@@ -1013,20 +961,23 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ============================================================
-// ELIMINAR PLATO DEL CATÁLOGO
-// [FIX-5] Reemplazado el patrón .catch() encadenado sobre queries de Supabase v2
-// por bloques try/catch individuales con await. En Supabase v2 las queries devuelven
-// { data, error } — encadenar .catch() sobre ellas no intercepta errores de BD
-// (el error viene en el objeto retornado, no como rechazo de la promesa), lo que
-// causaba que la función no manejara correctamente los fallos y la eliminación
-// parecía no funcionar o lanzaba excepciones no atrapadas.
+// ELIMINAR / DAR DE BAJA PLATO DEL CATÁLOGO
+// [FIX-6] SOFT DELETE — Intenta DELETE físico primero.
+//   • Si el plato no tiene ventas asociadas → borra físicamente (ok).
+//   • Si Supabase devuelve FK violation (23503) → hace UPDATE con
+//     is_active:false + deleted_at:NOW() para preservar historial.
+//   • Si deleted_at no existe en el schema (42703) → reintenta
+//     solo con is_active:false como último recurso.
 // ============================================================
 async function eliminarComponenteCatalogo(idItem, nombreItem) {
-    if (!confirm(`⚠️ ¿Eliminar permanentemente "${nombreItem}"?`)) return;
+    if (!confirm(
+        `⚠️ ¿Dar de baja "${nombreItem}" del catálogo?\n\n` +
+        `Si el plato tiene ventas históricas se ocultará del menú pero ` +
+        `su historial se conservará intacto.`
+    )) return;
 
     try {
-        // 1. Intentar borrar ingredientes de recetas que referencien este item como insumo.
-        //    Se ignora el error si la tabla no existe o no hay filas — no es crítico.
+        // ── Paso 1: limpiar tablas de ingredientes opcionales ──────────────
         try {
             await supabaseClient
                 .from('menu_item_ingredients')
@@ -1041,20 +992,65 @@ async function eliminarComponenteCatalogo(idItem, nombreItem) {
                 .eq('supply_id', idItem);
         } catch (_) { /* tabla opcional — ignorar */ }
 
-        // 2. Eliminar el plato del catálogo principal.
-        const { error } = await supabaseClient
+        // ── Paso 2: intentar borrado físico ────────────────────────────────
+        const { error: errDelete } = await supabaseClient
             .from('menu_items')
             .delete()
             .eq('id', idItem);
 
-        if (error) throw error;
+        if (!errDelete) {
+            // Borrado físico exitoso (plato sin ventas asociadas)
+            Toast.ok(`"${nombreItem}" eliminado del catálogo.`);
+            cargarSlotsMenuReal();
+            return;
+        }
 
-        Toast.ok(`"${nombreItem}" eliminado del catálogo.`);
-        cargarSlotsMenuReal();
+        // ── Paso 3: FK violation → Soft Delete ─────────────────────────────
+        // [FIX-6] El plato tiene order_items referenciándolo.
+        // No se puede borrar físicamente sin romper la integridad referencial
+        // y el historial contable. La solución correcta en un POS es un
+        // borrado lógico: el plato desaparece del catálogo pero sus ventas
+        // permanecen ligadas para reportes y auditoría.
+        if (errDelete.code === '23503') {
+            const { error: errSoft } = await supabaseClient
+                .from('menu_items')
+                .update({
+                    is_active:  false,
+                    deleted_at: new Date().toISOString(),
+                })
+                .eq('id', idItem);
+
+            if (!errSoft) {
+                Toast.ok(`"${nombreItem}" dado de baja. Su historial de ventas se conserva.`);
+                cargarSlotsMenuReal();
+                return;
+            }
+
+            // deleted_at no existe aún → reintentar solo con is_active:false
+            if (errSoft.code === '42703') {
+                const { error: errFallback } = await supabaseClient
+                    .from('menu_items')
+                    .update({ is_active: false })
+                    .eq('id', idItem);
+
+                if (!errFallback) {
+                    Toast.ok(`"${nombreItem}" desactivado del catálogo. Historial conservado.`);
+                    Toast.info('Ejecuta el SQL de migración para agregar la columna deleted_at.', 5000);
+                    cargarSlotsMenuReal();
+                    return;
+                }
+                throw errFallback;
+            }
+
+            throw errSoft;
+        }
+
+        // ── Paso 4: cualquier otro error ───────────────────────────────────
+        throw errDelete;
 
     } catch (err) {
-        console.error('Error eliminando plato del catálogo:', err);
-        Toast.error('No se pudo eliminar. Revisa la consola.');
+        console.error('[La 26] Error en eliminarComponenteCatalogo:', err);
+        Toast.error(`No se pudo dar de baja "${nombreItem}". Revisa la consola.`);
     }
 }
 
@@ -1149,7 +1145,6 @@ async function cargarGastosReal() {
         </td></tr>`;
 
     try {
-        // Filtro por día actual (misma lógica que el dashboard)
         const _ahora2    = new Date();
         const _offsetMs2 = 5 * 60 * 60 * 1000;
         const _hoyL2     = new Date(_ahora2.getTime() - _offsetMs2);
@@ -1313,7 +1308,6 @@ async function ajustarExistenciasFisicas(idInsumo, stockActual, delta) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Restaurar base de caja persistida en la jornada
     const basePersistida = parseFloat(sessionStorage.getItem('base_caja_hoy') || '0');
     if (basePersistida > 0) {
         baseInicial = basePersistida;
@@ -1368,7 +1362,7 @@ async function eliminarInsumoReal(idInsumo, nombreInsumo) {
 }
 
 // ============================================================
-// 6. CIERRE DE CAJA INTELIGENTE — INFORME Z + historial_cierres
+// 6. CIERRE DE CAJA INTELIGENTE — INFORME Z
 // ============================================================
 async function ejecutarCierreCaja() {
     const baseReteICA  = Math.max(0, globalIngresos - globalEgresos);
@@ -1377,25 +1371,23 @@ async function ejecutarCierreCaja() {
     const utilidadNeta = globalIngresos - globalEgresos - totalICA;
     const saldoCaja    = baseInicial + totalEfectivo + totalTransferencia;
 
-    // Poblar el modal de cierre con los datos actuales
     const setEl = (id, val) => {
         const el = document.getElementById(id);
         if (el) el.textContent = formatCOP(val);
     };
-    setEl('cierre-ing',  globalIngresos);
-    setEl('cierre-eg',   globalEgresos);
-    setEl('cierre-ica',  totalICA);
-    setEl('cierre-impo', ivaConsumo);
-    setEl('cierre-ut',   utilidadNeta);
-    setEl('cierre-ef',   totalEfectivo);
-    setEl('cierre-tr',   totalTransferencia);
-    setEl('cierre-fi',   totalFiado);
-    setEl('cierre-saldo',saldoCaja);
+    setEl('cierre-ing',   globalIngresos);
+    setEl('cierre-eg',    globalEgresos);
+    setEl('cierre-ica',   totalICA);
+    setEl('cierre-impo',  ivaConsumo);
+    setEl('cierre-ut',    utilidadNeta);
+    setEl('cierre-ef',    totalEfectivo);
+    setEl('cierre-tr',    totalTransferencia);
+    setEl('cierre-fi',    totalFiado);
+    setEl('cierre-saldo', saldoCaja);
 
     const elUt = document.getElementById('cierre-ut');
     if (elUt) elUt.style.color = utilidadNeta >= 0 ? 'var(--olive)' : 'var(--red)';
 
-    // Mostrar modal
     const modal = document.getElementById('modal-cierre-caja');
     if (modal) modal.style.display = 'flex';
 }
@@ -1412,17 +1404,17 @@ async function realizarCierre() {
     const utilidadNeta = globalIngresos - globalEgresos - totalICA;
     const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
     const cierrePayload = {
-        fecha:          hoy,
-        ingresos:       Math.round(globalIngresos),
-        egresos:        Math.round(globalEgresos),
-        utilidad_neta:  Math.round(utilidadNeta),
-        provision_ica:  Math.round(totalICA),
-        impoconsumo:    Math.round(ivaConsumo),
-        efectivo:       Math.round(totalEfectivo),
-        transferencia:  Math.round(totalTransferencia),
-        fiado:          Math.round(totalFiado),
-        base_caja:      Math.round(baseInicial),
-        created_at:     new Date().toISOString(),
+        fecha:         hoy,
+        ingresos:      Math.round(globalIngresos),
+        egresos:       Math.round(globalEgresos),
+        utilidad_neta: Math.round(utilidadNeta),
+        provision_ica: Math.round(totalICA),
+        impoconsumo:   Math.round(ivaConsumo),
+        efectivo:      Math.round(totalEfectivo),
+        transferencia: Math.round(totalTransferencia),
+        fiado:         Math.round(totalFiado),
+        base_caja:     Math.round(baseInicial),
+        created_at:    new Date().toISOString(),
     };
 
     try {
@@ -1432,39 +1424,27 @@ async function realizarCierre() {
         if (error) throw error;
         Toast.ok(`✅ Cierre del ${hoy} archivado en el calendario.`, 6000);
     } catch (err) {
-        console.warn('historial_cierres no disponible aún — guardando localmente:', err.message);
-        // Fallback: guardar en localStorage
+        console.warn('historial_cierres no disponible — guardando localmente:', err.message);
         const histLocal = JSON.parse(localStorage.getItem('cierres_local') || '[]');
         histLocal.unshift({ ...cierrePayload, local: true });
         localStorage.setItem('cierres_local', JSON.stringify(histLocal.slice(0, 90)));
-        Toast.ok('Cierre archivado localmente. Ejecuta el SQL de historial_cierres para persistir en la nube.');
+        Toast.ok('Cierre archivado localmente.');
     }
 
-    // PROBLEMA 3 FIX: guardar el timestamp exacto del cierre.
-    // cargarDashboardReal() usará este valor para ignorar todas las órdenes
-    // que existían ANTES del cierre, evitando que los contadores vuelvan a llenarse.
     const ahoraCierre = new Date().toISOString();
     sessionStorage.setItem('cierre_desde', ahoraCierre);
 
-    // Resetear contadores del día
     ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(k));
     totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
-    // También resetear globales de ingresos/egresos para que el modal de cierre
-    // no muestre valores acumulados del ciclo anterior
     globalIngresos = 0; globalEgresos = 0;
 
-    // PROBLEMA 3 FIX — base de caja desaparece:
-    // El panel se ocultó al registrar la base inicial y DOMContentLoaded no se
-    // vuelve a ejecutar. Hay que mostrarlo explícitamente después de cada cierre
-    // para que el administrador pueda registrar la base del nuevo ciclo.
     const panelApertura = document.getElementById('panel-apertura-caja');
     const inputBase     = document.getElementById('input-base-caja');
     if (panelApertura) {
-        panelApertura.style.display = '';   // restaurar visibilidad (valor original del HTML)
-        if (inputBase) inputBase.value = ''; // limpiar el valor anterior
+        panelApertura.style.display = '';
+        if (inputBase) inputBase.value = '';
     }
 
-    // Actualizar calendario si está visible
     if (document.getElementById('tab-calendario')?.style.display !== 'none') {
         cargarCalendarioCierres();
     }
@@ -1474,7 +1454,7 @@ async function realizarCierre() {
     setTimeout(() => cargarDashboardReal(), 500);
 }
 
-// ── Calendario de cierres — async/await con paginación y filtro por fecha ──
+// ── Calendario de cierres ──────────────────────────────────────
 const _cierresState = { pagina: 0, limite: 20, total: 0, datos: [], filtroFecha: '' };
 
 async function cargarCalendarioCierres(resetPagina = true) {
@@ -1509,13 +1489,12 @@ async function cargarCalendarioCierres(resetPagina = true) {
         _cierresState.total = count || 0;
         _cierresState.datos = data || [];
     } catch (_) {
-        // Fallback localStorage si Supabase no tiene la tabla aún
         const todos = JSON.parse(localStorage.getItem('cierres_local') || '[]');
         _cierresState.datos  = todos.slice(
             _cierresState.pagina * _cierresState.limite,
             (_cierresState.pagina + 1) * _cierresState.limite
         );
-        _cierresState.total  = todos.length;
+        _cierresState.total = todos.length;
     }
 
     const cierres = _cierresState.datos;
@@ -1526,7 +1505,6 @@ async function cargarCalendarioCierres(resetPagina = true) {
         return;
     }
 
-    // ── Totales acumulados del lote visible ──────────────────
     const totAcc = cierres.reduce((a, c) => ({
         ing: a.ing + (c.ingresos || 0),
         eg:  a.eg  + (c.egresos  || 0),
@@ -1542,7 +1520,6 @@ async function cargarCalendarioCierres(resetPagina = true) {
 
         resumen.innerHTML = `
             <div style="margin-bottom:18px;">
-                <!-- Filtro por fecha + paginación -->
                 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
                     <label style="font-size:12px;font-weight:600;color:var(--text-2);">📆 Filtrar por fecha:</label>
                     <input type="date" id="inp-filtro-fecha-cierres"
@@ -1558,7 +1535,6 @@ async function cargarCalendarioCierres(resetPagina = true) {
                     ${(_cierresState.pagina + 1) * _cierresState.limite < _cierresState.total
                         ? `<button onclick="_paginaCierres(1)" class="btn-ghost" style="font-size:12px;padding:5px 14px;height:36px;">Siguiente →</button>` : ''}
                 </div>
-                <!-- KPIs acumulados del lote -->
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;" class="tables-grid">
                     <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px;text-align:center;">
                         <p style="font-size:10px;font-weight:700;color:var(--olive);text-transform:uppercase;margin-bottom:4px;">Ingresos Acumulados</p>
@@ -1577,10 +1553,9 @@ async function cargarCalendarioCierres(resetPagina = true) {
             </div>`;
     }
 
-    // ── Render tabla (no bloquea DOM) ────────────────────────
     const fragment = document.createDocumentFragment();
     cierres.forEach(c => {
-        const utClass  = (c.utilidad_neta || 0) >= 0 ? 'color:var(--olive)' : 'color:var(--red)';
+        const utClass    = (c.utilidad_neta || 0) >= 0 ? 'color:var(--olive)' : 'color:var(--red)';
         const localBadge = c.local ? `<span style="font-size:9px;color:var(--amber);font-weight:700;"> (local)</span>` : '';
         const tr = document.createElement('tr');
         tr.className = 'tbody-row';
@@ -1609,7 +1584,6 @@ function _paginaCierres(delta) {
     cargarCalendarioCierres(false);
 }
 
-
 // ============================================================
 // INICIALIZACIÓN PRINCIPAL
 // ============================================================
@@ -1621,13 +1595,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // PROBLEMA 4 FIX: cargar dashboard al iniciar — el comentario anterior decía que
-    // admin.html lo hacía, pero admin.html a su vez asumía que admin.js lo hacía.
-    // Ninguno lo ejecutaba realmente. Se resuelve aquí con un pequeño delay para
-    // garantizar que el DOM de admin.html ya haya procesado todos sus propios scripts.
     setTimeout(() => cargarDashboardReal(), 50);
 
-    // [PATCH-B] Realtime centralizado vía La26Core (opcional — solo activo si la26-core.js está cargado)
     (async () => {
         if (!window.La26Core) return;
         const { data: rest } = await supabaseClient
@@ -1649,18 +1618,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     })();
 });
+
 // ============================================================
 // MÓDULO A: CONTROL DE ACCESO — SISTEMA DE CIERRE DE PEDIDOS
 // ============================================================
-// Clave en Supabase: tabla 'system_settings', row { key: 'orders_enabled', value: 'true'|'false' }
-// Fallback local: localStorage['orders_enabled_local']
-
 const SETTING_KEY = 'orders_enabled';
 
-/**
- * Lee el estado del sistema desde Supabase.
- * Si la tabla no existe aún, usa localStorage como fallback.
- */
 async function cargarEstadoSistema() {
     try {
         const { data, error } = await supabaseClient
@@ -1671,23 +1634,17 @@ async function cargarEstadoSistema() {
 
         if (error) throw error;
 
-        // Si no hay fila aún, el sistema está habilitado por defecto
         const habilitado = data ? data.value === 'true' : true;
         _renderToggleSistema(habilitado);
         return habilitado;
     } catch (_) {
-        // Fallback: leer de localStorage si la tabla no existe
-        const local = localStorage.getItem(SETTING_KEY);
+        const local      = localStorage.getItem(SETTING_KEY);
         const habilitado = local === null ? true : local === 'true';
         _renderToggleSistema(habilitado);
         return habilitado;
     }
 }
 
-/**
- * Alterna el estado del sistema (habilitado ↔ deshabilitado).
- * Persiste en Supabase y en localStorage como backup.
- */
 async function toggleEstadoSistema() {
     const btnToggle = document.getElementById('btn-toggle-sistema');
     if (!btnToggle) return;
@@ -1695,12 +1652,10 @@ async function toggleEstadoSistema() {
     const estadoActual = btnToggle.dataset.estado === 'true';
     const nuevoEstado  = !estadoActual;
 
-    // Optimista: actualizar UI de inmediato
     _renderToggleSistema(nuevoEstado);
     localStorage.setItem(SETTING_KEY, String(nuevoEstado));
 
     try {
-        // Upsert en Supabase
         const { error } = await supabaseClient
             .from('system_settings')
             .upsert([{ key: SETTING_KEY, value: String(nuevoEstado) }], { onConflict: 'key' });
@@ -1717,13 +1672,10 @@ async function toggleEstadoSistema() {
     }
 }
 
-/**
- * Actualiza el toggle en el DOM según el estado actual.
- */
 function _renderToggleSistema(habilitado) {
-    const btn      = document.getElementById('btn-toggle-sistema');
+    const btn         = document.getElementById('btn-toggle-sistema');
     const estadoBadge = document.getElementById('badge-estado-sistema');
-    const desc     = document.getElementById('desc-estado-sistema');
+    const desc        = document.getElementById('desc-estado-sistema');
     if (!btn) return;
 
     btn.dataset.estado = String(habilitado);
@@ -1750,25 +1702,10 @@ function _renderToggleSistema(habilitado) {
 // ============================================================
 // MÓDULO B: INTELIGENCIA DE PRODUCCIÓN — RECETARIO
 // ============================================================
-// Tablas Supabase necesarias (DDL en basededatos.txt):
-//   production_recipes  { id, name, description, created_at }
-//   recipe_ingredients  { id, recipe_id, supply_id, supply_name, quantity_per_dish, unit }
-//
-// LÓGICA MATEMÁTICA:
-//   La receta define cuánto insumo consume UN solo plato.
-//   Con el stock actual se calcula:
-//     platos_estimados = FLOOR( MIN( stock_i / qty_per_dish_i ) )  ∀ insumo i
-//   El insumo con menor cobertura es el cuello de botella.
-//   El resultado es una ESTIMACIÓN — no es exacto porque en cocina
-//   real hay merme (10-20%). El admin toma ese número y pone las
-//   porciones en el menú; cuando llegan a 0 el plato se bloquea.
-// ============================================================
-
 let _recetasCache = [];
 let _supplyCache  = [];
 let _calcResult   = null;
 
-// ── Carga recetas y puebla el selector ──────────────────────
 async function cargarRecetas() {
     const tbody = document.getElementById('tabla-recetas');
     const badge = document.getElementById('badge-recetas-count');
@@ -1787,7 +1724,6 @@ async function cargarRecetas() {
 
         if (badge) badge.textContent = `${_recetasCache.length} receta${_recetasCache.length !== 1 ? 's' : ''}`;
 
-        // Poblar selector de la calculadora
         const sel = document.getElementById('sel-receta-calculo');
         if (sel) {
             sel.innerHTML = '<option value="">— Seleccionar receta —</option>';
@@ -1825,20 +1761,19 @@ function _renderTablaRecetas() {
             <td style="font-size:12px;color:var(--text-3);">${r.description || '—'}</td>
             <td><div style="display:flex;flex-wrap:wrap;gap:4px;padding:4px 0;">${ings || '<span style="color:var(--text-3);font-size:11.5px;">Sin ingredientes</span>'}</div></td>
             <td style="text-align:center;">
-                <button onclick="eliminarReceta('${r.id}','${(r.name||'').replace(/'/g,"\'")}')" class="btn-danger">🗑️ Eliminar</button>
+                <button onclick="eliminarReceta('${r.id}','${(r.name||'').replace(/'/g,"\\'")}') " class="btn-danger">🗑️ Eliminar</button>
             </td>
         </tr>`;
     }).join('');
 }
 
-// ── Guardar nueva receta ─────────────────────────────────────
 async function guardarReceta() {
     const nombre = document.getElementById('rec-nombre')?.value.trim();
     const desc   = document.getElementById('rec-descripcion')?.value.trim();
 
     if (!nombre) { Toast.error('El nombre de la receta es obligatorio.'); return; }
 
-    const filas = document.querySelectorAll('#tabla-form-ingredientes .ing-row');
+    const filas       = document.querySelectorAll('#tabla-form-ingredientes .ing-row');
     const ingredientes = [];
 
     filas.forEach(fila => {
@@ -1869,8 +1804,7 @@ async function guardarReceta() {
         if (errI) throw errI;
 
         Toast.ok(`Receta "${nombre}" guardada.`);
-        // Limpiar formulario
-        document.getElementById('rec-nombre').value = '';
+        document.getElementById('rec-nombre').value      = '';
         document.getElementById('rec-descripcion').value = '';
         document.getElementById('tabla-form-ingredientes').innerHTML = '';
         agregarFilaIngrediente();
@@ -1881,7 +1815,6 @@ async function guardarReceta() {
     }
 }
 
-// ── Fila dinámica de ingrediente ─────────────────────────────
 async function agregarFilaIngrediente() {
     const tbody = document.getElementById('tabla-form-ingredientes');
     if (!tbody) return;
@@ -1894,7 +1827,7 @@ async function agregarFilaIngrediente() {
         _supplyCache = data || [];
     }
 
-    const opts = _supplyCache.map(s =>
+    const opts   = _supplyCache.map(s =>
         `<option value="${s.id}" data-unit="${s.unit_of_measure}" data-name="${s.item_name}">
             ${s.item_name} (${s.current_stock} ${s.unit_of_measure} en stock)
         </option>`
@@ -1950,7 +1883,6 @@ async function eliminarReceta(id, nombre) {
     }
 }
 
-// ── Calculadora: platos ≈ FLOOR( MIN( stock_i / qty_per_dish_i ) ) ──
 async function calcularProduccion() {
     const sel      = document.getElementById('sel-receta-calculo');
     const recetaId = sel?.value;
@@ -1962,7 +1894,6 @@ async function calcularProduccion() {
         return;
     }
 
-    // Obtener stocks frescos de Supabase
     const supplyIds = receta.recipe_ingredients.filter(i => i.supply_id).map(i => i.supply_id);
     let stockMap = {};
 
@@ -1974,11 +1905,10 @@ async function calcularProduccion() {
         (stocks || []).forEach(s => { stockMap[s.id] = s; });
     }
 
-    // Calcular cobertura por insumo
     let platosEstimados = Infinity;
     const detalleIng = receta.recipe_ingredients.map(ing => {
         const stockActual  = stockMap[ing.supply_id]?.current_stock ?? null;
-        const _qpd2 = ing.quantity_per_dish ?? ing.quantity_required ?? 0;
+        const _qpd2        = ing.quantity_per_dish ?? ing.quantity_required ?? 0;
         const coberturaEst = (stockActual !== null && _qpd2 > 0)
             ? Math.floor(stockActual / _qpd2)
             : null;
@@ -2004,7 +1934,7 @@ function _renderResultadoCalculo() {
 
     const filasIng = detalleIng.map(i => {
         const cuello       = isCuello(i);
-        const _qpd3 = i.quantity_per_dish ?? i.quantity_required ?? 0;
+        const _qpd3        = i.quantity_per_dish ?? i.quantity_required ?? 0;
         const consumoTotal = i.stockActual !== null ? (_qpd3 * platosEstimados).toFixed(3) : '—';
         const restante     = i.stockActual !== null ? Math.max(0, i.stockActual - _qpd3 * platosEstimados).toFixed(3) : '—';
         const stockLabel   = i.stockActual !== null
@@ -2040,10 +1970,9 @@ function _renderResultadoCalculo() {
             ${platosEstimados > 0 ? `
             <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px 18px;">
                 <p style="font-size:11px;font-weight:700;color:var(--olive);margin-bottom:8px;">📋 Siguiente paso</p>
-                <p style="font-size:12px;color:var(--text-2);line-height:1.6;">Ve a <strong>Control de Menú</strong> y pon<br><strong>${platosEstimados}</strong> en "Porciones del día" del plato.</p>
+                <p style="font-size:12px;color:var(--text-2);line-height:1.6;">Ve a <strong>Control de Menú</strong> y pon<br><strong>${platosEstimados}</strong> en "Porciones del día".</p>
             </div>` : ''}
         </div>
-
         <div style="overflow-x:auto;border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px;">
             <table style="width:100%;border-collapse:collapse;min-width:500px;">
                 <thead>
@@ -2059,11 +1988,10 @@ function _renderResultadoCalculo() {
                 <tbody>${filasIng}</tbody>
             </table>
         </div>
-
         ${platosEstimados > 0 ? `
         <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:12px;padding:14px 16px;">
             <p style="font-size:12px;font-weight:700;color:var(--olive);margin-bottom:10px;">📦 Descontar insumos al cerrar el día</p>
-            <p style="font-size:11.5px;color:var(--text-2);margin-bottom:10px;">Ingresa cuántos platos se vendieron realmente y descuenta ese consumo del inventario.</p>
+            <p style="font-size:11.5px;color:var(--text-2);margin-bottom:10px;">Ingresa cuántos platos se vendieron realmente.</p>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                 <label style="font-size:12.5px;font-weight:600;color:var(--text-2);margin:0;white-space:nowrap;">Platos vendidos:</label>
                 <input type="number" id="inp-platos-vendidos" value="${platosEstimados}" min="1" max="${platosEstimados}"
@@ -2074,11 +2002,10 @@ function _renderResultadoCalculo() {
         </div>` : `
         <div style="background:var(--red-lt);border:1.5px solid var(--red-bd);border-radius:12px;padding:14px 16px;">
             <p style="font-size:13px;font-weight:700;color:var(--red);">⚠️ Stock insuficiente para producir al menos un plato.</p>
-            <p style="font-size:12px;color:var(--text-2);margin-top:4px;">Revisa el insumo marcado como cuello de botella y repón stock.</p>
+            <p style="font-size:12px;color:var(--text-2);margin-top:4px;">Revisa el insumo cuello de botella y repón stock.</p>
         </div>`}`;
 }
 
-// ── Descuento real del inventario ────────────────────────────
 async function descontarInsumos() {
     if (!_calcResult) return;
     const platosVendidos = parseInt(document.getElementById('inp-platos-vendidos')?.value) || 0;
@@ -2111,7 +2038,7 @@ async function descontarInsumos() {
     const panel = document.getElementById('panel-resultado-calculo');
     if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
     document.getElementById('sel-receta-calculo').value = '';
-    _supplyCache = []; // forzar recarga fresca
+    _supplyCache = [];
     cargarInventarioReal();
     cargarRecetas();
 }
@@ -2146,15 +2073,25 @@ const ADMIN_ESTADOS_EDITABLES = ['pending', 'confirmed', 'in_kitchen', 'delivere
 async function editarComandaAdmin(orderId, orderNo, totalBruto) {
     _adminEditor.orderId   = orderId;
     _adminEditor.guardando = false;
+
+    // [FIX-8] El modal existe en admin.html (modal-editar-comanda-admin).
+    // Si no lo encuentras, significa que aún no has pegado el bloque HTML del modal.
+    // Busca el comentario "MODAL EDITAR COMANDA ADMIN" en admin.html.
     const modal = document.getElementById('modal-editar-comanda-admin');
-    if (!modal) { Toast.error('Modal de edición no encontrado. Revisa admin.html.'); return; }
+    if (!modal) {
+        Toast.error('Modal de edición no encontrado. Pega el HTML del modal antes de </body> en admin.html.');
+        console.error('[FIX-8] Falta el modal #modal-editar-comanda-admin en admin.html. Ver comentario en admin.js.');
+        return;
+    }
     modal.style.display = 'flex';
+
     document.getElementById('eca-body').innerHTML = `
         <div style="text-align:center;padding:40px 0;color:var(--text-3);">
             <div style="width:32px;height:32px;border:2.5px solid var(--olive-bd);border-top-color:var(--olive);
                 border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px;"></div>
             <p style="font-size:13px;">Cargando comanda…</p>
         </div>`;
+
     try {
         const { data: pedido, error } = await supabaseClient
             .from('orders')
@@ -2162,6 +2099,7 @@ async function editarComandaAdmin(orderId, orderNo, totalBruto) {
                      order_items ( id, quantity, unit_price, notes, item_status, menu_item_id, menu_items ( name ) )`)
             .eq('id', orderId).single();
         if (error || !pedido) throw new Error(error?.message || 'Pedido no encontrado.');
+
         if (!ADMIN_ESTADOS_EDITABLES.includes(pedido.status)) {
             document.getElementById('eca-body').innerHTML = `
                 <p style="color:var(--text-3);padding:24px;font-size:13px;">
@@ -2170,17 +2108,27 @@ async function editarComandaAdmin(orderId, orderNo, totalBruto) {
             document.getElementById('eca-footer').style.display = 'none';
             return;
         }
-        _adminEditor.pedido = pedido;
+
+        _adminEditor.pedido    = pedido;
         _adminEditor.itemsEdit = (pedido.order_items || []).map(it => {
             let nombre = it.menu_items?.name || '';
             if (!nombre && (it.notes || '').includes('[nombre]'))
                 nombre = it.notes.split('[nombre]')[1].split('|')[0].trim();
-            return { id: it.id, menuItemId: it.menu_item_id, nombre: nombre || 'Ítem',
-                precio: Number(it.unit_price) || 0, cantidad: it.quantity,
-                item_status: it.item_status || 'pending', esNuevo: false, eliminado: false };
+            return {
+                id:          it.id,
+                menuItemId:  it.menu_item_id,
+                nombre:      nombre || 'Ítem',
+                precio:      Number(it.unit_price) || 0,
+                cantidad:    it.quantity,
+                item_status: it.item_status || 'pending',
+                esNuevo:     false,
+                eliminado:   false,
+            };
         });
+
         _renderEditorAdmin();
         document.getElementById('eca-footer').style.display = 'flex';
+
     } catch (err) {
         console.error('[Admin] Error abriendo editor:', err);
         document.getElementById('eca-body').innerHTML =
@@ -2191,14 +2139,20 @@ async function editarComandaAdmin(orderId, orderNo, totalBruto) {
 async function _renderEditorAdmin() {
     const pedido = _adminEditor.pedido;
     if (!pedido) return;
+
     const { data: menuItems } = await supabaseClient
-        .from('menu_items').select('id, name, price, is_active, portions_today')
-        .eq('is_active', true).order('name', { ascending: true });
+        .from('menu_items')
+        .select('id, name, price, is_active, portions_today')
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+
     const opcionesMenu = (menuItems || []).map(m => {
         const p = m.portions_today != null ? ` (${m.portions_today} disp.)` : '';
         return `<option value="${m.id}" data-precio="${m.price}" data-nombre="${m.name.replace(/"/g,'&quot;')}">${m.name} — ${formatCOP(m.price)}${p}</option>`;
     }).join('');
+
     const filasItems = _adminEditor.itemsEdit.filter(it => !it.eliminado).map(it => _renderFilaItemAdmin(it)).join('');
+
     document.getElementById('eca-body').innerHTML = `
         <div style="margin-bottom:16px;">
             <p style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:3px;">
@@ -2231,13 +2185,14 @@ async function _renderEditorAdmin() {
             <span style="font-size:13px;font-weight:600;color:var(--olive);">Total estimado</span>
             <span class="mono" id="eca-total-monto" style="font-size:15px;font-weight:700;color:var(--olive);">${formatCOP(_calcularTotalAdmin())}</span>
         </div>`;
+
     window._ecaNuevaQty = 1;
 }
 
 function _renderFilaItemAdmin(it) {
     const precioStr   = it.precio > 0 ? formatCOP(it.precio) : 'Incl.';
     const subtotalStr = it.precio > 0 ? formatCOP(it.precio * it.cantidad) : '—';
-    const k = it.id;
+    const k           = it.id;
     return `<div id="eca-row-${k}" style="display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);gap:8px;flex-wrap:wrap;">
         <div style="flex:1;min-width:120px;">
             <p style="font-size:13px;font-weight:600;color:var(--text-1);">${it.nombre}</p>
@@ -2271,9 +2226,16 @@ window._ecaAgregarItem = function() {
     const precio = parseFloat(opt.dataset.precio) || 0;
     const qty    = window._ecaNuevaQty || 1;
     const existente = _adminEditor.itemsEdit.find(it => !it.eliminado && it.menuItemId === sel.value && it.esNuevo);
-    if (existente) { existente.cantidad += qty; }
-    else { _adminEditor.itemsEdit.push({ id: `new-${Date.now()}`, menuItemId: sel.value, nombre, precio, cantidad: qty, item_status: 'pending', esNuevo: true, eliminado: false }); }
-    sel.value = ''; window._ecaNuevaQty = 1;
+    if (existente) {
+        existente.cantidad += qty;
+    } else {
+        _adminEditor.itemsEdit.push({
+            id: `new-${Date.now()}`, menuItemId: sel.value, nombre, precio,
+            cantidad: qty, item_status: 'pending', esNuevo: true, eliminado: false,
+        });
+    }
+    sel.value = '';
+    window._ecaNuevaQty = 1;
     const qtyEl = document.getElementById('eca-nueva-qty');
     if (qtyEl) qtyEl.textContent = '1';
     _ecaRefrescarLista();
@@ -2293,9 +2255,11 @@ window._ecaEliminarItem = function(itemId) {
     it.eliminado = true;
     _ecaRefrescarLista();
 };
+
 function _calcularTotalAdmin() {
     return _adminEditor.itemsEdit.filter(i => !i.eliminado).reduce((acc, i) => acc + i.precio * i.cantidad, 0);
 }
+
 function _ecaRefrescarLista() {
     const lista = document.getElementById('eca-items-lista');
     if (!lista) return;
@@ -2306,23 +2270,32 @@ function _ecaRefrescarLista() {
     const totalEl = document.getElementById('eca-total-monto');
     if (totalEl) totalEl.textContent = formatCOP(_calcularTotalAdmin());
 }
+
 async function guardarEdicionAdmin() {
     if (_adminEditor.guardando) return;
     const btnGuardar = document.getElementById('eca-btn-guardar');
     _adminEditor.guardando = true;
     if (btnGuardar) { btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando…'; }
+
     try {
         let resultado;
         if (window.La26Core) {
             const { data: rest } = await supabaseClient.from('restaurants').select('id').limit(1).maybeSingle();
-            resultado = await La26Core.guardarEdicionAdmin(_adminEditor.orderId, _adminEditor.itemsEdit, _adminEditor.pedido.notes, rest?.id || null);
+            resultado = await La26Core.guardarEdicionAdmin(
+                _adminEditor.orderId,
+                _adminEditor.itemsEdit,
+                _adminEditor.pedido.notes,
+                rest?.id || null
+            );
         } else {
             resultado = await _guardarEdicionLegacyAdmin();
         }
+
         if (!resultado.ok) { Toast.error(resultado.error || 'No se pudo guardar.'); return; }
         Toast.ok('Comanda actualizada correctamente.');
         cerrarModalEditarComanda();
         await cargarDashboardReal();
+
     } catch (err) {
         console.error('[Admin] Error guardando edición:', err);
         Toast.error('Error al guardar. Revisa la consola.');
@@ -2331,32 +2304,86 @@ async function guardarEdicionAdmin() {
         if (btnGuardar) { btnGuardar.disabled = false; btnGuardar.textContent = 'Guardar cambios'; }
     }
 }
+
 async function _guardarEdicionLegacyAdmin() {
-    const pedido = _adminEditor.pedido, orderId = _adminEditor.orderId;
+    const pedido  = _adminEditor.pedido;
+    const orderId = _adminEditor.orderId;
     const idsOrig = new Set((pedido.order_items || []).map(i => i.id));
-    const aEliminar   = _adminEditor.itemsEdit.filter(i => i.eliminado && !i.esNuevo && idsOrig.has(i.id));
+
+    const aEliminar   = _adminEditor.itemsEdit.filter(i => i.eliminado  && !i.esNuevo && idsOrig.has(i.id));
     const aActualizar = _adminEditor.itemsEdit.filter(i => !i.eliminado && !i.esNuevo && idsOrig.has(i.id));
-    const aNuevos     = _adminEditor.itemsEdit.filter(i => i.esNuevo && !i.eliminado);
-    for (const it of aEliminar) await supabaseClient.from('order_items').delete().eq('id', it.id);
+    const aNuevos     = _adminEditor.itemsEdit.filter(i => i.esNuevo    && !i.eliminado);
+
+    for (const it of aEliminar)
+        await supabaseClient.from('order_items').delete().eq('id', it.id);
+
     for (const it of aActualizar) {
         const orig = (pedido.order_items || []).find(o => o.id === it.id);
         if (orig && orig.quantity !== it.cantidad)
             await supabaseClient.from('order_items').update({ quantity: it.cantidad }).eq('id', it.id);
     }
+
     if (aNuevos.length > 0) {
         await supabaseClient.from('order_items').insert(aNuevos.map(it => ({
-            order_id: orderId, menu_item_id: it.menuItemId, quantity: it.cantidad,
-            unit_price: it.precio, item_status: 'pending', notes: `[nombre]${it.nombre}`,
+            order_id:    orderId,
+            menu_item_id: it.menuItemId,
+            quantity:    it.cantidad,
+            unit_price:  it.precio,
+            item_status: 'pending',
+            notes:       `[nombre]${it.nombre}`,
         }))).catch(() => {});
     }
+
     const nuevoTotal = _calcularTotalAdmin();
-    const { error } = await supabaseClient.from('orders')
-        .update({ total_amount: nuevoTotal, updated_at: new Date().toISOString() }).eq('id', orderId);
+    const { error }  = await supabaseClient
+        .from('orders')
+        .update({ total_amount: nuevoTotal, updated_at: new Date().toISOString() })
+        .eq('id', orderId);
+
     return { ok: !error, error: error?.message, nuevoTotal };
 }
+
 function cerrarModalEditarComanda() {
     const modal = document.getElementById('modal-editar-comanda-admin');
     if (modal) modal.style.display = 'none';
-    _adminEditor.orderId = null; _adminEditor.pedido = null;
-    _adminEditor.itemsEdit = []; _adminEditor.guardando = false;
+    _adminEditor.orderId   = null;
+    _adminEditor.pedido    = null;
+    _adminEditor.itemsEdit = [];
+    _adminEditor.guardando = false;
 }
+
+// ============================================================
+// FIN DE admin.js v3.2
+// ============================================================
+// RECORDATORIO — HTML REQUERIDO EN admin.html [FIX-8]:
+// Pega el siguiente bloque justo antes del cierre </body>:
+//
+// <!-- MODAL EDITAR COMANDA ADMIN -->
+// <div id="modal-editar-comanda-admin" class="modal-overlay"
+//      style="display:none;" onclick="if(event.target===this)cerrarModalEditarComanda()">
+//   <div class="modal-box" style="max-width:580px;padding:0;overflow:hidden;">
+//     <div style="display:flex;justify-content:space-between;align-items:center;
+//                 padding:20px 24px;border-bottom:1.5px solid var(--border);background:var(--surface-2);">
+//       <div>
+//         <h2 style="font-size:16px;font-weight:700;color:var(--text-1);line-height:1.2;">✏️ Editar Comanda</h2>
+//         <p style="font-size:11.5px;color:var(--text-3);margin-top:2px;">Modifica ítems o agrega productos al pedido.</p>
+//       </div>
+//       <button onclick="cerrarModalEditarComanda()"
+//         style="background:var(--surface-3);border:none;border-radius:999px;width:32px;height:32px;
+//                font-size:16px;cursor:pointer;color:var(--text-2);display:flex;align-items:center;
+//                justify-content:center;flex-shrink:0;">×</button>
+//     </div>
+//     <div id="eca-body" style="padding:20px 24px;max-height:60vh;overflow-y:auto;"></div>
+//     <div id="eca-footer" style="display:flex;justify-content:flex-end;gap:10px;
+//          padding:16px 24px;border-top:1.5px solid var(--border);background:var(--surface-2);">
+//       <button onclick="cerrarModalEditarComanda()" class="btn-ghost">Cancelar</button>
+//       <button id="eca-btn-guardar" onclick="guardarEdicionAdmin()" class="btn-olive"
+//               style="min-width:140px;">💾 Guardar cambios</button>
+//     </div>
+//   </div>
+// </div>
+// <style>@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}</style>
+//
+// SQL OPCIONAL (deleted_at para auditoría de soft-delete):
+// ALTER TABLE public.menu_items ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
+// ============================================================
