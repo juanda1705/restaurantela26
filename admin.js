@@ -254,14 +254,19 @@ async function cargarDashboardReal() {
                     // 1. Busca [MESA ...] o [PARA LLEVAR] / [DOMICILIO] en notes
                     // 2. Si tiene table_id, busca en tableMap
                     // 3. Fallback: 'P.L.'
-                    const mesaMatch = (ord.notes || '').match(/\[MESA\s*([^\]]+)\]|\[(PARA LLEVAR|DOMICILIO)\]/i);
+                    const mesaMatch = (ord.notes || '').match(/\[MESA\]\s*Mesa:\s*([^|]+)/i);
+                    const esPL = (ord.notes || '').includes('[PARA LLEVAR]');
+                    const esDom = (ord.notes || '').includes('[DOMICILIO]');
                     let mesaLabel;
                     if (mesaMatch) {
-                        mesaLabel = mesaMatch[1] || mesaMatch[2] || '—';
+                        mesaLabel = mesaMatch[1].trim();
+                    } else if (esPL) {
+                        mesaLabel = 'Para Llevar';
+                    } else if (esDom) {
+                        mesaLabel = 'Domicilio';
                     } else if (ord.table_id && tableMap[ord.table_id]) {
                         mesaLabel = tableMap[ord.table_id];
                     } else if (ord.table_id) {
-                        // table_id existe pero no está en el mapa — muestra los últimos 4 chars del UUID
                         mesaLabel = String(ord.table_id).slice(-4).toUpperCase();
                     } else {
                         mesaLabel = 'P.L.';
