@@ -1671,10 +1671,10 @@ async function cargarEstadoSistema() {
         _renderToggleSistema(habilitado);
         return habilitado;
     } catch (_) {
-        const local      = localStorage.getItem(SETTING_KEY);
-        const habilitado = local === null ? true : local === 'true';
-        _renderToggleSistema(habilitado);
-        return habilitado;
+        // Si Supabase no responde, el sistema siempre arranca habilitado.
+        // No leer localStorage aquí evita que un valor corrupto bloquee el sistema.
+        _renderToggleSistema(true);
+        return true;
     }
 }
 
@@ -1686,7 +1686,13 @@ async function toggleEstadoSistema() {
     const nuevoEstado  = !estadoActual;
 
     _renderToggleSistema(nuevoEstado);
-    localStorage.setItem(SETTING_KEY, String(nuevoEstado));
+    // Solo persiste en localStorage si el estado es false (bloqueo intencional).
+    // Si se habilita, limpia cualquier valor corrupto anterior.
+    if (nuevoEstado) {
+        localStorage.removeItem(SETTING_KEY);
+    } else {
+        localStorage.setItem(SETTING_KEY, 'false');
+    }
 
     try {
         const { error } = await supabaseClient
