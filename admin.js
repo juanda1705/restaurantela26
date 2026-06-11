@@ -129,45 +129,48 @@ function getRangoByCodigo(codigo) {
 }
 
 // ============================================================
-// [FIX-10] HELPER — Construye mapa tableId → nombre de mesa
-// Intenta primero la tabla 'tables', luego 'restaurant_tables'.
-// Si ninguna existe devuelve un objeto vacío (sin lanzar error).
+// [FIX-10 v2] _buildTableMap — tolerante a nombres de columna
+// Consulta la tabla de mesas y construye { [id]: etiqueta }.
+// Intenta 'tables' primero, luego 'restaurant_tables'.
+// Para el label usa en orden: name → label → number →
+// table_number → los últimos 4 chars del id.
 // ============================================================
 async function _buildTableMap() {
     const map = {};
 
-    // Intento 1: tabla 'tables'
+    async function _procesarFilas(filas) {
+        if (!filas || filas.length === 0) return false;
+        filas.forEach(t => {
+            // Acepta cualquiera de los nombres de columna posibles
+            const label =
+                t.name        ||
+                t.label       ||
+                (t.number       != null ? String(t.number)       : null) ||
+                (t.table_number != null ? String(t.table_number) : null) ||
+                String(t.id).slice(-4).toUpperCase();
+            map[t.id] = label;
+        });
+        return true;
+    }
+
+    // Intento 1 — tabla 'tables' con todas las columnas candidatas
     try {
         const { data, error } = await supabaseClient
             .from('tables')
-            .select('id, name, number, table_number');
-        if (!error && data) {
-            data.forEach(t => {
-                // Usa 'name', 'number' o 'table_number' según lo que exista
-                const label = t.name || (t.number != null ? String(t.number) : null) || (t.table_number != null ? String(t.table_number) : null) || t.id;
-                map[t.id] = label;
-            });
-            return map;
-        }
+            .select('id, name, label, number, table_number');
+        if (!error && await _procesarFilas(data)) return map;
     } catch (_) { /* intenta siguiente */ }
 
-    // Intento 2: tabla 'restaurant_tables'
+    // Intento 2 — tabla 'restaurant_tables'
     try {
         const { data, error } = await supabaseClient
             .from('restaurant_tables')
-            .select('id, name, number, table_number');
-        if (!error && data) {
-            data.forEach(t => {
-                const label = t.name || (t.number != null ? String(t.number) : null) || (t.table_number != null ? String(t.table_number) : null) || t.id;
-                map[t.id] = label;
-            });
-            return map;
-        }
+            .select('id, name, label, number, table_number');
+        if (!error && await _procesarFilas(data)) return map;
     } catch (_) { /* sin tabla de mesas */ }
 
-    return map;
+    return map;   // mapa vacío → fallback al UUID truncado
 }
-
 // ============================================================
 // 1. DASHBOARD — CONTABILIDAD Y COMANDAS
 // [FIX-10] Se agrega consulta de mesas para resolver table_id
