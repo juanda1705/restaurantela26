@@ -143,10 +143,8 @@ async function _buildTableMap() {
         filas.forEach(t => {
             // Acepta cualquiera de los nombres de columna posibles
             const label =
-                t.name        ||
-                t.label       ||
-                (t.number       != null ? String(t.number)       : null) ||
-                (t.table_number != null ? String(t.table_number) : null) ||
+                t.label ||
+                (t.number != null && t.number > 0 ? `Mesa ${t.number}` : null) ||
                 String(t.id).slice(-4).toUpperCase();
             map[t.id] = label;
         });
@@ -157,7 +155,7 @@ async function _buildTableMap() {
     try {
         const { data, error } = await supabaseClient
             .from('tables')
-            .select('id, name, label, number, table_number');
+            .select('id, label, number');
         if (!error && await _procesarFilas(data)) return map;
     } catch (_) { /* intenta siguiente */ }
 
@@ -165,7 +163,7 @@ async function _buildTableMap() {
     try {
         const { data, error } = await supabaseClient
             .from('restaurant_tables')
-            .select('id, name, label, number, table_number');
+            .select('id, label, number');
         if (!error && await _procesarFilas(data)) return map;
     } catch (_) { /* sin tabla de mesas */ }
 
