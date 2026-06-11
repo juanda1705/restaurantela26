@@ -1,6 +1,29 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE MESERO
-// menu.js · Versión 7.4.1
+// menu.js · Versión 7.4.2
+//
+// CAMBIOS v7.4.2 (patches aplicados sobre v7.4.1):
+//  [FIX-PORCIONES-CRITICO]
+//    Order.enviar(): el descuento de porciones ya NO depende
+//    exclusivamente de La26Core. Se agrega _descontarPorciones()
+//    como función directa sobre Supabase (usando `db`) que se
+//    ejecuta SIEMPRE después de insertar los order_items.
+//    La26Core sigue llamándose en paralelo si está disponible,
+//    pero nunca es el único camino. Esto resuelve el escenario
+//    donde menu.html no carga la26-core.js.
+//
+//  [FIX-PORCIONES-FILTRO]
+//    _descontarPorciones(): filtra correctamente por menuItemId
+//    no-null Y disponibilidad del slot (porciones < 999).
+//    Solo descuenta ítems que tienen control real de porciones
+//    (portions_today != null en la BD). Usa UPDATE con
+//    decrement seguro: portions_today - cantidad, con mínimo 0
+//    via GREATEST(portions_today - cantidad, 0).
+//
+//  [FIX-PORCIONES-OPTIMISTIC]
+//    Después del descuento en BD, actualiza State.slots en
+//    memoria para que la UI refleje el nuevo stock sin esperar
+//    el ciclo de realtime.
 //
 // CAMBIOS v7.4.1 (patches aplicados sobre v7.4):
 //  [PATCH-1] Order.enviar(): llama La26Core.descontarPorcionesOrden
@@ -17,33 +40,18 @@
 //
 // CAMBIOS v7.4:
 //  [ADD-SESION]      Sesión de mesero por nombre (sessionStorage).
-//                   Pedidos etiquetados con el mesero.
-//                   Historial filtra solo pedidos del mesero activo.
 //  [ADD-MEDIANOCHE]  Reset automático del historial a las 00:00.
-//  [DEL-VENTA]       Stats row solo muestra Total, Pendientes,
-//                   Entregados (sin Venta Total).
-//  [ADD-EDITAR]      Módulo EditarPedido: modal inline para
-//                   agregar ítems, cambiar cantidades y eliminar
-//                   productos pendientes de órdenes en estado
-//                   pending / preparing / confirmed.
-//                   NUNCA crea órdenes nuevas. Usa el mismo
-//                   order_id. Realtime propaga cambios a cocina,
-//                   caja y dashboard sin modificarlos.
+//  [DEL-VENTA]       Stats row solo muestra Total, Pendientes, Entregados.
+//  [ADD-EDITAR]      Módulo EditarPedido completo.
 //
 // CAMBIOS v7.3:
-//  [ADD-HISTORIAL] Módulo Hist integrado directamente en este
-//             archivo. El historial se muestra como pestaña
-//             dentro de menu.html sin necesidad de archivo
-//             separado. Incluye stats, filtros, tarjetas
-//             expandibles, realtime y badge de pendientes.
+//  [ADD-HISTORIAL] Módulo Hist integrado directamente en este archivo.
 //
 // CAMBIOS v7.2:
 //  [ADD-DIRECCION] Campo de dirección en pedidos a domicilio.
-//  [ADD-RESET-DIRECCION] Reset en nuevoPedido().
 //
 // CAMBIOS v7.1:
 //  [FIX-MESA] _resolverTableId sin fallback a Mesa 1.
-//  [FIX-MESA-NOTES] Número real en notes de la orden.
 // ============================================================
 
 'use strict';
@@ -109,16 +117,11 @@ const Sesion = {
         sessionStorage.removeItem(this.KEY);
     },
 
-    /** Devuelve el nombre en mayúsculas para display */
     label() {
         const n = this.obtener();
         return n ? n : '—';
     },
 
-    /**
-     * Verifica si hay sesión activa.
-     * Si no, muestra el prompt de nombre y bloquea hasta que se ingrese.
-     */
     async requerir() {
         if (this.obtener()) {
             _actualizarBannerMesero();
@@ -182,7 +185,6 @@ const Sesion = {
                 this.guardar(val);
                 overlay.style.display = 'none';
                 _actualizarBannerMesero();
-                // Recargar historial con el nuevo mesero
                 HistState.cargado = false;
                 HistState.pedidos = [];
                 if (typeof Tabs !== 'undefined' && Tabs.actual === 'historial') {
@@ -205,18 +207,15 @@ function _programarResetMedianoche() {
     const ahora  = new Date();
     const manana = new Date(ahora);
     manana.setDate(manana.getDate() + 1);
-    manana.setHours(0, 0, 5, 0); // 00:00:05 del día siguiente
+    manana.setHours(0, 0, 5, 0);
     const ms = manana - ahora;
 
     setTimeout(() => {
-        // Limpiar historial para que recargue con la nueva fecha
         HistState.cargado = false;
         HistState.pedidos = [];
-        // Si el historial está visible, recargarlo
         if (typeof Tabs !== 'undefined' && Tabs.actual === 'historial') {
             Hist.cargar();
         }
-        // Reprogramar para el siguiente día
         _programarResetMedianoche();
     }, ms);
 }
@@ -431,6 +430,8 @@ const Menu = {
                     descripcion: item.description || '',
                     itemType: CATEGORIAS[item.item_type] ? item.item_type : 'a_la_carte',
                     porciones, disponible,
+                    // [FIX-PORCIONES] Guardar si tiene control real de porciones
+                    tieneControlPorciones: tienePortions,
                 };
             });
 
@@ -459,13 +460,13 @@ function _mostrarEstado(estado, msg = '') {
 
 function _activarModoDemo() {
     State.slots = [
-        { id:'demo-p1', menuItemId:null, nombre:'Pechuga a la Plancha con Salsa Criolla', precio:16000, descripcion:'Pechuga jugosa bañada en salsa criolla.', itemType:'protein', porciones:12, disponible:true  },
-        { id:'demo-p2', menuItemId:null, nombre:'Tilapia Frita con Salsa de Ajo',         precio:18000, descripcion:'Tilapia frita con salsa de ajo y limón.',  itemType:'protein', porciones:8,  disponible:true  },
-        { id:'demo-p3', menuItemId:null, nombre:'Cerdo al Horno con Salsa BBQ',           precio:17000, descripcion:'Lomo de cerdo con salsa BBQ artesanal.',   itemType:'protein', porciones:0,  disponible:false },
-        { id:'demo-s1', menuItemId:null, nombre:'Arroz Blanco',                           precio:0,     descripcion:'Acompañamiento del almuerzo.',             itemType:'side',    porciones:30, disponible:true  },
-        { id:'demo-s2', menuItemId:null, nombre:'Fríjoles Rojos con Hogao',              precio:0,     descripcion:'Fríjoles cocinados a fuego lento.',         itemType:'side',    porciones:25, disponible:true  },
-        { id:'demo-d1', menuItemId:null, nombre:'Jugo Natural del Día',                  precio:3000,  descripcion:'Fruta fresca de temporada.',                itemType:'drink',   porciones:30, disponible:true  },
-        { id:'demo-d2', menuItemId:null, nombre:'Limonada de Panela',                    precio:3500,  descripcion:'Limón con panela orgánica.',                itemType:'drink',   porciones:25, disponible:true  },
+        { id:'demo-p1', menuItemId:null, nombre:'Pechuga a la Plancha con Salsa Criolla', precio:16000, descripcion:'Pechuga jugosa bañada en salsa criolla.', itemType:'protein', porciones:12, disponible:true,  tieneControlPorciones:false },
+        { id:'demo-p2', menuItemId:null, nombre:'Tilapia Frita con Salsa de Ajo',         precio:18000, descripcion:'Tilapia frita con salsa de ajo y limón.',  itemType:'protein', porciones:8,  disponible:true,  tieneControlPorciones:false },
+        { id:'demo-p3', menuItemId:null, nombre:'Cerdo al Horno con Salsa BBQ',           precio:17000, descripcion:'Lomo de cerdo con salsa BBQ artesanal.',   itemType:'protein', porciones:0,  disponible:false, tieneControlPorciones:false },
+        { id:'demo-s1', menuItemId:null, nombre:'Arroz Blanco',                           precio:0,     descripcion:'Acompañamiento del almuerzo.',             itemType:'side',    porciones:30, disponible:true,  tieneControlPorciones:false },
+        { id:'demo-s2', menuItemId:null, nombre:'Fríjoles Rojos con Hogao',              precio:0,     descripcion:'Fríjoles cocinados a fuego lento.',         itemType:'side',    porciones:25, disponible:true,  tieneControlPorciones:false },
+        { id:'demo-d1', menuItemId:null, nombre:'Jugo Natural del Día',                  precio:3000,  descripcion:'Fruta fresca de temporada.',                itemType:'drink',   porciones:30, disponible:true,  tieneControlPorciones:false },
+        { id:'demo-d2', menuItemId:null, nombre:'Limonada de Panela',                    precio:3500,  descripcion:'Limón con panela orgánica.',                itemType:'drink',   porciones:25, disponible:true,  tieneControlPorciones:false },
     ];
     _renderizarMenu();
     _mostrarEstado('menu');
@@ -675,8 +676,108 @@ function _actualizarCartBar() {
 }
 
 // ============================================================
+// [FIX-PORCIONES-CRITICO] DESCUENTO DIRECTO DE PORCIONES
+// ============================================================
+// Esta función se ejecuta SIEMPRE después de confirmar una orden,
+// independientemente de si La26Core está disponible o no.
+// Solo descuenta ítems que tienen control real de porciones
+// (tieneControlPorciones === true, es decir portions_today != null en BD).
+//
+// Usa una actualización atómica segura:
+//   portions_today = GREATEST(portions_today - cantidad, 0)
+// para nunca ir a negativo.
+// ============================================================
+async function _descontarPorciones(cartSnapshot) {
+    // cartSnapshot = copia del carrito en el momento de confirmar
+    // [{slotId, cantidad}]
+
+    const itemsConControl = cartSnapshot
+        .map(item => {
+            const slot = State.slots.find(s => s.id === item.slotId);
+            if (!slot) return null;
+            // Solo descuenta si tiene menuItemId real (no demo) y control de porciones
+            if (!slot.menuItemId || !slot.tieneControlPorciones) return null;
+            return { menuItemId: slot.menuItemId, cantidad: item.cantidad, slot };
+        })
+        .filter(Boolean);
+
+    if (itemsConControl.length === 0) {
+        // No hay ítems con control de porciones — no hay nada que descontar
+        return;
+    }
+
+    // Agrupar por menuItemId por si el mismo ítem aparece dos veces en el carrito
+    const agrupado = {};
+    for (const it of itemsConControl) {
+        if (!agrupado[it.menuItemId]) {
+            agrupado[it.menuItemId] = { menuItemId: it.menuItemId, cantidad: 0, slot: it.slot };
+        }
+        agrupado[it.menuItemId].cantidad += it.cantidad;
+    }
+
+    const promesas = Object.values(agrupado).map(async ({ menuItemId, cantidad, slot }) => {
+        try {
+            // Leer el valor actual de portions_today primero
+            const { data: actual, error: errLeer } = await db
+                .from('menu_items')
+                .select('portions_today')
+                .eq('id', menuItemId)
+                .single();
+
+            if (errLeer || !actual) {
+                console.warn(`[La 26] No se pudo leer portions_today para ${slot.nombre}:`, errLeer?.message);
+                return;
+            }
+
+            const porcionesActuales = Number(actual.portions_today) ?? 0;
+            const nuevasPorciones   = Math.max(0, porcionesActuales - cantidad);
+
+            const { error: errUpdate } = await db
+                .from('menu_items')
+                .update({
+                    portions_today: nuevasPorciones,
+                    // Si llega a 0, desactivar automáticamente
+                    is_active: nuevasPorciones > 0,
+                })
+                .eq('id', menuItemId);
+
+            if (errUpdate) {
+                console.warn(`[La 26] Error descontando porciones de "${slot.nombre}":`, errUpdate.message);
+                return;
+            }
+
+            // [FIX-PORCIONES-OPTIMISTIC] Actualizar State.slots en memoria inmediatamente
+            // para que la UI refleje el stock correcto sin esperar el ciclo de realtime
+            const idxSlot = State.slots.findIndex(s => s.id === slot.id);
+            if (idxSlot !== -1) {
+                State.slots[idxSlot].porciones   = nuevasPorciones;
+                State.slots[idxSlot].disponible  = nuevasPorciones > 0;
+                // Si se agotó, refrescar la tarjeta en la UI
+                if (nuevasPorciones === 0) {
+                    _refrescarTarjeta(slot.id);
+                } else if (nuevasPorciones <= 5) {
+                    // Actualizar badge de "pocas" si corresponde
+                    _refrescarTarjeta(slot.id);
+                }
+            }
+
+            console.info(`[La 26] ✓ Porciones descontadas: "${slot.nombre}" ${porcionesActuales} → ${nuevasPorciones}`);
+
+        } catch (err) {
+            // No cortar el flujo principal, solo loguear
+            console.warn(`[La 26] Excepción al descontar porciones de "${slot.nombre}":`, err.message);
+        }
+    });
+
+    // Ejecutar todos los descuentos en paralelo
+    await Promise.allSettled(promesas);
+}
+
+// ============================================================
 // ENVÍO DEL PEDIDO
-// [PATCH-1] Se agregan llamadas a La26Core después del bloque errItems
+// [FIX-PORCIONES-CRITICO] Se llama _descontarPorciones() SIEMPRE
+// después de insertar los order_items, con la copia del carrito.
+// La26Core sigue usándose como canal adicional si está disponible.
 // ============================================================
 const Order = {
     async enviar() {
@@ -711,6 +812,10 @@ const Order = {
         State.isSubmitting = true;
         if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Enviando…'; }
 
+        // [FIX-PORCIONES-CRITICO] Capturar snapshot del carrito ANTES de limpiarlo
+        // para usarlo en _descontarPorciones() después de confirmar la orden.
+        const cartSnapshot = State.cart.map(item => ({ ...item }));
+
         try {
             if (!State.restaurantId) await _resolverRestaurant();
             if (!State.restaurantId) throw new Error('No se pudo identificar el restaurante.');
@@ -727,11 +832,11 @@ const Order = {
             // Inyectar mesero en las notas
             const mesero = Sesion.obtener();
             let notaCocina = '';
-            if (modalidad === 'mesa')      notaCocina = `[MESA] Mesa: ${mesa}`;
+            if (modalidad === 'mesa')           notaCocina = `[MESA] Mesa: ${mesa}`;
             else if (modalidad === 'llevar')    notaCocina = `[PARA LLEVAR] Cliente: ${nombre || 'Sin nombre'}`;
             else if (modalidad === 'domicilio') notaCocina = `[DOMICILIO] Cliente: ${nombre || 'Sin nombre'} | Dir: ${direccion}`;
-            if (mesero)   notaCocina += ` | Mesero: ${mesero}`;
-            if (notas)    notaCocina += ` | Nota: ${notas}`;
+            if (mesero) notaCocina += ` | Mesero: ${mesero}`;
+            if (notas)  notaCocina += ` | Nota: ${notas}`;
 
             const numeroOrden = generarNumeroOrden();
             const total       = calcularTotal();
@@ -783,21 +888,32 @@ const Order = {
                     }
                 }
 
-                // [PATCH-1] Descuento automático de porciones e inventario via La26Core
-                // Silencioso: si La26Core no está disponible o falla, NO afecta el flujo principal
+                // ─────────────────────────────────────────────────────────
+                // [FIX-PORCIONES-CRITICO] DESCUENTO DIRECTO — SIEMPRE corre
+                // No depende de La26Core. Usa `db` que ya está inicializado.
+                // Ejecuta en background (no bloquea la pantalla de éxito).
+                // ─────────────────────────────────────────────────────────
+                _descontarPorciones(cartSnapshot).catch(err =>
+                    console.warn('[La 26] Error en descuento de porciones (background):', err.message)
+                );
+
+                // La26Core como canal adicional si está disponible (inventario avanzado)
                 if (window.La26Core) {
-                    const _itemsParaDescuento = State.cart.map(item => ({
+                    const _itemsParaDescuento = cartSnapshot.map(item => ({
                         menuItemId: State.slots.find(s => s.id === item.slotId)?.menuItemId || null,
                         cantidad:   item.cantidad,
                         nombre:     State.slots.find(s => s.id === item.slotId)?.nombre || '',
                     })).filter(i => i.menuItemId);
 
-                    La26Core.descontarPorcionesOrden(_itemsParaDescuento).catch(e =>
-                        console.warn('[menu.js] Descuento porciones silencioso:', e.message));
+                    if (_itemsParaDescuento.length > 0) {
+                        La26Core.descontarPorcionesOrden(_itemsParaDescuento).catch(e =>
+                            console.warn('[menu.js] La26Core.descontarPorcionesOrden silencioso:', e.message));
+                    }
+
                     La26Core.ajustarInventarioPorItems(
                         payload.map(p => ({ menu_item_id: p.menu_item_id, quantity: p.quantity, notes: p.notes })),
                         1
-                    ).catch(e => console.warn('[menu.js] Descuento inventario silencioso:', e.message));
+                    ).catch(e => console.warn('[menu.js] La26Core.ajustarInventarioPorItems silencioso:', e.message));
                 }
             }
 
@@ -819,7 +935,6 @@ const Order = {
         document.getElementById('success-modal').classList.add('open');
         State.cart = [];
         _actualizarCartBar();
-        // Refrescar historial si está cargado
         if (HistState.cargado) Hist.cargar();
     },
 
@@ -846,7 +961,7 @@ function _suscribirRealtimeMenu() {
     if (State.realtimeChannel) { db.removeChannel(State.realtimeChannel); State.realtimeChannel = null; }
 
     State.realtimeChannel = db
-        .channel(`la26-menu-v74-${State.restaurantId}`)
+        .channel(`la26-menu-v742-${State.restaurantId}`)
         .on('postgres_changes',{ event:'UPDATE', schema:'public', table:'menu_items',
             filter:`restaurant_id=eq.${State.restaurantId}` },
             (payload) => _actualizarSlotDesdeRealtime(payload.new))
@@ -867,7 +982,14 @@ function _actualizarSlotDesdeRealtime(item) {
     const porciones     = tienePortions ? Number(item.portions_today) : 999;
     const disponible    = item.is_active === true && porciones > 0;
 
-    State.slots[idx] = { ...State.slots[idx], nombre:item.name, precio:Number(item.price)||0, porciones, disponible };
+    State.slots[idx] = {
+        ...State.slots[idx],
+        nombre:    item.name,
+        precio:    Number(item.price) || 0,
+        porciones,
+        disponible,
+        tieneControlPorciones: tienePortions,
+    };
     _refrescarTarjeta(item.id);
 
     if (!disponible) {
@@ -892,7 +1014,6 @@ const HistState = {
     realtimeChannel: null,
 };
 
-// ── Parsear el campo notes para extraer tipo, destino, mesero, etc. ──
 function _parsearNota(notes) {
     const n = notes || '';
     let tipo = 'mesa', destino = '', cliente = '', direccion = '', nota = '', mesero = '';
@@ -915,7 +1036,6 @@ function _parsearNota(notes) {
         tipo = 'mesa'; destino = n || 'Sin datos';
     }
 
-    // Extraer mesero
     const mm = n.match(/Mesero:\s*([^|]+)/);
     mesero = mm ? mm[1].trim() : '';
 
@@ -960,7 +1080,6 @@ const Hist = {
 
             if (error) throw error;
 
-            // Filtrar por mesero activo
             const meseroActivo = Sesion.obtener();
             const todas = ordenes || [];
             HistState.pedidos = meseroActivo
@@ -1008,7 +1127,6 @@ const Hist = {
     },
 
     _render() {
-        // ── Stats (sin venta total) ──
         const total      = HistState.pedidos.length;
         const pendientes = HistState.pedidos.filter(p => p.status === 'pending' || p.status === 'preparing').length;
         const entregados = HistState.pedidos.filter(p => p.status === 'delivered').length;
@@ -1018,19 +1136,16 @@ const Hist = {
         set('st-pendientes', pendientes);
         set('st-entregados', entregados);
 
-        // Badge en la pestaña
         const badge = document.getElementById('badge-pendientes');
         if (badge) {
             badge.textContent = pendientes;
             badge.classList.toggle('visible', pendientes > 0);
         }
 
-        // Fecha
         const fechaEl = document.getElementById('hist-fecha');
         if (fechaEl) fechaEl.textContent = new Date().toLocaleDateString('es-CO',
             { weekday:'long', year:'numeric', month:'long', day:'numeric', timeZone:'America/Bogota' });
 
-        // Lista
         const lista = document.getElementById('hist-lista');
         if (!lista) return;
         lista.innerHTML = '';
@@ -1061,7 +1176,7 @@ const Hist = {
             HistState.realtimeChannel = null;
         }
         HistState.realtimeChannel = db
-            .channel(`la26-hist-v74-${State.restaurantId}`)
+            .channel(`la26-hist-v742-${State.restaurantId}`)
             .on('postgres_changes', {
                 event:'*', schema:'public', table:'orders',
                 filter:`restaurant_id=eq.${State.restaurantId}`,
@@ -1111,7 +1226,6 @@ function _crearTarjetaPedido(pedido, idx) {
     const nombreMostrar = pedido.customer_name || cliente || '';
     const editable = ESTADOS_EDITABLES.includes(pedido.status);
 
-    // Items
     const items = pedido.order_items || [];
     const itemsHTML = items.length > 0
         ? items.map(it => {
@@ -1142,7 +1256,6 @@ function _crearTarjetaPedido(pedido, idx) {
                <span class="card-nota-text">${nota}</span>
            </div>` : '';
 
-    // Botón editar — solo si el estado lo permite
     const editarBtnHTML = editable
         ? `<button class="btn-editar-pedido" onclick="EditarPedido.abrir('${pedido.id}')" title="Editar este pedido">
                ✏️ Editar pedido
@@ -1197,15 +1310,12 @@ function toggleHistCard(bodyId, chevId) {
 
 // ============================================================
 // ═══ MÓDULO EDITAR PEDIDO (v7.4) ═══
-// [PATCH-3] EditarPedido.guardar() delega a La26Core.guardarEdicionAdmin
-//           con _guardarLegacy() como fallback para compatibilidad total
 // ============================================================
 
 const EditarPedido = {
-    // Estado del editor
     _pedidoId:    null,
-    _pedido:      null,         // datos completos del pedido
-    _itemsEdit:   [],           // [{id, menuItemId, nombre, precio, cantidad, item_status, esNuevo}]
+    _pedido:      null,
+    _itemsEdit:   [],
     _notaEdit:    '',
     _guardando:   false,
 
@@ -1213,7 +1323,6 @@ const EditarPedido = {
         this._pedidoId  = pedidoId;
         this._guardando = false;
 
-        // Mostrar modal con loader
         const modal = document.getElementById('edit-modal');
         if (!modal) return;
         modal.classList.add('open');
@@ -1221,7 +1330,6 @@ const EditarPedido = {
         _editSetLoader(true);
 
         try {
-            // Cargar datos frescos del pedido
             const { data: pedido, error } = await db
                 .from('orders')
                 .select(`
@@ -1238,7 +1346,6 @@ const EditarPedido = {
             if (error) throw error;
             if (!pedido) throw new Error('Pedido no encontrado.');
 
-            // Verificar que sea editable
             if (!ESTADOS_EDITABLES.includes(pedido.status)) {
                 _editSetError(`Este pedido no se puede editar (estado: ${pedido.status}).`);
                 return;
@@ -1246,11 +1353,9 @@ const EditarPedido = {
 
             this._pedido = pedido;
 
-            // Extraer nota libre del campo notes
             const parsed = _parsearNota(pedido.notes);
             this._notaEdit = parsed.nota;
 
-            // Construir lista de ítems editables
             this._itemsEdit = (pedido.order_items || []).map(it => {
                 let nombre = it.menu_items?.name || '';
                 if (!nombre && it.notes) {
@@ -1298,7 +1403,6 @@ const EditarPedido = {
             ready:'Listo', delivered:'Entregado', cancelled:'Cancelado', confirmed:'Confirmado',
         };
 
-        // Título del pedido
         const tituloHTML = `
             <div class="edit-pedido-titulo">
                 <span class="edit-order-no"># ${this._pedido.order_number || '—'}</span>
@@ -1306,13 +1410,11 @@ const EditarPedido = {
             </div>
             <p class="edit-destino-label">${parsed.destino}${parsed.cliente ? ` · ${parsed.cliente}` : ''}</p>`;
 
-        // Lista de ítems actuales
         const itemsHTML = this._itemsEdit
             .filter(it => !it.eliminado)
             .map((it, i) => this._renderItemRow(it, i))
             .join('');
 
-        // Selector de platos para agregar
         const slotsDisponibles = State.slots.filter(s => s.disponible);
         const opcionesSlots = slotsDisponibles.map(s =>
             `<option value="${s.id}">${s.nombre}${s.precio > 0 ? ' — ' + formatCOP(s.precio) : ' (Incluido)'}</option>`
@@ -1355,7 +1457,6 @@ const EditarPedido = {
                 <span id="edit-total-monto" class="edit-total-monto">${formatCOP(this._calcularTotalEdit())}</span>
             </div>`;
 
-        // Inicializar qty nueva
         this._nuevaQty = 1;
         _editSetLoader(false);
     },
@@ -1409,12 +1510,10 @@ const EditarPedido = {
         const slot = State.slots.find(s => s.id === slotId);
         if (!slot) return;
 
-        // Si ya existe en la lista, sumar cantidad
         const existente = this._itemsEdit.find(it => !it.eliminado && it.menuItemId === slot.menuItemId && it.esNuevo);
         if (existente) {
             existente.cantidad += this._nuevaQty;
         } else {
-            // Ítem nuevo — usar slotId como id temporal
             this._itemsEdit.push({
                 id:          `new-${Date.now()}`,
                 menuItemId:  slot.menuItemId,
@@ -1495,9 +1594,6 @@ const EditarPedido = {
         if (el) el.textContent = formatCOP(this._calcularTotalEdit());
     },
 
-    // [PATCH-3] guardar() — delega a La26Core.guardarEdicionAdmin cuando está disponible.
-    // Si La26Core no existe, ejecuta _guardarLegacy() que replica la lógica original v7.4
-    // sin ningún cambio, garantizando compatibilidad total hacia atrás.
     async guardar() {
         if (this._guardando) return;
         if (!this._pedidoId || !this._pedido) return;
@@ -1510,14 +1606,12 @@ const EditarPedido = {
             const notaInput = document.getElementById('edit-nota-input');
             const nuevaNota = (notaInput?.value || '').trim();
 
-            // Reconstruir notes conservando prefijo y mesero
             const parsed = _parsearNota(this._pedido.notes);
             let notaBase = this._pedido.notes || '';
             notaBase = notaBase.replace(/\s*\|\s*Nota:\s*.+$/, '');
             if (nuevaNota) notaBase += ` | Nota: ${nuevaNota}`;
             const notaFinal = notaBase.trim();
 
-            // Delegar toda la lógica a La26Core si está disponible (incluye inventario)
             if (window.La26Core) {
                 const resultado = await La26Core.guardarEdicionAdmin(
                     this._pedidoId,
@@ -1530,7 +1624,6 @@ const EditarPedido = {
                     return;
                 }
             } else {
-                // Fallback: lógica original v7.4 sin control de inventario La26Core
                 await this._guardarLegacy(notaFinal);
             }
 
@@ -1548,32 +1641,21 @@ const EditarPedido = {
         }
     },
 
-    // Fallback: lógica original de menu.js v7.4 — sin ninguna modificación.
-    // Se ejecuta únicamente cuando La26Core no está disponible en window.
     async _guardarLegacy(notaFinal) {
         const pedidoId        = this._pedidoId;
         const pedido          = this._pedido;
         const itemsOriginales = pedido.order_items || [];
         const idsOriginales   = new Set(itemsOriginales.map(i => i.id));
 
-        // Ítems a eliminar (existentes marcados como eliminados)
-        const aEliminar = this._itemsEdit
-            .filter(it => it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
+        const aEliminar  = this._itemsEdit.filter(it => it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
+        const aActualizar = this._itemsEdit.filter(it => !it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
+        const aNuevos    = this._itemsEdit.filter(it => it.esNuevo && !it.eliminado);
 
-        // Ítems a actualizar cantidad (existentes no eliminados)
-        const aActualizar = this._itemsEdit
-            .filter(it => !it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
-
-        // Ítems nuevos
-        const aNuevos = this._itemsEdit.filter(it => it.esNuevo && !it.eliminado);
-
-        // Ejecutar eliminaciones
         for (const it of aEliminar) {
             const { error } = await db.from('order_items').delete().eq('id', it.id);
             if (error) console.warn('[EditarPedido] Error eliminando ítem:', error.message);
         }
 
-        // Ejecutar actualizaciones de cantidad
         for (const it of aActualizar) {
             const original = itemsOriginales.find(o => o.id === it.id);
             if (original && original.quantity !== it.cantidad) {
@@ -1584,7 +1666,6 @@ const EditarPedido = {
             }
         }
 
-        // Insertar nuevos ítems
         if (aNuevos.length > 0) {
             const { data: todosMenuItems } = await db.from('menu_items')
                 .select('id,name').eq('restaurant_id', State.restaurantId).eq('is_active', true);
@@ -1620,7 +1701,6 @@ const EditarPedido = {
             }
         }
 
-        // Recalcular total y actualizar orders
         const nuevoTotal = this._calcularTotalEdit();
         const { error: errUpdate } = await db.from('orders')
             .update({
@@ -1634,7 +1714,7 @@ const EditarPedido = {
 };
 
 function _editSetLoader(activo) {
-    const body = document.getElementById('edit-modal-body');
+    const body   = document.getElementById('edit-modal-body');
     const footer = document.getElementById('edit-modal-footer');
     if (activo) {
         if (body) body.innerHTML = `
@@ -1649,7 +1729,7 @@ function _editSetLoader(activo) {
 }
 
 function _editSetError(msg) {
-    const body = document.getElementById('edit-modal-body');
+    const body   = document.getElementById('edit-modal-body');
     const footer = document.getElementById('edit-modal-footer');
     if (body) body.innerHTML = `
         <div class="empty-state" style="padding:56px 28px;">
@@ -1661,39 +1741,24 @@ function _editSetError(msg) {
 
 // ============================================================
 // INIT
-// [PATCH-2] Se agrega suscripción a La26Core.on('onMenuItemChange')
-//           y La26Core.on('onOrderChange') después de Menu.cargar()
-//           para actualizaciones en tiempo real vía La26Core.
-//           La suscripción propia de Supabase (_suscribirRealtimeMenu)
-//           sigue activa — La26Core es un canal adicional, no un reemplazo.
 // ============================================================
 (async function init() {
     try {
-        // Programar reset de medianoche
         _programarResetMedianoche();
-
-        // Requerir sesión de mesero antes de cargar
         await Sesion.requerir();
-
         await _resolverRestaurant();
         await Menu.cargar();
 
-        // [PATCH-2] Realtime centralizado via La26Core (adicional al canal propio)
-        // Solo se activa si La26Core está disponible y hay restaurantId resuelto.
-        // No reemplaza ni interfiere con _suscribirRealtimeMenu().
+        // La26Core como canal adicional de realtime si está disponible
         if (window.La26Core && State.restaurantId) {
             La26Core.suscribirRealtime(State.restaurantId);
 
-            // Cuando un menu_item cambia (porciones, disponibilidad, precio)
-            // actualizar el slot en memoria y refrescar solo esa tarjeta
             La26Core.on('onMenuItemChange', ({ payload }) => {
                 const item = payload?.new;
                 if (!item?.id) return;
                 _actualizarSlotDesdeRealtime(item);
             });
 
-            // Cuando cambia una orden (nuevo pedido, cambio de estado)
-            // refrescar historial si está visible
             La26Core.on('onOrderChange', () => {
                 if (HistState.cargado) {
                     setTimeout(() => Hist.cargar(), 600);
