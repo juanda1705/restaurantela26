@@ -897,19 +897,9 @@ const Order = {
                     console.warn('[La 26] Error en descuento de porciones (background):', err.message)
                 );
 
-                // La26Core como canal adicional si está disponible (inventario avanzado)
+                // La26Core solo para inventario de insumos — NO porciones
+                // (porciones ya las maneja _descontarPorciones arriba)
                 if (window.La26Core) {
-                    const _itemsParaDescuento = cartSnapshot.map(item => ({
-                        menuItemId: State.slots.find(s => s.id === item.slotId)?.menuItemId || null,
-                        cantidad:   item.cantidad,
-                        nombre:     State.slots.find(s => s.id === item.slotId)?.nombre || '',
-                    })).filter(i => i.menuItemId);
-
-                    if (_itemsParaDescuento.length > 0) {
-                        La26Core.descontarPorcionesOrden(_itemsParaDescuento).catch(e =>
-                            console.warn('[menu.js] La26Core.descontarPorcionesOrden silencioso:', e.message));
-                    }
-
                     La26Core.ajustarInventarioPorItems(
                         payload.map(p => ({ menu_item_id: p.menu_item_id, quantity: p.quantity, notes: p.notes })),
                         1
