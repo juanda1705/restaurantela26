@@ -1761,8 +1761,6 @@ function _editSetError(msg) {
         const _sistemaHabilitado = await _verificarSistemaHabilitado();
         if (!_sistemaHabilitado) return;   // _verificarSistemaHabilitado muestra la pantalla
 
-        const _sistemaHabilitado = await _verificarSistemaHabilitado();
-        if (!_sistemaHabilitado) return;
         await _resolverRestaurant();
         await Menu.cargar();
 
