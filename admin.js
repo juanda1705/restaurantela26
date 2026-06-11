@@ -11,6 +11,9 @@
 //          sessionStorage en vez de la columna inexistente payment_method.
 //  [FIX-4] registrarMetodoPago: guarda el método en sessionStorage y actualiza
 //          status a 'paid' (valor válido del enum) en vez de 'completed'.
+//  [FIX-5] eliminarComponenteCatalogo: reemplazado .catch() encadenado en queries
+//          de Supabase v2 por bloques try/catch con await para evitar errores de
+//          promesa no manejada y asegurar que la eliminación funcione correctamente.
 // Bucaramanga, Santander — Colombia
 // ============================================================
 
@@ -1010,21 +1013,47 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ============================================================
-// ELIMINAR PLATO
+// ELIMINAR PLATO DEL CATÁLOGO
+// [FIX-5] Reemplazado el patrón .catch() encadenado sobre queries de Supabase v2
+// por bloques try/catch individuales con await. En Supabase v2 las queries devuelven
+// { data, error } — encadenar .catch() sobre ellas no intercepta errores de BD
+// (el error viene en el objeto retornado, no como rechazo de la promesa), lo que
+// causaba que la función no manejara correctamente los fallos y la eliminación
+// parecía no funcionar o lanzaba excepciones no atrapadas.
 // ============================================================
 async function eliminarComponenteCatalogo(idItem, nombreItem) {
     if (!confirm(`⚠️ ¿Eliminar permanentemente "${nombreItem}"?`)) return;
-    try {
-        // Intentar borrar ingredientes relacionados — se ignora si la tabla no existe
-        await supabaseClient.from('menu_item_ingredients').delete().eq('menu_item_id', idItem).catch(() => {});
-        await supabaseClient.from('recipe_ingredients').delete().eq('supply_id', idItem).catch(() => {});
 
-        const { error } = await supabaseClient.from('menu_items').delete().eq('id', idItem);
+    try {
+        // 1. Intentar borrar ingredientes de recetas que referencien este item como insumo.
+        //    Se ignora el error si la tabla no existe o no hay filas — no es crítico.
+        try {
+            await supabaseClient
+                .from('menu_item_ingredients')
+                .delete()
+                .eq('menu_item_id', idItem);
+        } catch (_) { /* tabla opcional — ignorar */ }
+
+        try {
+            await supabaseClient
+                .from('recipe_ingredients')
+                .delete()
+                .eq('supply_id', idItem);
+        } catch (_) { /* tabla opcional — ignorar */ }
+
+        // 2. Eliminar el plato del catálogo principal.
+        const { error } = await supabaseClient
+            .from('menu_items')
+            .delete()
+            .eq('id', idItem);
+
         if (error) throw error;
+
         Toast.ok(`"${nombreItem}" eliminado del catálogo.`);
         cargarSlotsMenuReal();
+
     } catch (err) {
-        console.error('Error eliminando plato:', err);
+        console.error('Error eliminando plato del catálogo:', err);
         Toast.error('No se pudo eliminar. Revisa la consola.');
     }
 }
