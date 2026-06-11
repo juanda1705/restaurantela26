@@ -6,6 +6,7 @@
     <title>Restaurante la 26 — Sistema Interno</title>
     <link rel="icon" type="image/png" href="logo.png">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
@@ -419,6 +420,15 @@
         #new-order-banner.visible { display:flex; }
         .banner-dot { width:8px; height:8px; background:#fff; border-radius:50%; animation:pulse 1s infinite; }
 
+        /* ── Lucide icon sizing ── */
+        .perfil-chip svg          { width:12px; height:12px; flex-shrink:0; }
+        .stat-chip svg            { width:13px; height:13px; flex-shrink:0; }
+        .filter-btn svg           { width:13px; height:13px; flex-shrink:0; vertical-align:middle; }
+        .nav-tab svg              { width:14px; height:14px; flex-shrink:0; vertical-align:middle; }
+        .nav-user-chip svg        { width:13px; height:13px; flex-shrink:0; }
+        #btn-toggle-pass svg      { width:16px; height:16px; }
+        .empty-icon svg           { width:2.8rem; height:2.8rem; }
+
         @media (max-width:600px) {
             .login-card { padding:34px 22px 30px; }
             .orders-grid { grid-template-columns:1fr; }
@@ -448,13 +458,13 @@
 <nav id="nav-admin" aria-label="Navegación administrador">
     <div class="nav-logo">Restaurante <em>la 26</em></div>
     <div class="nav-tabs">
-        <button class="nav-tab active" onclick="La26.navTo('cocina', this)">🍳 Cocina</button>
-        <button class="nav-tab"        onclick="La26.navTo('admin', this)">📊 Admin</button>
-        <button class="nav-tab"        onclick="La26.navTo('cliente', this)">👤 Cliente</button>
+        <button class="nav-tab active" onclick="La26.navTo('cocina', this)"><span><i data-lucide="chef-hat"></i></span> Cocina</button>
+        <button class="nav-tab"        onclick="La26.navTo('admin', this)"><span><i data-lucide="bar-chart-2"></i></span> Admin</button>
+        <button class="nav-tab"        onclick="La26.navTo('cliente', this)"><span><i data-lucide="user"></i></span> Cliente</button>
     </div>
     <div class="nav-right">
         <div class="nav-user-chip">
-            <span id="nav-emoji">👑</span>
+            <span id="nav-emoji"><i data-lucide="crown"></i></span>
             <span id="nav-username">admin</span>
         </div>
         <button class="btn-logout" onclick="La26.cerrarSesion()">Salir</button>
@@ -521,7 +531,7 @@
                     id="btn-toggle-pass"
                     style="position:absolute;right:16px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--ink-ghost);font-size:16px;line-height:1;"
                     aria-label="Mostrar/ocultar contraseña">
-                    👁
+                    <span><i data-lucide="eye" id="icon-toggle-pass"></i></span>
                 </button>
             </div>
 
@@ -536,9 +546,9 @@
         <div style="margin-top:24px;padding-top:20px;border-top:1px solid #f0f0e8;">
             <p style="font-size:11px;color:var(--ink-ghost);letter-spacing:0.05em;text-transform:uppercase;text-align:center;margin-bottom:12px;">Perfiles disponibles</p>
             <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;">
-                <span class="perfil-chip" style="background:var(--oliva-pale);border:1px solid var(--oliva-bd);color:var(--oliva);">👑 Admin</span>
-                <span class="perfil-chip" style="background:var(--amber-pale);border:1px solid var(--amber-bd);color:var(--amber);">🍳 Cocina</span>
-                <span class="perfil-chip" style="background:var(--blue-pale);border:1px solid var(--blue-bd);color:var(--blue);">👤 Cliente</span>
+                <span class="perfil-chip" style="background:var(--oliva-pale);border:1px solid var(--oliva-bd);color:var(--oliva);"><span><i data-lucide="crown"></i></span> Admin</span>
+                <span class="perfil-chip" style="background:var(--amber-pale);border:1px solid var(--amber-bd);color:var(--amber);"><span><i data-lucide="chef-hat"></i></span> Cocina</span>
+                <span class="perfil-chip" style="background:var(--blue-pale);border:1px solid var(--blue-bd);color:var(--blue);"><span><i data-lucide="user"></i></span> Cliente</span>
             </div>
         </div>
     </div>
@@ -560,9 +570,9 @@
             <span class="bar-title">Cocina — <em>la 26</em></span>
         </div>
         <div style="display:flex;gap:12px;align-items:center;">
-            <div class="stat-chip pending">⏳ <span id="count-pending">0</span> Pendientes</div>
-            <div class="stat-chip preparing">🔥 <span id="count-preparing">0</span> Preparando</div>
-            <div class="stat-chip delivered">✓ <span id="count-delivered">0</span> Entregados</div>
+            <div class="stat-chip pending"><span><i data-lucide="clock"></i></span> <span id="count-pending">0</span> Pendientes</div>
+            <div class="stat-chip preparing"><span><i data-lucide="flame"></i></span> <span id="count-preparing">0</span> Preparando</div>
+            <div class="stat-chip delivered"><span><i data-lucide="check"></i></span> <span id="count-delivered">0</span> Entregados</div>
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
             <span style="font-size:12px;color:rgba(255,255,255,0.4);" id="bar-user-label"></span>
@@ -587,9 +597,9 @@
         <!-- Filtros -->
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:22px;">
             <button class="filter-btn active" data-filter="all"       onclick="La26.setFilter('all',this)">Todos</button>
-            <button class="filter-btn"        data-filter="pending"   onclick="La26.setFilter('pending',this)">⏳ Pendientes</button>
-            <button class="filter-btn"        data-filter="in_kitchen" onclick="La26.setFilter('in_kitchen',this)">🔥 En Cocina</button>
-            <button class="filter-btn"        data-filter="confirmed" onclick="La26.setFilter('confirmed',this)">✓ Confirmados</button>
+            <button class="filter-btn"        data-filter="pending"   onclick="La26.setFilter('pending',this)"><span><i data-lucide="clock"></i></span> Pendientes</button>
+            <button class="filter-btn"        data-filter="in_kitchen" onclick="La26.setFilter('in_kitchen',this)"><span><i data-lucide="flame"></i></span> En Cocina</button>
+            <button class="filter-btn"        data-filter="confirmed" onclick="La26.setFilter('confirmed',this)"><span><i data-lucide="check"></i></span> Confirmados</button>
         </div>
 
         <!-- Grid — el contenedor que app.js necesita -->
@@ -617,12 +627,29 @@
 // Solo maneja UI del login y delega TODO lo demás a La26 (app.js)
 // ══════════════════════════════════════════════════════════════
 
+// ── Inicializar iconos Lucide ──
+document.addEventListener('DOMContentLoaded', function () {
+    lucide.createIcons();
+
+    // Re-ejecutar tras inyecciones dinámicas en el grid de pedidos
+    const grid = document.getElementById('contenedor-pedidos');
+    if (grid) {
+        new MutationObserver(function () {
+            if (window.lucide) lucide.createIcons();
+        }).observe(grid, { childList: true, subtree: false });
+    }
+});
+
 // Toggle de visibilidad de contraseña
 document.getElementById('btn-toggle-pass').addEventListener('click', function () {
     const pass = document.getElementById('login-pass');
     const esTexto = pass.type === 'text';
     pass.type = esTexto ? 'password' : 'text';
-    this.textContent = esTexto ? '👁' : '🙈';
+    const iconEl = document.getElementById('icon-toggle-pass');
+    if (iconEl) {
+        iconEl.setAttribute('data-lucide', esTexto ? 'eye' : 'eye-off');
+        lucide.createIcons({ nodes: [iconEl.closest('span')] });
+    }
 });
 
 // ► ÚNICO punto de entrada del login: el submit del form
