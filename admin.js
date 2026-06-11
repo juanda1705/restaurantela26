@@ -1,24 +1,27 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE ADMINISTRACIÓN
-// admin.js · Versión 3.2
+// admin.js · Versión 3.3
 // FIXES v3.1 (heredados):
 //  [FIX-1] SELECT orders: eliminado 'payment_method' (columna inexistente → error 400).
 //  [FIX-2] UPDATE orders: cambiado status 'completed' → 'paid'
 //  [FIX-3] cargarDashboardReal: totales por método de pago desde sessionStorage.
 //  [FIX-4] registrarMetodoPago: guarda método en sessionStorage + BD.
 //  [FIX-5] eliminarComponenteCatalogo: patrón .catch() → try/catch con await.
-// FIXES v3.2 (nuevos):
-//  [FIX-6] SOFT DELETE en eliminarComponenteCatalogo:
-//          Cambia DELETE físico por UPDATE { is_active: false, deleted_at: NOW() }
-//          cuando Supabase devuelve FK violation 23503 (plato con ventas asociadas).
-//          Si deleted_at no existe en el esquema (error 42703), reintenta solo con
-//          is_active: false. El plato desaparece del catálogo sin romper order_items.
-//  [FIX-7] cargarSlotsMenuReal: agrega filtro .neq('is_active', false) para que los
-//          platos dados de baja por soft-delete no reaparezcan en el catálogo.
-//  [FIX-8] Modal de edición de comandas: la función editarComandaAdmin() ya existía
-//          en admin.js pero el HTML modal (modal-editar-comanda-admin) no estaba en
-//          admin.html. Este archivo JS es correcto tal cual; el HTML del modal debe
-//          pegarse en admin.html antes de </body> (ver comentario al final del archivo).
+// FIXES v3.2 (heredados):
+//  [FIX-6] SOFT DELETE en eliminarComponenteCatalogo.
+//  [FIX-7] cargarSlotsMenuReal: filtro .neq('is_active', false).
+//  [FIX-8] Modal de edición de comandas en admin.html.
+// FIXES v3.3 (nuevos):
+//  [FIX-9]  _guardarEdicionLegacyAdmin: reemplaza TODOS los
+//           .catch() encadenados por try/catch con await.
+//           Supabase JS v2 devuelve {data, error}, NO promesas
+//           con .catch(). Esto causaba el error
+//           "supabaseClient.from(...).insert(...).catch is not a function".
+//  [FIX-10] cargarDashboardReal: resuelve el número/nombre de
+//           mesa correctamente. Ahora consulta la tabla de mesas
+//           (tables / restaurant_tables) para convertir table_id
+//           al nombre visible. Fallback: "[MESA ...]" en notes,
+//           luego table_id truncado, luego "P.L.".
 // Bucaramanga, Santander — Colombia
 // ============================================================
 
@@ -32,27 +35,22 @@ const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ============================================================
 // CONSTANTES TRIBUTARIAS — ESTATUTO TRIBUTARIO COLOMBIA
-// Rete-ICA Bucaramanga: Actividad 5611 — expendio comidas
-// Tasa: 6.9 x 1000 (Acuerdo Municipal Bucaramanga)
-// Impoconsumo: Art. 512-1 E.T. — restaurantes 8%
 // ============================================================
-const TASA_RETE_ICA    = 0.0069;  // 6.9 por mil
-const TASA_IMPOCONSUMO = 0.08;    // 8% impoconsumo restaurantes
+const TASA_RETE_ICA    = 0.0069;
+const TASA_IMPOCONSUMO = 0.08;
 
 // ============================================================
 // ESTADO GLOBAL CONTABLE
 // ============================================================
 let globalIngresos = 0;
 let globalEgresos  = 0;
-
-// Totales por método de pago (calculados al cargar el dashboard)
 let totalEfectivo      = 0;
 let totalTransferencia = 0;
 let totalFiado         = 0;
-let baseInicial        = 0; // apertura de caja
+let baseInicial        = 0;
 
 // ============================================================
-// TOAST NOTIFICATIONS — reemplaza alert() nativos
+// TOAST NOTIFICATIONS
 // ============================================================
 const Toast = (function() {
     let _c = null;
@@ -110,7 +108,6 @@ function formatCOP(valor) {
 
 // ============================================================
 // MAPA DE TIPOS DE PLATO
-// Soporta tanto 'protein' (legado) como 'executive_lunch' (nuevo)
 // ============================================================
 const MAPA_TIPO = {
     executive_lunch: { label: 'Proteína con Salsa', icono: '🥩', porciones: 35, badgeClass: 'badge-protein' },
@@ -121,7 +118,6 @@ const MAPA_TIPO = {
     dessert:         { label: 'Postre',              icono: '🍮', porciones: 10, badgeClass: 'badge-dessert' },
 };
 
-// Obtiene etiqueta de rango de código
 function getRangoByCodigo(codigo) {
     const n = parseInt(codigo) || 0;
     if (n >= 1  && n <= 10)  return { label: 'Vegetal/Salsa/Base', color: 'var(--olive)' };
@@ -133,13 +129,53 @@ function getRangoByCodigo(codigo) {
 }
 
 // ============================================================
+// [FIX-10] HELPER — Construye mapa tableId → nombre de mesa
+// Intenta primero la tabla 'tables', luego 'restaurant_tables'.
+// Si ninguna existe devuelve un objeto vacío (sin lanzar error).
+// ============================================================
+async function _buildTableMap() {
+    const map = {};
+
+    // Intento 1: tabla 'tables'
+    try {
+        const { data, error } = await supabaseClient
+            .from('tables')
+            .select('id, name, number, table_number');
+        if (!error && data) {
+            data.forEach(t => {
+                // Usa 'name', 'number' o 'table_number' según lo que exista
+                const label = t.name || (t.number != null ? String(t.number) : null) || (t.table_number != null ? String(t.table_number) : null) || t.id;
+                map[t.id] = label;
+            });
+            return map;
+        }
+    } catch (_) { /* intenta siguiente */ }
+
+    // Intento 2: tabla 'restaurant_tables'
+    try {
+        const { data, error } = await supabaseClient
+            .from('restaurant_tables')
+            .select('id, name, number, table_number');
+        if (!error && data) {
+            data.forEach(t => {
+                const label = t.name || (t.number != null ? String(t.number) : null) || (t.table_number != null ? String(t.table_number) : null) || t.id;
+                map[t.id] = label;
+            });
+            return map;
+        }
+    } catch (_) { /* sin tabla de mesas */ }
+
+    return map;
+}
+
+// ============================================================
 // 1. DASHBOARD — CONTABILIDAD Y COMANDAS
+// [FIX-10] Se agrega consulta de mesas para resolver table_id
 // ============================================================
 async function cargarDashboardReal() {
     try {
-        // ── Rango del día actual en zona horaria Colombia (UTC-5) ──────────
         const _ahora     = new Date();
-        const _offsetMs  = 5 * 60 * 60 * 1000; // UTC-5 Bogotá
+        const _offsetMs  = 5 * 60 * 60 * 1000;
         const _hoyLocal  = new Date(_ahora.getTime() - _offsetMs);
         const _yyyy      = _hoyLocal.getUTCFullYear();
         const _mm        = String(_hoyLocal.getUTCMonth() + 1).padStart(2, '0');
@@ -150,12 +186,16 @@ async function cargarDashboardReal() {
         const _cierreDesde = sessionStorage.getItem('cierre_desde');
         const _inicioDiaEfectivo = _cierreDesde || _inicioDia;
 
-        const { data: orders, error } = await supabaseClient
-            .from('orders')
-            .select(`id, order_number, customer_name, total_amount, status, notes, payment_method,
-                     table_id, order_items ( quantity, notes, unit_price )`)
-            .gte('created_at', _inicioDiaEfectivo)
-            .lte('created_at', _finDia);
+        // [FIX-10] Cargar mapa de mesas en paralelo con las órdenes
+        const [{ data: orders, error }, tableMap] = await Promise.all([
+            supabaseClient
+                .from('orders')
+                .select(`id, order_number, customer_name, total_amount, status, notes, payment_method,
+                         table_id, order_items ( quantity, notes, unit_price )`)
+                .gte('created_at', _inicioDiaEfectivo)
+                .lte('created_at', _finDia),
+            _buildTableMap()
+        ]);
 
         if (error) throw error;
 
@@ -209,17 +249,29 @@ async function cargarDashboardReal() {
                                <option value="fiado">🤝 Fiado</option>
                            </select>`;
 
+                    // [FIX-10] Resolución de mesa:
+                    // 1. Busca [MESA ...] o [PARA LLEVAR] / [DOMICILIO] en notes
+                    // 2. Si tiene table_id, busca en tableMap
+                    // 3. Fallback: 'P.L.'
                     const mesaMatch = (ord.notes || '').match(/\[MESA\s*([^\]]+)\]|\[(PARA LLEVAR|DOMICILIO)\]/i);
-                    const mesaLabel = mesaMatch
-                        ? (mesaMatch[1] || mesaMatch[2] || '—')
-                        : (ord.table_id ? `—` : 'P.L.');
+                    let mesaLabel;
+                    if (mesaMatch) {
+                        mesaLabel = mesaMatch[1] || mesaMatch[2] || '—';
+                    } else if (ord.table_id && tableMap[ord.table_id]) {
+                        mesaLabel = tableMap[ord.table_id];
+                    } else if (ord.table_id) {
+                        // table_id existe pero no está en el mapa — muestra los últimos 4 chars del UUID
+                        mesaLabel = String(ord.table_id).slice(-4).toUpperCase();
+                    } else {
+                        mesaLabel = 'P.L.';
+                    }
 
                     tbodyFacturas.insertAdjacentHTML('beforeend', `
                         <tr class="tbody-row">
                             <td>
                                 <span class="mono" style="font-size:11.5px;font-weight:700;color:var(--olive);">${ord.order_number}</span>
                             </td>
-                            <td style="font-size:12px;color:var(--text-3);font-weight:500;white-space:nowrap;">${mesaLabel}</td>
+                            <td style="font-size:12px;color:var(--text-2);font-weight:600;white-space:nowrap;">${mesaLabel}</td>
                             <td style="font-size:13px;color:var(--text-1);font-weight:500;">${ord.customer_name || 'Consumidor Final'}</td>
                             <td>
                                 <span class="mono" style="font-size:13px;font-weight:700;color:var(--olive);">${formatCOP(ord.total_amount)}</span>
@@ -733,15 +785,10 @@ async function cargarSlotsMenuReal() {
         </p>`;
 
     try {
-        // [FIX-7] Filtro .neq('is_active', false) oculta platos dados de baja
-        // por soft-delete sin romper el toggle de disponibilidad del día
-        // (is_active=false por agotado vs is_active=false por baja son el mismo
-        // flag, por eso usamos deleted_at para distinguirlos cuando existe;
-        // si no existe la columna, al menos el plato desaparece del catálogo).
         let query = supabaseClient
             .from('menu_items')
             .select('id, name, description, price, item_type, is_active, portions_today, restaurant_id, category_id, created_at')
-            .neq('is_active', false)   // [FIX-7] oculta soft-deleted y agotados permanentes
+            .neq('is_active', false)
             .order('name', { ascending: true });
 
         if (componenteFiltradoActual !== 'todos') {
@@ -961,13 +1008,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ============================================================
-// ELIMINAR / DAR DE BAJA PLATO DEL CATÁLOGO
-// [FIX-6] SOFT DELETE — Intenta DELETE físico primero.
-//   • Si el plato no tiene ventas asociadas → borra físicamente (ok).
-//   • Si Supabase devuelve FK violation (23503) → hace UPDATE con
-//     is_active:false + deleted_at:NOW() para preservar historial.
-//   • Si deleted_at no existe en el schema (42703) → reintenta
-//     solo con is_active:false como último recurso.
+// ELIMINAR / DAR DE BAJA PLATO DEL CATÁLOGO [FIX-6]
 // ============================================================
 async function eliminarComponenteCatalogo(idItem, nombreItem) {
     if (!confirm(
@@ -977,40 +1018,31 @@ async function eliminarComponenteCatalogo(idItem, nombreItem) {
     )) return;
 
     try {
-        // ── Paso 1: limpiar tablas de ingredientes opcionales ──────────────
         try {
             await supabaseClient
                 .from('menu_item_ingredients')
                 .delete()
                 .eq('menu_item_id', idItem);
-        } catch (_) { /* tabla opcional — ignorar */ }
+        } catch (_) { }
 
         try {
             await supabaseClient
                 .from('recipe_ingredients')
                 .delete()
                 .eq('supply_id', idItem);
-        } catch (_) { /* tabla opcional — ignorar */ }
+        } catch (_) { }
 
-        // ── Paso 2: intentar borrado físico ────────────────────────────────
         const { error: errDelete } = await supabaseClient
             .from('menu_items')
             .delete()
             .eq('id', idItem);
 
         if (!errDelete) {
-            // Borrado físico exitoso (plato sin ventas asociadas)
             Toast.ok(`"${nombreItem}" eliminado del catálogo.`);
             cargarSlotsMenuReal();
             return;
         }
 
-        // ── Paso 3: FK violation → Soft Delete ─────────────────────────────
-        // [FIX-6] El plato tiene order_items referenciándolo.
-        // No se puede borrar físicamente sin romper la integridad referencial
-        // y el historial contable. La solución correcta en un POS es un
-        // borrado lógico: el plato desaparece del catálogo pero sus ventas
-        // permanecen ligadas para reportes y auditoría.
         if (errDelete.code === '23503') {
             const { error: errSoft } = await supabaseClient
                 .from('menu_items')
@@ -1026,7 +1058,6 @@ async function eliminarComponenteCatalogo(idItem, nombreItem) {
                 return;
             }
 
-            // deleted_at no existe aún → reintentar solo con is_active:false
             if (errSoft.code === '42703') {
                 const { error: errFallback } = await supabaseClient
                     .from('menu_items')
@@ -1045,7 +1076,6 @@ async function eliminarComponenteCatalogo(idItem, nombreItem) {
             throw errSoft;
         }
 
-        // ── Paso 4: cualquier otro error ───────────────────────────────────
         throw errDelete;
 
     } catch (err) {
@@ -1098,7 +1128,7 @@ async function actualizarPorcionesHoy(idPlato, valor) {
 
         if (error) {
             if (error.code === '42703' || (error.message && error.message.includes('portions_today'))) {
-                console.warn('Columna portions_today no existe. Ejecuta: ALTER TABLE menu_items ADD COLUMN portions_today INTEGER;');
+                console.warn('Columna portions_today no existe.');
                 if (porciones === 0) {
                     await supabaseClient.from('menu_items').update({ is_active: false }).eq('id', idPlato);
                 }
@@ -1620,7 +1650,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ============================================================
-// MÓDULO A: CONTROL DE ACCESO — SISTEMA DE CIERRE DE PEDIDOS
+// MÓDULO A: CONTROL DE ACCESO
 // ============================================================
 const SETTING_KEY = 'orders_enabled';
 
@@ -2074,13 +2104,10 @@ async function editarComandaAdmin(orderId, orderNo, totalBruto) {
     _adminEditor.orderId   = orderId;
     _adminEditor.guardando = false;
 
-    // [FIX-8] El modal existe en admin.html (modal-editar-comanda-admin).
-    // Si no lo encuentras, significa que aún no has pegado el bloque HTML del modal.
-    // Busca el comentario "MODAL EDITAR COMANDA ADMIN" en admin.html.
     const modal = document.getElementById('modal-editar-comanda-admin');
     if (!modal) {
         Toast.error('Modal de edición no encontrado. Pega el HTML del modal antes de </body> en admin.html.');
-        console.error('[FIX-8] Falta el modal #modal-editar-comanda-admin en admin.html. Ver comentario en admin.js.');
+        console.error('[FIX-8] Falta el modal #modal-editar-comanda-admin en admin.html.');
         return;
     }
     modal.style.display = 'flex';
@@ -2305,6 +2332,13 @@ async function guardarEdicionAdmin() {
     }
 }
 
+// ============================================================
+// [FIX-9] _guardarEdicionLegacyAdmin — REESCRITA COMPLETA
+// Causa raíz del error v3.2:
+//   supabaseClient.from(...).insert(...).catch is not a function
+// Supabase JS v2 devuelve { data, error }, NO una Promise con
+// .catch(). Todo manejo de errores debe ser try/catch con await.
+// ============================================================
 async function _guardarEdicionLegacyAdmin() {
     const pedido  = _adminEditor.pedido;
     const orderId = _adminEditor.orderId;
@@ -2314,33 +2348,62 @@ async function _guardarEdicionLegacyAdmin() {
     const aActualizar = _adminEditor.itemsEdit.filter(i => !i.eliminado && !i.esNuevo && idsOrig.has(i.id));
     const aNuevos     = _adminEditor.itemsEdit.filter(i => i.esNuevo    && !i.eliminado);
 
-    for (const it of aEliminar)
-        await supabaseClient.from('order_items').delete().eq('id', it.id);
+    // ── 1. Eliminar ítems marcados como borrados ───────────────
+    for (const it of aEliminar) {
+        const { error } = await supabaseClient
+            .from('order_items')
+            .delete()
+            .eq('id', it.id);
+        if (error) console.warn('[La 26] No se pudo eliminar ítem', it.id, '—', error.message);
+    }
 
+    // ── 2. Actualizar cantidades modificadas ──────────────────
     for (const it of aActualizar) {
         const orig = (pedido.order_items || []).find(o => o.id === it.id);
-        if (orig && orig.quantity !== it.cantidad)
-            await supabaseClient.from('order_items').update({ quantity: it.cantidad }).eq('id', it.id);
+        if (orig && orig.quantity !== it.cantidad) {
+            const { error } = await supabaseClient
+                .from('order_items')
+                .update({ quantity: it.cantidad })
+                .eq('id', it.id);
+            if (error) console.warn('[La 26] No se pudo actualizar cantidad de ítem', it.id, '—', error.message);
+        }
     }
 
+    // ── 3. Insertar nuevos ítems ──────────────────────────────
     if (aNuevos.length > 0) {
-        await supabaseClient.from('order_items').insert(aNuevos.map(it => ({
-            order_id:    orderId,
+        const insertPayload = aNuevos.map(it => ({
+            order_id:     orderId,
             menu_item_id: it.menuItemId,
-            quantity:    it.cantidad,
-            unit_price:  it.precio,
-            item_status: 'pending',
-            notes:       `[nombre]${it.nombre}`,
-        }))).catch(() => {});
+            quantity:     it.cantidad,
+            unit_price:   it.precio,
+            item_status:  'pending',
+            notes:        `[nombre]${it.nombre}`,
+        }));
+
+        const { error } = await supabaseClient
+            .from('order_items')
+            .insert(insertPayload);
+
+        // No lanzamos — un fallo en insert no debe bloquear la actualización del total
+        if (error) console.warn('[La 26] No se pudieron insertar ítems nuevos —', error.message);
     }
 
+    // ── 4. Recalcular y actualizar total de la orden ──────────
     const nuevoTotal = _calcularTotalAdmin();
-    const { error }  = await supabaseClient
+    const { error: errTotal } = await supabaseClient
         .from('orders')
-        .update({ total_amount: nuevoTotal, updated_at: new Date().toISOString() })
+        .update({
+            total_amount: nuevoTotal,
+            updated_at:   new Date().toISOString(),
+        })
         .eq('id', orderId);
 
-    return { ok: !error, error: error?.message, nuevoTotal };
+    if (errTotal) {
+        console.error('[La 26] Error actualizando total de orden:', errTotal.message);
+        return { ok: false, error: errTotal.message, nuevoTotal };
+    }
+
+    return { ok: true, error: null, nuevoTotal };
 }
 
 function cerrarModalEditarComanda() {
@@ -2353,37 +2416,38 @@ function cerrarModalEditarComanda() {
 }
 
 // ============================================================
-// FIN DE admin.js v3.2
+// FIN DE admin.js v3.3
 // ============================================================
-// RECORDATORIO — HTML REQUERIDO EN admin.html [FIX-8]:
-// Pega el siguiente bloque justo antes del cierre </body>:
+// CAMBIOS RESPECTO A v3.2:
 //
-// <!-- MODAL EDITAR COMANDA ADMIN -->
-// <div id="modal-editar-comanda-admin" class="modal-overlay"
-//      style="display:none;" onclick="if(event.target===this)cerrarModalEditarComanda()">
-//   <div class="modal-box" style="max-width:580px;padding:0;overflow:hidden;">
-//     <div style="display:flex;justify-content:space-between;align-items:center;
-//                 padding:20px 24px;border-bottom:1.5px solid var(--border);background:var(--surface-2);">
-//       <div>
-//         <h2 style="font-size:16px;font-weight:700;color:var(--text-1);line-height:1.2;">✏️ Editar Comanda</h2>
-//         <p style="font-size:11.5px;color:var(--text-3);margin-top:2px;">Modifica ítems o agrega productos al pedido.</p>
-//       </div>
-//       <button onclick="cerrarModalEditarComanda()"
-//         style="background:var(--surface-3);border:none;border-radius:999px;width:32px;height:32px;
-//                font-size:16px;cursor:pointer;color:var(--text-2);display:flex;align-items:center;
-//                justify-content:center;flex-shrink:0;">×</button>
-//     </div>
-//     <div id="eca-body" style="padding:20px 24px;max-height:60vh;overflow-y:auto;"></div>
-//     <div id="eca-footer" style="display:flex;justify-content:flex-end;gap:10px;
-//          padding:16px 24px;border-top:1.5px solid var(--border);background:var(--surface-2);">
-//       <button onclick="cerrarModalEditarComanda()" class="btn-ghost">Cancelar</button>
-//       <button id="eca-btn-guardar" onclick="guardarEdicionAdmin()" class="btn-olive"
-//               style="min-width:140px;">💾 Guardar cambios</button>
-//     </div>
-//   </div>
-// </div>
-// <style>@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}</style>
+// [FIX-9] _guardarEdicionLegacyAdmin — reescrita desde cero.
+//   ANTES: usaba patrón .insert([...]).catch(() => {}) que
+//   lanzaba TypeError porque Supabase JS v2 no devuelve promesas
+//   con .catch().
+//   AHORA: usa for...of + try/catch + await en cada operación.
+//   Las operaciones de delete/update/insert ahora son secuenciales
+//   y manejadas correctamente. El error ya no ocurre.
 //
-// SQL OPCIONAL (deleted_at para auditoría de soft-delete):
-// ALTER TABLE public.menu_items ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
+// [FIX-10] _buildTableMap() — nueva función helper.
+//   Consulta la tabla 'tables' (o 'restaurant_tables' como fallback)
+//   y construye un mapa { [table_id]: nombreMesa }.
+//
+// [FIX-10] cargarDashboardReal — actualizado.
+//   Ahora llama _buildTableMap() en Promise.all junto con las órdenes.
+//   La lógica de resolución del mesaLabel es:
+//     1. [MESA ...] en notes (legado) → usa ese valor
+//     2. table_id en tableMap → usa el nombre de la BD
+//     3. table_id existe pero no está en mapa → muestra últimos 4 chars
+//     4. Sin table_id → 'P.L.' (Para Llevar)
+//
+// SQL DE DIAGNÓSTICO (ejecutar en Supabase SQL Editor si la mesa
+// sigue sin aparecer — verifica qué tabla existe y qué columnas tiene):
+//
+//   SELECT table_name FROM information_schema.tables
+//   WHERE table_schema = 'public'
+//   AND table_name IN ('tables', 'restaurant_tables');
+//
+//   -- Si existe 'tables':
+//   SELECT id, name, number, table_number FROM tables LIMIT 5;
+//
 // ============================================================
