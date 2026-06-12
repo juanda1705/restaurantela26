@@ -40,7 +40,7 @@ const RESTAURANT_SLUG = "restaurante-la-26";
 let _restaurantId = null;
 
 const LA26_USERS = {
-    'admin':   { password: 'admin26',   role: 'admin',   label: 'Administrador', emoji: '👑' },
+    'admin':   { password: 'admin',   role: 'admin',   label: 'Administrador', emoji: '👑' },
     'cocina':  { password: 'cocina26',  role: 'cocina',  label: 'Cocina',        emoji: '🍳' },
     'cliente': { password: 'cliente26', role: 'cliente', label: 'Cliente',       emoji: '👤' },
 };
