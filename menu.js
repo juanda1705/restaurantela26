@@ -492,7 +492,7 @@ function _activarModoDemo() {
             const cfg = CATEGORIAS[tipo];
             const btn = document.createElement('button');
             btn.className   = `cat-btn${State.filtro === tipo ? ' active' : ''}`;
-            btn.textContent = `${cfg.icono} ${cfg.label}`;
+            btn.innerHTML   = `${cfg.icono} ${cfg.label}`;
             btn.onclick     = () => _cambiarFiltro(tipo);
             bar.appendChild(btn);
         });
@@ -1834,8 +1834,3 @@ function _mostrarPantallaFueraDeServicio() {
         _mostrarEstado('error', `Error al iniciar la carta: ${err.message}`);
     }
 })();
-
-// Inicializar iconos Lucide en DOMContentLoaded (para elementos estáticos del HTML)
-document.addEventListener('DOMContentLoaded', () => {
-    if (typeof lucide !== 'undefined') lucide.createIcons();
-});
