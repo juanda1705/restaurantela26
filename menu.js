@@ -2,6 +2,9 @@
 // RESTAURANTE LA 26 — PANEL DE MESERO
 // menu.js · Versión 7.4.2
 //
+// ── DEPENDENCIA REQUERIDA EN EL HTML (antes de este script) ──
+//   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+//
 // CAMBIOS v7.4.2 (patches aplicados sobre v7.4.1):
 //  [FIX-PORCIONES-CRITICO]
 //    Order.enviar(): el descuento de porciones ya NO depende
@@ -69,12 +72,12 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // CATEGORÍAS DE MENÚ
 // ============================================================
 const CATEGORIAS = {
-    protein:        { label: 'Proteína con Salsa', icono: '🥩', orden: 1 },
-    side:           { label: 'Principio',          icono: '🍲', orden: 2 },
-    drink:          { label: 'Bebida',             icono: '🥤', orden: 3 },
-    a_la_carte:     { label: 'A la Carta',         icono: '✨', orden: 4 },
-    executive_lunch:{ label: 'Menú Ejecutivo',     icono: '🍱', orden: 5 },
-    dessert:        { label: 'Postre',             icono: '🍮', orden: 6 },
+    protein:        { label: 'Proteína con Salsa', icono: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-2px;"><path d="M18 6c0-2.21-2.69-4-6-4S6 3.79 6 6c0 1.68.96 3.14 2.41 3.76L6 22h12l-2.41-12.24C16.96 9.14 18 7.68 18 6z"/></svg>', orden: 1 },
+    side:           { label: 'Principio',          icono: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-2px;"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="M17 12h3"/></svg>', orden: 2 },
+    drink:          { label: 'Bebida',             icono: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-2px;"><path d="M8 2h8l1 10H7L8 2z"/><path d="M7 12c0 5 2 8 5 8s5-3 5-8"/></svg>', orden: 3 },
+    a_la_carte:     { label: 'A la Carta',         icono: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-2px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>', orden: 4 },
+    executive_lunch:{ label: 'Menú Ejecutivo',     icono: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-2px;"><path d="M3 2h18v6H3z"/><path d="M3 8v14h18V8"/><path d="M12 12h.01"/></svg>', orden: 5 },
+    dessert:        { label: 'Postre',             icono: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-2px;"><path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8"/><path d="M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2 1 2 1"/><path d="M2 21h20"/><path d="M7 8v3"/><path d="M12 8v3"/><path d="M17 8v3"/><path d="M7 4h.01"/><path d="M12 4h.01"/><path d="M17 4h.01"/></svg>', orden: 6 },
 };
 
 const ITEM_TYPES_VALIDOS = ['executive_lunch','a_la_carte','drink','dessert','side'];
@@ -438,6 +441,7 @@ const Menu = {
             _renderizarMenu();
             _mostrarEstado('menu');
             _suscribirRealtimeMenu();
+            if (typeof lucide !== 'undefined') lucide.createIcons();
         } catch (err) {
             _mostrarEstado('error', `No se pudo cargar la carta: ${err.message || 'error de red'}`);
         }
@@ -470,9 +474,8 @@ function _activarModoDemo() {
     ];
     _renderizarMenu();
     _mostrarEstado('menu');
-}
-
-function _renderizarCatsBar() {
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+} {
     const bar = document.getElementById('cats-bar');
     if (!bar) return;
     bar.innerHTML = '';
@@ -489,7 +492,7 @@ function _renderizarCatsBar() {
             const cfg = CATEGORIAS[tipo];
             const btn = document.createElement('button');
             btn.className   = `cat-btn${State.filtro === tipo ? ' active' : ''}`;
-            btn.textContent = `${cfg.icono} ${cfg.label}`;
+            btn.innerHTML   = `${cfg.icono} ${cfg.label}`;
             btn.onclick     = () => _cambiarFiltro(tipo);
             bar.appendChild(btn);
         });
@@ -499,6 +502,7 @@ function _cambiarFiltro(tipo) {
     State.filtro = tipo;
     _renderizarCatsBar();
     _renderizarMenu();
+    if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 function _renderizarMenu() {
@@ -508,7 +512,7 @@ function _renderizarMenu() {
     sections.innerHTML = '';
     const lista = slotsFiltrados();
     if (!lista || lista.length === 0) {
-        sections.innerHTML = `<div class="empty-state"><div class="icon">🍽️</div><p>No hay platos disponibles<br>en esta categoría.</p></div>`;
+        sections.innerHTML = `<div class="empty-state"><div class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg></div><p>No hay platos disponibles<br>en esta categoría.</p></div>`;
         return;
     }
     const grupos = {};
@@ -1151,7 +1155,7 @@ const Hist = {
         if (items.length === 0) {
             lista.innerHTML = `
                 <div class="empty-state" style="padding:56px 28px;">
-                    <div class="icon">🍽️</div>
+                    <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg></div>
                     <p>${HistState.pedidos.length === 0
                         ? 'Aún no hay pedidos hoy.'
                         : 'No hay pedidos en esta categoría.'}</p>
@@ -1163,7 +1167,7 @@ const Hist = {
             const card = _crearTarjetaPedido(pedido, i);
             lista.appendChild(card);
         });
-    },
+        if (typeof lucide !== 'undefined') lucide.createIcons();
 
     _suscribirRealtime() {
         if (!State.restaurantId) return;
@@ -1200,7 +1204,7 @@ function _histSetError(msg) {
     const lista = document.getElementById('hist-lista');
     if (lista) lista.innerHTML = `
         <div class="empty-state" style="padding:56px 28px;">
-            <div class="icon">⚠️</div>
+            <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
             <p>${msg}</p>
             <button onclick="Hist.recargar()"
                 style="margin-top:12px;padding:11px 24px;border-radius:9999px;
@@ -1210,12 +1214,17 @@ function _histSetError(msg) {
                 Reintentar
             </button>
         </div>`;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 function _crearTarjetaPedido(pedido, idx) {
     const { tipo, destino, cliente, direccion, nota } = _parsearNota(pedido.notes);
 
-    const tipoIcons  = { mesa:'🍽️', llevar:'🛵', domicilio:'📦' };
+    const tipoIcons  = {
+        mesa:      '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-1px;"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg>',
+        llevar:    '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-1px;"><path d="M5 17H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v3"/><polygon points="9 17 14 12 17 15 22 10 22 17 9 17"/></svg>',
+        domicilio: '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-1px;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+    };
     const tipoLabels = { mesa:'Mesa', llevar:'Para Llevar', domicilio:'Domicilio' };
     const statusLabels = {
         pending:'Pendiente', preparing:'En cocina',
@@ -1246,19 +1255,19 @@ function _crearTarjetaPedido(pedido, idx) {
 
     const direccionHTML = (tipo === 'domicilio' && direccion)
         ? `<div class="card-direccion">
-               <span style="font-size:15px;flex-shrink:0;margin-top:1px;">📍</span>
+               <span style="display:inline-flex;align-items:center;flex-shrink:0;margin-top:1px;"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
                <span class="card-direccion-text">${direccion}</span>
            </div>` : '';
 
     const notaHTML = nota
         ? `<div class="card-nota">
-               <span style="font-size:14px;flex-shrink:0;margin-top:1px;">📝</span>
+               <span style="display:inline-flex;align-items:center;flex-shrink:0;margin-top:1px;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
                <span class="card-nota-text">${nota}</span>
            </div>` : '';
 
     const editarBtnHTML = editable
         ? `<button class="btn-editar-pedido" onclick="EditarPedido.abrir('${pedido.id}')" title="Editar este pedido">
-               ✏️ Editar pedido
+               <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-1px;margin-right:4px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>Editar pedido
            </button>`
         : '';
 
@@ -1273,12 +1282,12 @@ function _crearTarjetaPedido(pedido, idx) {
         <div class="card-head" onclick="toggleHistCard('${bodyId}','${chevId}')">
             <div class="card-head-left">
                 <div class="card-tipo">
-                    <span style="font-size:13px;">${tipoIcons[tipo]||'🍽️'}</span>
+                    <span style="display:inline-flex;align-items:center;">${tipoIcons[tipo]||'<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg>'}</span>
                     <span class="tipo-text ${tipo}">${tipoLabels[tipo]||tipo}</span>
                 </div>
                 <p class="card-destino">${destino}</p>
-                ${nombreMostrar ? `<p class="card-cliente">👤 ${nombreMostrar}</p>` : ''}
-                <p class="card-hora">🕐 ${_horaCorta(pedido.created_at)}</p>
+                ${nombreMostrar ? `<p class="card-cliente"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-1px;margin-right:3px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>${nombreMostrar}</p>` : ''}
+                <p class="card-hora"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-1px;margin-right:3px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${_horaCorta(pedido.created_at)}</p>
             </div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
                 <span class="status-badge ${statusClass}">${statusLabels[statusClass]||statusClass}</span>
@@ -1459,6 +1468,7 @@ const EditarPedido = {
 
         this._nuevaQty = 1;
         _editSetLoader(false);
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     },
 
     _renderItemRow(it, i) {
@@ -1479,7 +1489,7 @@ const EditarPedido = {
                     <button class="edit-qty-btn" onclick="EditarPedido._cambiarCantidad('${it.id || 'new-'+i}', +1)">+</button>
                     <span class="edit-item-subtotal">${subtotalStr}</span>
                     ${noEliminable
-                        ? `<span class="edit-item-lock" title="En cocina, no se puede eliminar">🔒</span>`
+                        ? `<span class="edit-item-lock" title="En cocina, no se puede eliminar"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-1px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>`
                         : `<button class="edit-item-del" onclick="EditarPedido._eliminarItem('${it.id || 'new-'+i}')" title="Eliminar">✕</button>`
                     }
                 </div>
@@ -1581,6 +1591,7 @@ const EditarPedido = {
             return;
         }
         lista.innerHTML = activos.map((it, i) => this._renderItemRow(it, i)).join('');
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     },
 
     _calcularTotalEdit() {
@@ -1733,7 +1744,7 @@ function _editSetError(msg) {
     const footer = document.getElementById('edit-modal-footer');
     if (body) body.innerHTML = `
         <div class="empty-state" style="padding:56px 28px;">
-            <div class="icon">⚠️</div>
+            <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
             <p>${msg}</p>
         </div>`;
     if (footer) footer.style.display = 'none';
@@ -1775,7 +1786,7 @@ function _mostrarPantallaFueraDeServicio() {
         loader.style.display = 'flex';
         loader.innerHTML = `
             <div style="text-align:center;padding:40px 20px;max-width:300px;">
-                <div style="font-size:48px;margin-bottom:20px;">🔒</div>
+                <div style="font-size:48px;margin-bottom:20px;display:flex;justify-content:center;align-items:center;"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
                 <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.8rem;
                            font-weight:400;color:var(--ink);margin-bottom:12px;line-height:1.2;">
                     Sistema fuera<br>de servicio
@@ -1785,11 +1796,9 @@ function _mostrarPantallaFueraDeServicio() {
                     Consulta con el administrador.
                 </p>
             </div>`;
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 }
-
-// ============================================================
-// INIT
 // ============================================================
 (async function init() {
     try {
