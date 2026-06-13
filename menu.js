@@ -1068,20 +1068,13 @@ const Hist = {
                     )
                 `)
                 .eq('restaurant_id', State.restaurantId)
-                .gte('created_at', `${hoy}T00:00:00`)
-                .lte('created_at', `${hoy}T23:59:59`)
+                .gte('created_at', `${hoy}T05:00:00Z`)
+                .lte('created_at', `${hoy}T28:59:59Z`)
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
 
-            const meseroActivo = Sesion.obtener();
-            const todas = ordenes || [];
-            HistState.pedidos = meseroActivo
-                ? todas.filter(p => {
-                    const { mesero } = _parsearNota(p.notes);
-                    return mesero.toLowerCase() === meseroActivo.toLowerCase();
-                })
-                : todas;
+            HistState.pedidos = ordenes || [];
 
             HistState.cargado = true;
             this._render();
