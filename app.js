@@ -697,6 +697,15 @@ function _crearCardHTML(order, esNuevo = false) {
         </div>
         <div class="card-body">
             ${modalidad ? `<div class="comanda-modalidad ${modalidadCls}">${_esc(modalidad)}</div>` : ''}
+            ${(() => {
+                const matchNota = notasOrden.match(/\|\s*Nota:\s*(.+?)(\||$)/);
+                const notaCliente = matchNota ? matchNota[1].trim() : null;
+                return notaCliente
+                    ? `<div style="background:#fffbeb;border:1.5px solid #f59e0b;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px;color:#92400e;font-weight:600;">
+                           ⚠️ Nota del cliente: ${_esc(notaCliente)}
+                       </div>`
+                    : '';
+            })()}
             <div class="items-label">Comanda</div>
             ${itemsHTML}
         </div>
