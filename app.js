@@ -1,1820 +1,931 @@
 // ============================================================
-// RESTAURANTE LA 26 — PANEL DE MESERO
-// menu.js · Versión 7.4.2
+// RESTAURANTE LA 26 — app.js · Versión 3.3
+// Módulo principal: login, cocina, Supabase Realtime
+// Namespace global: window.La26
+// Bucaramanga, Santander — Colombia
 //
-// CAMBIOS v7.4.2 (patches aplicados sobre v7.4.1):
-//  [FIX-PORCIONES-CRITICO]
-//    Order.enviar(): el descuento de porciones ya NO depende
-//    exclusivamente de La26Core. Se agrega _descontarPorciones()
-//    como función directa sobre Supabase (usando `db`) que se
-//    ejecuta SIEMPRE después de insertar los order_items.
-//    La26Core sigue llamándose en paralelo si está disponible,
-//    pero nunca es el único camino. Esto resuelve el escenario
-//    donde menu.html no carga la26-core.js.
+// CAMBIOS v3.3 (fix crítico de mesa):
+//  [FIX-MESA] _crearCardHTML: identificadorMesa ahora lee el
+//             número de mesa DESDE NOTES con máxima prioridad.
+//             El formato en notes es "[MESA] Mesa: N" y se
+//             extrae con regex. El JOIN a tables solo se usa
+//             como último recurso para compatibilidad legacy.
 //
-//  [FIX-PORCIONES-FILTRO]
-//    _descontarPorciones(): filtra correctamente por menuItemId
-//    no-null Y disponibilidad del slot (porciones < 999).
-//    Solo descuenta ítems que tienen control real de porciones
-//    (portions_today != null en la BD). Usa UPDATE con
-//    decrement seguro: portions_today - cantidad, con mínimo 0
-//    via GREATEST(portions_today - cantidad, 0).
+//             PROBLEMA ORIGINAL:
+//               - menu.js resolvía table_id y a veces caía en
+//                 Mesa 1 (fallback). El JOIN en app.js leía el
+//                 label de esa Mesa 1, mostrando "Mesa 1" aunque
+//                 el mesero hubiera escrito "Mesa 5".
 //
-//  [FIX-PORCIONES-OPTIMISTIC]
-//    Después del descuento en BD, actualiza State.slots en
-//    memoria para que la UI refleje el nuevo stock sin esperar
-//    el ciclo de realtime.
+//             SOLUCIÓN:
+//               - menu.js v7.1 guarda el número REAL en notes:
+//                 "[MESA] Mesa: 5" (siempre, independiente del table_id).
+//               - app.js v3.3 lee ese valor de notes con prioridad
+//                 máxima. El JOIN es solo fallback legacy.
 //
-// CAMBIOS v7.4.1 (patches aplicados sobre v7.4):
-//  [PATCH-1] Order.enviar(): llama La26Core.descontarPorcionesOrden
-//            y La26Core.ajustarInventarioPorItems después de insertar
-//            los order_items. Silencioso si La26Core no está disponible.
-//
-//  [PATCH-2] init(): se suscribe a La26Core.on('onMenuItemChange')
-//            y La26Core.on('onOrderChange') para actualizaciones
-//            en tiempo real sin recargar todo el menú.
-//
-//  [PATCH-3] EditarPedido.guardar(): delega a La26Core.guardarEdicionAdmin
-//            para control de inventario consistente con admin.
-//            Incluye _guardarLegacy() como fallback sin La26Core.
-//
-// CAMBIOS v7.4:
-//  [ADD-SESION]      Sesión de mesero por nombre (sessionStorage).
-//  [ADD-MEDIANOCHE]  Reset automático del historial a las 00:00.
-//  [DEL-VENTA]       Stats row solo muestra Total, Pendientes, Entregados.
-//  [ADD-EDITAR]      Módulo EditarPedido completo.
-//
-// CAMBIOS v7.3:
-//  [ADD-HISTORIAL] Módulo Hist integrado directamente en este archivo.
-//
-// CAMBIOS v7.2:
-//  [ADD-DIRECCION] Campo de dirección en pedidos a domicilio.
-//
-// CAMBIOS v7.1:
-//  [FIX-MESA] _resolverTableId sin fallback a Mesa 1.
+// CAMBIOS v3.2 (sin modificar):
+//  [FIX-1] cargarPedidos: fallback sin join anidado a menu_items
+//  [FIX-2] Realtime INSERT orders: delay 300 → 1500 ms
+//  [FIX-3] Realtime INSERT order_items: delay 600 → 1200 ms
+//  [FIX-4] _crearCardHTML: muestra nota de entrega parseada
 // ============================================================
 
-'use strict';
-
-// ============================================================
-// CREDENCIALES SUPABASE
-// ============================================================
 const SUPABASE_URL      = "https://hxmodeduckuhvvspnkxd.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_ESxhljLgqWkGvrnKhvbeEg_iBqaGciv";
-const RESTAURANT_SLUG   = "restaurante-la-26";
 
-const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const _supabase = supabaseClient;
 
-// ============================================================
-// CATEGORÍAS DE MENÚ
-// ============================================================
-const CATEGORIAS = {
-    protein:        { label: 'Proteína con Salsa', icono: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M18 6c0-2.2-2.7-4-6-4S6 3.8 6 6c0 1.7 1 3.1 2.4 3.8L6 22h12l-2.4-12.2C16.9 9.1 18 7.7 18 6z"/></svg>', orden: 1 },
-    side:           { label: 'Principio',          icono: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M12 2a10 10 0 0 1 10 10H2A10 10 0 0 1 12 2z"/><path d="M6 22h12"/><path d="M12 12v10"/></svg>', orden: 2 },
-    drink:          { label: 'Bebida',             icono: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M8 2h8l1 10H7L8 2z"/><path d="M7 12c0 5 2 8 5 8s5-3 5-8"/></svg>', orden: 3 },
-    a_la_carte:     { label: 'A la Carta',         icono: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>', orden: 4 },
-    executive_lunch:{ label: 'Menú Ejecutivo',     icono: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>', orden: 5 },
-    dessert:        { label: 'Postre',             icono: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M6 2h12l2 6H4L6 2z"/><path d="M4 8c0 8 2 12 8 12s8-4 8-12"/></svg>', orden: 6 },
+const RESTAURANT_SLUG = "restaurante-la-26";
+let _restaurantId = null;
+
+const LA26_USERS = {
+    'admin':   { password: 'admin26',   role: 'admin',   label: 'Administrador', emoji: '👑' },
+    'cocina':  { password: 'cocina26',  role: 'cocina',  label: 'Cocina',        emoji: '🍳' },
+    'cliente': { password: 'cliente26', role: 'cliente', label: 'Cliente',       emoji: '👤' },
 };
 
-const ITEM_TYPES_VALIDOS = ['executive_lunch','a_la_carte','drink','dessert','side'];
-
-// Estados que permiten edición
-const ESTADOS_EDITABLES = ['pending', 'preparing', 'confirmed'];
-// Estados de ítem que NO se pueden eliminar
-const ITEM_ESTADOS_NO_ELIMINABLES = ['preparing', 'delivered'];
-
-// ============================================================
-// ESTADO GLOBAL
-// ============================================================
-const State = {
-    restaurantId:    null,
-    slots:           [],
-    cart:            [],
-    filtro:          'todos',
-    isSubmitting:    false,
-    realtimeChannel: null,
-};
+let _currentRole     = null;
+let _currentUser     = null;
+let _allOrders       = [];
+let _activeFilter    = 'all';
+let _realtimeChannel = null;
+let _timerInterval   = null;
+let _audioCtx        = null;
 
 // ============================================================
-// ═══ SESIÓN DE MESERO ═══
+// NAMESPACE PÚBLICO
 // ============================================================
-const Sesion = {
-    KEY: 'la26_mesero_nombre',
-
-    obtener() {
-        return sessionStorage.getItem(this.KEY) || null;
-    },
-
-    guardar(nombre) {
-        const n = (nombre || '').trim();
-        if (!n) return false;
-        sessionStorage.setItem(this.KEY, n);
-        return true;
-    },
-
-    cerrar() {
-        sessionStorage.removeItem(this.KEY);
-    },
-
-    label() {
-        const n = this.obtener();
-        return n ? n : '—';
-    },
-
-    async requerir() {
-        if (this.obtener()) {
-            _actualizarBannerMesero();
-            return;
-        }
-        await this._mostrarPrompt();
-        _actualizarBannerMesero();
-    },
-
-    _mostrarPrompt() {
-        return new Promise((resolve) => {
-            const overlay = document.getElementById('sesion-overlay');
-            const input   = document.getElementById('sesion-input');
-            const btn     = document.getElementById('sesion-btn');
-            const errEl   = document.getElementById('sesion-error');
-            if (!overlay) { resolve(); return; }
-
-            overlay.style.display = 'flex';
-            if (input) { input.value = ''; setTimeout(() => input.focus(), 120); }
-            if (errEl) errEl.style.display = 'none';
-
-            const confirmar = () => {
-                const val = (input?.value || '').trim();
-                if (!val) {
-                    if (errEl) { errEl.textContent = 'Ingresa tu nombre para continuar.'; errEl.style.display = 'block'; }
-                    input?.focus();
-                    return;
-                }
-                this.guardar(val);
-                overlay.style.display = 'none';
-                resolve();
-            };
-
-            if (btn) btn.onclick = confirmar;
-            if (input) {
-                input.onkeydown = (e) => { if (e.key === 'Enter') confirmar(); };
-            }
-        });
-    },
-
-    cambiar() {
-        const overlay = document.getElementById('sesion-overlay');
-        const input   = document.getElementById('sesion-input');
-        const errEl   = document.getElementById('sesion-error');
-        if (!overlay) return;
-        this.cerrar();
-        if (input) input.value = '';
-        if (errEl) errEl.style.display = 'none';
-        overlay.style.display = 'flex';
-        setTimeout(() => input?.focus(), 120);
-
-        const btn = document.getElementById('sesion-btn');
-        if (btn) {
-            btn.onclick = () => {
-                const val = (input?.value || '').trim();
-                if (!val) {
-                    if (errEl) { errEl.textContent = 'Ingresa tu nombre para continuar.'; errEl.style.display = 'block'; }
-                    input?.focus();
-                    return;
-                }
-                this.guardar(val);
-                overlay.style.display = 'none';
-                _actualizarBannerMesero();
-                HistState.cargado = false;
-                HistState.pedidos = [];
-                if (typeof Tabs !== 'undefined' && Tabs.actual === 'historial') {
-                    Hist.cargar();
-                }
-            };
-        }
-    },
-};
-
-function _actualizarBannerMesero() {
-    const el = document.getElementById('mesero-nombre-display');
-    if (el) el.textContent = Sesion.label();
-}
-
-// ============================================================
-// RESET AUTOMÁTICO A MEDIANOCHE
-// ============================================================
-function _programarResetMedianoche() {
-    const ahora  = new Date();
-    const manana = new Date(ahora);
-    manana.setDate(manana.getDate() + 1);
-    manana.setHours(0, 0, 5, 0);
-    const ms = manana - ahora;
-
-    setTimeout(() => {
-        HistState.cargado = false;
-        HistState.pedidos = [];
-        if (typeof Tabs !== 'undefined' && Tabs.actual === 'historial') {
-            Hist.cargar();
-        }
-        _programarResetMedianoche();
-    }, ms);
-}
-
-// ============================================================
-// TOAST
-// ============================================================
-const Toast = (function() {
-    function show(msg, tipo = 'info', dur = 3800) {
-        const wrap = document.getElementById('toast-wrap');
-        if (!wrap) return;
-        const c = {
-            ok:    { bg:'#f5f7f0', border:'rgba(74,103,65,0.35)',  text:'#2e4028', dot:'#4a6741' },
-            error: { bg:'#fdf5f3', border:'rgba(192,80,60,0.30)',  text:'#6b2a1e', dot:'#c0503c' },
-            info:  { bg:'#f5f7f0', border:'rgba(74,103,65,0.25)',  text:'#3a4a38', dot:'#4a6741' },
-        }[tipo] || {};
-
-        const t = document.createElement('div');
-        Object.assign(t.style, {
-            display:'flex', alignItems:'center', gap:'9px',
-            background:c.bg, border:`1.5px solid ${c.border}`,
-            borderRadius:'999px', padding:'10px 20px 10px 14px',
-            boxShadow:'0 4px 20px rgba(0,0,0,0.10)',
-            fontSize:'13.5px', fontFamily:"'DM Sans',sans-serif",
-            fontWeight:'500', color:c.text,
-            pointerEvents:'auto', opacity:'0',
-            transform:'translateY(-8px)',
-            transition:'opacity .28s ease, transform .28s ease',
-            maxWidth:'calc(100vw - 32px)',
-        });
-        const dot = document.createElement('span');
-        Object.assign(dot.style,{ width:'7px',height:'7px',borderRadius:'50%',background:c.dot,flexShrink:'0',display:'block' });
-        const txt = document.createElement('span');
-        txt.textContent = msg;
-        t.appendChild(dot); t.appendChild(txt);
-        wrap.appendChild(t);
-
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-            t.style.opacity = '1'; t.style.transform = 'translateY(0)';
-        }));
-        const timer = setTimeout(() => {
-            t.style.opacity = '0'; t.style.transform = 'translateY(-8px)';
-            setTimeout(() => t.remove(), 300);
-        }, dur);
-        t.onclick = () => { clearTimeout(timer); t.remove(); };
-    }
-    return {
-        ok:    (m,ms) => show(m,'ok',ms),
-        error: (m,ms) => show(m,'error',ms),
-        info:  (m,ms) => show(m,'info',ms),
-    };
-})();
-
-// ============================================================
-// HELPERS
-// ============================================================
-function formatCOP(v) {
-    return '$' + Math.round(v || 0).toLocaleString('es-CO');
-}
-function todayISO() {
-    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
-}
-function generarNumeroOrden() {
-    return `LA26-${Math.floor(10000000 + Math.random() * 89999999)}`;
-}
-function calcularTotal() {
-    return State.cart.reduce((acc, item) => {
-        const slot = State.slots.find(s => s.id === item.slotId);
-        return acc + (slot ? slot.precio * item.cantidad : 0);
-    }, 0);
-}
-function calcularCantidadTotal() {
-    return State.cart.reduce((acc, item) => acc + item.cantidad, 0);
-}
-function slotsFiltrados() {
-    if (State.filtro === 'todos') return State.slots;
-    return State.slots.filter(s => s.itemType === State.filtro);
-}
-
-// ============================================================
-// RESOLVER RESTAURANT_ID
-// ============================================================
-let _restaurantResolving = false;
-
-async function _resolverRestaurant() {
-    if (State.restaurantId || _restaurantResolving) return;
-    _restaurantResolving = true;
-    try {
-        const { data: r1, error: e1 } = await db
-            .from('restaurants').select('id')
-            .eq('slug', RESTAURANT_SLUG).maybeSingle();
-        if (e1) console.warn('[La 26] restaurants query error:', e1.message);
-        if (r1?.id) { State.restaurantId = r1.id; return; }
-
-        const { data: r2 } = await db.from('restaurants').select('id').limit(1).maybeSingle();
-        if (r2?.id) { State.restaurantId = r2.id; return; }
-
-        const { data: r3 } = await db
-            .from('restaurants')
-            .insert([{ name: 'Restaurante la 26', slug: RESTAURANT_SLUG }])
-            .select('id').single();
-        if (r3?.id) State.restaurantId = r3.id;
-    } catch (err) {
-        console.warn('[La 26] Error resolviendo restaurant_id:', err);
-    } finally {
-        _restaurantResolving = false;
-    }
-}
-
-// ============================================================
-// RESOLVER TABLE_ID  (v7.1 — sin fallback a Mesa 1)
-// ============================================================
-async function _resolverTableId(modalidad, mesa) {
-    if (!State.restaurantId) await _resolverRestaurant();
-    if (!State.restaurantId) return null;
-
-    if (modalidad === 'mesa') {
-        const mesaNum = parseInt(mesa);
-
-        if (!isNaN(mesaNum) && mesaNum > 0) {
-            const { data: porNum } = await db.from('tables').select('id')
-                .eq('restaurant_id', State.restaurantId).eq('number', mesaNum).maybeSingle();
-            if (porNum?.id) return porNum.id;
-        }
-
-        if (mesa) {
-            const { data: porLabel } = await db.from('tables').select('id')
-                .eq('restaurant_id', State.restaurantId)
-                .ilike('label', `%${mesa}%`)
-                .not('label','ilike','%llevar%')
-                .not('label','ilike','%domicilio%')
-                .not('label','ilike','%takeaway%')
-                .maybeSingle();
-            if (porLabel?.id) return porLabel.id;
-        }
-
-        const mesaNumFinal = (!isNaN(parseInt(mesa)) && parseInt(mesa) > 0) ? parseInt(mesa) : null;
-        if (mesaNumFinal) {
-            try {
-                const { data: nueva, error: errNueva } = await db.from('tables')
-                    .insert([{
-                        restaurant_id: State.restaurantId,
-                        number: mesaNumFinal,
-                        label: `Mesa ${mesaNumFinal}`,
-                        qr_code: `MESA-${State.restaurantId}-${mesaNumFinal}-${Date.now()}`,
-                        capacity: 4, status: 'available',
-                    }]).select('id').single();
-                if (nueva?.id) return nueva.id;
-                if (errNueva?.code === '23505') {
-                    const { data: reintento } = await db.from('tables').select('id')
-                        .eq('restaurant_id', State.restaurantId).eq('number', mesaNumFinal).maybeSingle();
-                    if (reintento?.id) return reintento.id;
-                }
-            } catch (e) {
-                console.warn(`[La 26] No se pudo crear Mesa ${mesaNumFinal}:`, e.message);
-            }
-        }
-        return null;
-    }
-
-    // Para llevar / domicilio
-    const { data: mv0 } = await db.from('tables').select('id')
-        .eq('restaurant_id', State.restaurantId).eq('number', 0).maybeSingle();
-    if (mv0?.id) return mv0.id;
-
-    const { data: mvL } = await db.from('tables').select('id')
-        .eq('restaurant_id', State.restaurantId).ilike('label','%para llevar%').maybeSingle();
-    if (mvL?.id) return mvL.id;
-
-    const { data: mn } = await db.from('tables').insert([{
-        restaurant_id: State.restaurantId, number: 0,
-        label: 'Para Llevar / Domicilio',
-        qr_code: `VIRTUAL-TAKEAWAY-${State.restaurantId}-${Date.now()}`,
-        capacity: 99, status: 'available',
-    }]).select('id').single();
-    return mn?.id || null;
-}
-
-// ============================================================
-// MENÚ
-// ============================================================
-const Menu = {
-    async cargar() {
-        _mostrarEstado('loader');
-        if (!State.restaurantId) await _resolverRestaurant();
-        if (!State.restaurantId) {
-            _mostrarEstado('error', 'No se pudo identificar el restaurante.');
-            return;
-        }
-        try {
-            const { data: dataRaw, error } = await db
-                .from('menu_items')
-                .select('id, name, price, item_type, is_active, description, portions_today')
-                .eq('restaurant_id', State.restaurantId)
-                .eq('is_active', true)
-                .order('item_type', { ascending: true })
-                .order('name',      { ascending: true });
-
-            const TIPOS_ACEPTADOS = [...ITEM_TYPES_VALIDOS, 'protein'];
-            const data = dataRaw ? dataRaw.filter(i => TIPOS_ACEPTADOS.includes(i.item_type)) : dataRaw;
-
-            if (error) throw error;
-            if (!data || data.length === 0) { _activarModoDemo(); return; }
-
-            State.slots = data.map(item => {
-                const tienePortions = item.portions_today !== null && item.portions_today !== undefined;
-                const porciones     = tienePortions ? Number(item.portions_today) : 999;
-                const disponible    = item.is_active === true && porciones > 0;
-                return {
-                    id: item.id, menuItemId: item.id,
-                    nombre: item.name, precio: Number(item.price) || 0,
-                    descripcion: item.description || '',
-                    itemType: CATEGORIAS[item.item_type] ? item.item_type : 'a_la_carte',
-                    porciones, disponible,
-                    // [FIX-PORCIONES] Guardar si tiene control real de porciones
-                    tieneControlPorciones: tienePortions,
-                };
-            });
-
-            _renderizarMenu();
-            _mostrarEstado('menu');
-            _suscribirRealtimeMenu();
-        } catch (err) {
-            _mostrarEstado('error', `No se pudo cargar la carta: ${err.message || 'error de red'}`);
-        }
-    },
-};
-
-function _mostrarEstado(estado, msg = '') {
-    const loader   = document.getElementById('app-loader');
-    const error    = document.getElementById('app-error');
-    const sections = document.getElementById('menu-sections');
-    if (loader)   loader.style.display   = estado === 'loader' ? 'flex'  : 'none';
-    if (error)    error.style.display    = estado === 'error'  ? 'flex'  : 'none';
-    if (sections) sections.style.display = estado === 'menu'   ? 'block' : 'none';
-    if (estado === 'error') {
-        if (loader) loader.style.display = 'none';
-        const el = document.getElementById('error-msg');
-        if (el) el.textContent = msg || 'Error desconocido. Recarga la página.';
-    }
-}
-
-function _activarModoDemo() {
-    State.slots = [
-        { id:'demo-p1', menuItemId:null, nombre:'Pechuga a la Plancha con Salsa Criolla', precio:16000, descripcion:'Pechuga jugosa bañada en salsa criolla.', itemType:'protein', porciones:12, disponible:true,  tieneControlPorciones:false },
-        { id:'demo-p2', menuItemId:null, nombre:'Tilapia Frita con Salsa de Ajo',         precio:18000, descripcion:'Tilapia frita con salsa de ajo y limón.',  itemType:'protein', porciones:8,  disponible:true,  tieneControlPorciones:false },
-        { id:'demo-p3', menuItemId:null, nombre:'Cerdo al Horno con Salsa BBQ',           precio:17000, descripcion:'Lomo de cerdo con salsa BBQ artesanal.',   itemType:'protein', porciones:0,  disponible:false, tieneControlPorciones:false },
-        { id:'demo-s1', menuItemId:null, nombre:'Arroz Blanco',                           precio:0,     descripcion:'Acompañamiento del almuerzo.',             itemType:'side',    porciones:30, disponible:true,  tieneControlPorciones:false },
-        { id:'demo-s2', menuItemId:null, nombre:'Fríjoles Rojos con Hogao',              precio:0,     descripcion:'Fríjoles cocinados a fuego lento.',         itemType:'side',    porciones:25, disponible:true,  tieneControlPorciones:false },
-        { id:'demo-d1', menuItemId:null, nombre:'Jugo Natural del Día',                  precio:3000,  descripcion:'Fruta fresca de temporada.',                itemType:'drink',   porciones:30, disponible:true,  tieneControlPorciones:false },
-        { id:'demo-d2', menuItemId:null, nombre:'Limonada de Panela',                    precio:3500,  descripcion:'Limón con panela orgánica.',                itemType:'drink',   porciones:25, disponible:true,  tieneControlPorciones:false },
-    ];
-    _renderizarMenu();
-    _mostrarEstado('menu');
-}
-
-function _renderizarCatsBar() {
-    const bar = document.getElementById('cats-bar');
-    if (!bar) return;
-    bar.innerHTML = '';
-
-    const btnTodos = document.createElement('button');
-    btnTodos.className   = `cat-btn${State.filtro === 'todos' ? ' active' : ''}`;
-    btnTodos.textContent = 'Todos';
-    btnTodos.onclick     = () => _cambiarFiltro('todos');
-    bar.appendChild(btnTodos);
-
-    const tipos = [...new Set(State.slots.map(s => s.itemType))].filter(t => CATEGORIAS[t]);
-    tipos.sort((a,b) => (CATEGORIAS[a]?.orden||99) - (CATEGORIAS[b]?.orden||99))
-        .forEach(tipo => {
-            const cfg = CATEGORIAS[tipo];
-            const btn = document.createElement('button');
-            btn.className   = `cat-btn${State.filtro === tipo ? ' active' : ''}`;
-            btn.innerHTML   = `${cfg.icono} ${cfg.label}`;
-            btn.onclick     = () => _cambiarFiltro(tipo);
-            bar.appendChild(btn);
-        });
-}
-
-function _cambiarFiltro(tipo) {
-    State.filtro = tipo;
-    _renderizarCatsBar();
-    _renderizarMenu();
-}
-
-function _renderizarMenu() {
-    _renderizarCatsBar();
-    const sections = document.getElementById('menu-sections');
-    if (!sections) return;
-    sections.innerHTML = '';
-    const lista = slotsFiltrados();
-    if (!lista || lista.length === 0) {
-        sections.innerHTML = `<div class="empty-state"><div class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#b4b4aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg></div><p>No hay platos disponibles<br>en esta categoría.</p></div>`;
-        return;
-    }
-    const grupos = {};
-    lista.forEach(slot => {
-        const tipo = CATEGORIAS[slot.itemType] ? slot.itemType : 'a_la_carte';
-        if (!grupos[tipo]) grupos[tipo] = [];
-        grupos[tipo].push(slot);
-    });
-    Object.keys(grupos)
-        .sort((a,b) => (CATEGORIAS[a]?.orden||99) - (CATEGORIAS[b]?.orden||99))
-        .forEach((tipo, secIdx) => {
-            const cfg = CATEGORIAS[tipo];
-            const platos = grupos[tipo];
-            if (!platos?.length) return;
-            const sec = document.createElement('div');
-            const header = document.createElement('div');
-            header.className = 'section-label';
-            header.innerHTML = `<h2>${cfg.icono} ${cfg.label}</h2>`;
-            sec.appendChild(header);
-            platos.forEach((slot, i) => {
-                const t = _crearTarjeta(slot);
-                t.style.animationDelay = `${secIdx * 0.06 + i * 0.05}s`;
-                sec.appendChild(t);
-            });
-            sections.appendChild(sec);
-        });
-}
-
-function _crearTarjeta(slot) {
-    const disponible = slot.disponible && slot.porciones > 0;
-    const pocas      = disponible && slot.porciones > 0 && slot.porciones < 999 && slot.porciones <= 5;
-    const enCarrito  = State.cart.find(c => c.slotId === slot.id);
-    const qty        = enCarrito ? enCarrito.cantidad : 0;
-
-    let badgeHTML = '';
-    if (!disponible) badgeHTML = `<span class="badge-agotado">Agotado</span>`;
-    else if (pocas)  badgeHTML = `<span class="badge-pocas">¡Solo quedan ${slot.porciones}!</span>`;
-
-    const precioHTML = slot.precio > 0
-        ? `<span class="plate-price">${formatCOP(slot.precio)}</span>`
-        : `<span class="plate-price incluido">Incluido</span>`;
-
-    let ctrlHTML = '';
-    if (disponible) {
-        ctrlHTML = qty === 0
-            ? `<button class="btn-add" onclick="Cart.agregar('${slot.id}')" aria-label="Agregar ${slot.nombre}">+</button>`
-            : `<div class="qty-chip">
-                   <button onclick="Cart.cambiar('${slot.id}',-1)" aria-label="Quitar">−</button>
-                   <span>${qty}</span>
-                   <button onclick="Cart.cambiar('${slot.id}',+1)" aria-label="Agregar">+</button>
-               </div>`;
-    }
-
-    const card = document.createElement('div');
-    card.id        = `tarjeta-${slot.id}`;
-    card.className = `plate-card${!disponible ? ' agotado' : ''} fade-up`;
-    card.innerHTML = `
-        <div class="plate-info">
-            <p class="plate-name">${slot.nombre}</p>
-            ${slot.descripcion ? `<p class="plate-desc">${slot.descripcion}</p>` : ''}
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px;">
-                ${precioHTML}${badgeHTML}
-            </div>
-        </div>
-        <div style="flex-shrink:0;">${ctrlHTML}</div>`;
-    return card;
-}
-
-function _refrescarTarjeta(slotId) {
-    const slot = State.slots.find(s => s.id === slotId);
-    if (!slot) return;
-    const vieja = document.getElementById(`tarjeta-${slotId}`);
-    if (vieja) vieja.replaceWith(_crearTarjeta(slot));
-}
-
-// ============================================================
-// CARRITO
-// ============================================================
-const Cart = {
-    agregar(slotId) {
-        const slot = State.slots.find(s => s.id === slotId);
-        if (!slot || !slot.disponible) return;
-        const existente = State.cart.find(c => c.slotId === slotId);
-        if (existente) {
-            if (slot.porciones < 999 && existente.cantidad >= slot.porciones) {
-                Toast.error(`Solo quedan ${slot.porciones} porciones de "${slot.nombre}".`);
-                return;
-            }
-            existente.cantidad++;
-        } else {
-            State.cart.push({ slotId, cantidad: 1 });
-        }
-        _refrescarTarjeta(slotId);
-        _actualizarCartBar();
-    },
-
-    cambiar(slotId, delta) {
-        const slot = State.slots.find(s => s.id === slotId);
-        if (!slot) return;
-        const idx = State.cart.findIndex(c => c.slotId === slotId);
-        if (idx === -1) return;
-        if (delta > 0 && slot.porciones < 999 && State.cart[idx].cantidad + delta > slot.porciones) {
-            Toast.error(`Solo quedan ${slot.porciones} porciones.`);
-            return;
-        }
-        const nueva = State.cart[idx].cantidad + delta;
-        if (nueva <= 0) State.cart.splice(idx, 1);
-        else            State.cart[idx].cantidad = nueva;
-        _refrescarTarjeta(slotId);
-        _actualizarCartBar();
-        const modal = document.getElementById('order-modal');
-        if (modal?.classList.contains('open')) Cart._renderSummary();
-    },
-
-    abrir() {
-        if (State.cart.length === 0) return;
-        this._renderSummary();
-        document.getElementById('order-modal').classList.add('open');
-        document.body.style.overflow = 'hidden';
-    },
-
-    cerrar() {
-        document.getElementById('order-modal').classList.remove('open');
-        document.body.style.overflow = '';
-    },
-
-    _renderSummary() {
-        const listEl  = document.getElementById('summary-items');
-        const totalEl = document.getElementById('summary-total');
-        if (!listEl) return;
-        listEl.innerHTML = '';
-        if (State.cart.length === 0) {
-            listEl.innerHTML = `<div style="text-align:center;padding:36px 0;"><p style="font-size:13px;color:var(--ink-ghost);">Tu pedido está vacío.</p></div>`;
-            if (totalEl) totalEl.textContent = '$0';
-            return;
-        }
-        State.cart.forEach(item => {
-            const slot = State.slots.find(s => s.id === item.slotId);
-            if (!slot) return;
-            const row = document.createElement('div');
-            row.className = 'summary-row';
-            row.innerHTML = `
-                <div style="flex:1;min-width:0;">
-                    <p class="summary-name">${slot.nombre}</p>
-                    <p class="summary-qty">${item.cantidad} × ${slot.precio > 0 ? formatCOP(slot.precio) : 'Incluido'}</p>
-                </div>
-                <span class="summary-price">${slot.precio > 0 ? formatCOP(slot.precio * item.cantidad) : '—'}</span>`;
-            listEl.appendChild(row);
-        });
-        if (totalEl) totalEl.textContent = formatCOP(calcularTotal());
-    },
-};
-
-function _actualizarCartBar() {
-    const qty = calcularCantidadTotal();
-    const bar     = document.getElementById('cart-bar');
-    const countEl = document.getElementById('cart-count');
-    const totalEl = document.getElementById('cart-total');
-    if (countEl) countEl.textContent = qty;
-    if (totalEl) totalEl.textContent = formatCOP(calcularTotal());
-    if (bar) {
-        if (qty > 0) bar.classList.add('visible');
-        else         bar.classList.remove('visible');
-    }
-}
-
-// ============================================================
-// [FIX-PORCIONES-CRITICO] DESCUENTO DIRECTO DE PORCIONES
-// ============================================================
-// Esta función se ejecuta SIEMPRE después de confirmar una orden,
-// independientemente de si La26Core está disponible o no.
-// Solo descuenta ítems que tienen control real de porciones
-// (tieneControlPorciones === true, es decir portions_today != null en BD).
-//
-// Usa una actualización atómica segura:
-//   portions_today = GREATEST(portions_today - cantidad, 0)
-// para nunca ir a negativo.
-// ============================================================
-async function _descontarPorciones(cartSnapshot) {
-    // cartSnapshot = copia del carrito en el momento de confirmar
-    // [{slotId, cantidad}]
-
-    const itemsConControl = cartSnapshot
-        .map(item => {
-            const slot = State.slots.find(s => s.id === item.slotId);
-            if (!slot) return null;
-            // Solo descuenta si tiene menuItemId real (no demo) y control de porciones
-            if (!slot.menuItemId || !slot.tieneControlPorciones) return null;
-            return { menuItemId: slot.menuItemId, cantidad: item.cantidad, slot };
-        })
-        .filter(Boolean);
-
-    if (itemsConControl.length === 0) {
-        // No hay ítems con control de porciones — no hay nada que descontar
-        return;
-    }
-
-    // Agrupar por menuItemId por si el mismo ítem aparece dos veces en el carrito
-    const agrupado = {};
-    for (const it of itemsConControl) {
-        if (!agrupado[it.menuItemId]) {
-            agrupado[it.menuItemId] = { menuItemId: it.menuItemId, cantidad: 0, slot: it.slot };
-        }
-        agrupado[it.menuItemId].cantidad += it.cantidad;
-    }
-
-    const promesas = Object.values(agrupado).map(async ({ menuItemId, cantidad, slot }) => {
-        try {
-            // Leer el valor actual de portions_today primero
-            const { data: actual, error: errLeer } = await db
-                .from('menu_items')
-                .select('portions_today')
-                .eq('id', menuItemId)
-                .single();
-
-            if (errLeer || !actual) {
-                console.warn(`[La 26] No se pudo leer portions_today para ${slot.nombre}:`, errLeer?.message);
-                return;
-            }
-
-            const porcionesActuales = Number(actual.portions_today) ?? 0;
-            const nuevasPorciones   = Math.max(0, porcionesActuales - cantidad);
-
-            const { error: errUpdate } = await db
-                .from('menu_items')
-                .update({
-                    portions_today: nuevasPorciones,
-                    // Si llega a 0, desactivar automáticamente
-                    is_active: nuevasPorciones > 0,
-                })
-                .eq('id', menuItemId);
-
-            if (errUpdate) {
-                console.warn(`[La 26] Error descontando porciones de "${slot.nombre}":`, errUpdate.message);
-                return;
-            }
-
-            // [FIX-PORCIONES-OPTIMISTIC] Actualizar State.slots en memoria inmediatamente
-            // para que la UI refleje el stock correcto sin esperar el ciclo de realtime
-            const idxSlot = State.slots.findIndex(s => s.id === slot.id);
-            if (idxSlot !== -1) {
-                State.slots[idxSlot].porciones   = nuevasPorciones;
-                State.slots[idxSlot].disponible  = nuevasPorciones > 0;
-                // Si se agotó, refrescar la tarjeta en la UI
-                if (nuevasPorciones === 0) {
-                    _refrescarTarjeta(slot.id);
-                } else if (nuevasPorciones <= 5) {
-                    // Actualizar badge de "pocas" si corresponde
-                    _refrescarTarjeta(slot.id);
-                }
-            }
-
-            console.info(`[La 26] ✓ Porciones descontadas: "${slot.nombre}" ${porcionesActuales} → ${nuevasPorciones}`);
-
-        } catch (err) {
-            // No cortar el flujo principal, solo loguear
-            console.warn(`[La 26] Excepción al descontar porciones de "${slot.nombre}":`, err.message);
-        }
-    });
-
-    // Ejecutar todos los descuentos en paralelo
-    await Promise.allSettled(promesas);
-}
-
-// ============================================================
-// ENVÍO DEL PEDIDO
-// [FIX-PORCIONES-CRITICO] Se llama _descontarPorciones() SIEMPRE
-// después de insertar los order_items, con la copia del carrito.
-// La26Core sigue usándose como canal adicional si está disponible.
-// ============================================================
-const Order = {
-    async enviar() {
-        if (State.isSubmitting) return;
-        if (State.cart.length === 0) { Toast.error('Agrega al menos un plato al pedido.'); return; }
-
-        const btnEl       = document.getElementById('btn-enviar');
-        const mesaEl      = document.getElementById('form-mesa');
-        const nombreEl    = document.getElementById('form-nombre');
-        const notasEl     = document.getElementById('form-notas');
-        const direccionEl = document.getElementById('form-direccion');
-        const modalidadEl = document.querySelector('input[name="form-modalidad"]:checked');
-
-        const mesa      = (mesaEl?.value      || '').trim();
-        const nombre    = (nombreEl?.value    || '').trim();
-        const notas     = (notasEl?.value     || '').trim();
-        const direccion = (direccionEl?.value || '').trim();
-        const modalidad = modalidadEl?.value || 'mesa';
-
-        if (modalidad === 'mesa' && !mesa) {
-            mesaEl?.classList.add('error'); mesaEl?.focus();
-            Toast.error('Indica el número de mesa.'); return;
-        }
-        mesaEl?.classList.remove('error');
-
-        if (modalidad === 'domicilio' && !direccion) {
-            direccionEl?.classList.add('error'); direccionEl?.focus();
-            Toast.error('Indica la dirección de entrega.'); return;
-        }
-        direccionEl?.classList.remove('error');
-
-        State.isSubmitting = true;
-        if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Enviando…'; }
-
-        // [FIX-PORCIONES-CRITICO] Capturar snapshot del carrito ANTES de limpiarlo
-        // para usarlo en _descontarPorciones() después de confirmar la orden.
-        const cartSnapshot = State.cart.map(item => ({ ...item }));
-
-        try {
-            if (!State.restaurantId) await _resolverRestaurant();
-            if (!State.restaurantId) throw new Error('No se pudo identificar el restaurante.');
-
-            const tableId = await _resolverTableId(modalidad, mesa);
-            let tableIdFinal = tableId;
-            if (!tableIdFinal) {
-                const { data: anyTable } = await db.from('tables').select('id')
-                    .eq('restaurant_id', State.restaurantId).limit(1).maybeSingle();
-                tableIdFinal = anyTable?.id || null;
-            }
-            if (!tableIdFinal) throw new Error('No hay mesas configuradas. Crea al menos una en el panel admin.');
-
-            // Inyectar mesero en las notas
-            const mesero = Sesion.obtener();
-            let notaCocina = '';
-            if (modalidad === 'mesa')           notaCocina = `[MESA] Mesa: ${mesa}`;
-            else if (modalidad === 'llevar')    notaCocina = `[PARA LLEVAR] Cliente: ${nombre || 'Sin nombre'}`;
-            else if (modalidad === 'domicilio') notaCocina = `[DOMICILIO] Cliente: ${nombre || 'Sin nombre'} | Dir: ${direccion}`;
-            if (mesero) notaCocina += ` | Mesero: ${mesero}`;
-            if (notas)  notaCocina += ` | Nota: ${notas}`;
-
-            const numeroOrden = generarNumeroOrden();
-            const total       = calcularTotal();
-
-            const { data: orden, error: errOrd } = await db.from('orders').insert([{
-                restaurant_id: State.restaurantId,
-                table_id:      tableIdFinal,
-                order_number:  numeroOrden,
-                status:        'pending',
-                customer_name: nombre || null,
-                total_amount:  total,
-                notes:         notaCocina || null,
-            }]).select('id').single();
-            if (errOrd) throw errOrd;
-
-            const { data: todosItems } = await db.from('menu_items').select('id,name,item_type')
-                .eq('restaurant_id', State.restaurantId).eq('is_active', true);
-            const listaItems = todosItems || [];
-            const fallbackId = listaItems[0]?.id || null;
-
-            const payload = State.cart.map(item => {
-                const slot = State.slots.find(s => s.id === item.slotId);
-                if (!slot) return null;
-                let menuItemId = slot.menuItemId;
-                if (!menuItemId && listaItems.length > 0) {
-                    const nb  = (slot.nombre || '').toLowerCase().trim();
-                    const ex  = listaItems.find(m => m.name.toLowerCase().trim() === nb);
-                    const par = !ex && listaItems.find(m => m.name.toLowerCase().includes(nb.split(' ')[0]));
-                    menuItemId = ex?.id || par?.id || fallbackId;
-                }
-                return {
-                    order_id: orden.id, menu_item_id: menuItemId,
-                    quantity: item.cantidad, unit_price: slot.precio,
-                    item_status: 'pending',
-                    product_name: slot.nombre,
-                    notes: `[nombre]${slot.nombre}`,
-                };
-            }).filter(Boolean);
-
-            if (payload.length > 0) {
-                const { error: errItems } = await db.from('order_items').insert(payload);
-                if (errItems) {
-                    if (errItems.code === '42703' || errItems.message?.includes('product_name')) {
-                        const p2 = payload.map(({ product_name, ...rest }) => rest);
-                        const { error: err2 } = await db.from('order_items').insert(p2);
-                        if (err2) Toast.error('Pedido registrado pero ítems fallaron. Avisa al admin.', 6000);
-                    } else {
-                        Toast.error('Pedido registrado pero ítems fallaron. Avisa al admin.', 6000);
-                    }
-                }
-
-                // ─────────────────────────────────────────────────────────
-                // [FIX-PORCIONES-CRITICO] DESCUENTO DIRECTO — SIEMPRE corre
-                // No depende de La26Core. Usa `db` que ya está inicializado.
-                // Ejecuta en background (no bloquea la pantalla de éxito).
-                // ─────────────────────────────────────────────────────────
-                _descontarPorciones(cartSnapshot).catch(err =>
-                    console.warn('[La 26] Error en descuento de porciones (background):', err.message)
-                );
-
-                // La26Core solo para inventario de insumos — NO porciones
-                // (porciones ya las maneja _descontarPorciones arriba)
-                if (window.La26Core) {
-                    La26Core.ajustarInventarioPorItems(
-                        payload.map(p => ({ menu_item_id: p.menu_item_id, quantity: p.quantity, notes: p.notes })),
-                        1
-                    ).catch(e => console.warn('[menu.js] La26Core.ajustarInventarioPorItems silencioso:', e.message));
-                }
-            }
-
-            this._mostrarExito(numeroOrden);
-
-        } catch (err) {
-            console.error('[La 26] Error enviando pedido:', err);
-            Toast.error('No se pudo enviar el pedido. Verifica tu conexión.', 5000);
-        } finally {
-            State.isSubmitting = false;
-            if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Enviar a cocina'; }
-        }
-    },
-
-    _mostrarExito(numeroOrden) {
-        Cart.cerrar();
-        const el = document.getElementById('success-order-no');
-        if (el) el.textContent = numeroOrden;
-        document.getElementById('success-modal').classList.add('open');
-        State.cart = [];
-        _actualizarCartBar();
-        if (HistState.cargado) Hist.cargar();
-    },
-
-    nuevoPedido() {
-        document.getElementById('success-modal').classList.remove('open');
-        const notasEl     = document.getElementById('form-notas');
-        const direccionEl = document.getElementById('form-direccion');
-        if (notasEl)     notasEl.value     = '';
-        if (direccionEl) direccionEl.value = '';
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-        _renderizarMenu();
-    },
-
-    cerrarExito() {
-        document.getElementById('success-modal').classList.remove('open');
-    },
-};
-
-// ============================================================
-// REALTIME — menu_items
-// ============================================================
-function _suscribirRealtimeMenu() {
-    if (!State.restaurantId) return;
-    if (State.realtimeChannel) { db.removeChannel(State.realtimeChannel); State.realtimeChannel = null; }
-
-    State.realtimeChannel = db
-        .channel(`la26-menu-v742-${State.restaurantId}`)
-        .on('postgres_changes',{ event:'UPDATE', schema:'public', table:'menu_items',
-            filter:`restaurant_id=eq.${State.restaurantId}` },
-            (payload) => _actualizarSlotDesdeRealtime(payload.new))
-        .on('postgres_changes',{ event:'INSERT', schema:'public', table:'menu_items',
-            filter:`restaurant_id=eq.${State.restaurantId}` },
-            () => Menu.cargar())
-        .on('postgres_changes',{ event:'DELETE', schema:'public', table:'menu_items' },
-            () => Menu.cargar())
-        .subscribe();
-}
-
-function _actualizarSlotDesdeRealtime(item) {
-    if (!item?.id) return;
-    const idx = State.slots.findIndex(s => s.id === item.id);
-    if (idx === -1) { Menu.cargar(); return; }
-
-    const tienePortions = item.portions_today !== null && item.portions_today !== undefined;
-    const porciones     = tienePortions ? Number(item.portions_today) : 999;
-    const disponible    = item.is_active === true && porciones > 0;
-
-    State.slots[idx] = {
-        ...State.slots[idx],
-        nombre:    item.name,
-        precio:    Number(item.price) || 0,
-        porciones,
-        disponible,
-        tieneControlPorciones: tienePortions,
-    };
-    _refrescarTarjeta(item.id);
-
-    if (!disponible) {
-        const idx2 = State.cart.findIndex(c => c.slotId === item.id);
-        if (idx2 !== -1) {
-            const nombre = State.slots[idx].nombre;
-            State.cart.splice(idx2, 1);
-            _actualizarCartBar();
-            Toast.error(`"${nombre}" se agotó y fue removido de tu pedido.`, 5000);
-        }
-    }
-}
-
-// ============================================================
-// ═══ MÓDULO HISTORIAL (v7.4) ═══
-// ============================================================
-
-const HistState = {
-    pedidos:         [],
-    filtro:          'todos',
-    cargado:         false,
-    cargando:        false,   // <-- agregar esta línea
-    realtimeChannel: null,
-};
-
-function _parsearNota(notes) {
-    const n = notes || '';
-    let tipo = 'mesa', destino = '', cliente = '', direccion = '', nota = '', mesero = '';
-
-    if (n.startsWith('[MESA]')) {
-        tipo = 'mesa';
-        const m = n.match(/Mesa:\s*([^|]+)/);
-        destino = m ? `Mesa ${m[1].trim()}` : 'Mesa';
-    } else if (n.startsWith('[PARA LLEVAR]')) {
-        tipo = 'llevar'; destino = 'Para Llevar';
-        const m = n.match(/Cliente:\s*([^|]+)/);
-        cliente = m ? m[1].trim() : '';
-    } else if (n.startsWith('[DOMICILIO]')) {
-        tipo = 'domicilio'; destino = 'Domicilio';
-        const mc = n.match(/Cliente:\s*([^|]+)/);
-        const md = n.match(/Dir:\s*([^|]+)/);
-        cliente   = mc ? mc[1].trim() : '';
-        direccion = md ? md[1].trim() : '';
-    } else {
-        tipo = 'mesa'; destino = n || 'Sin datos';
-    }
-
-    const mm = n.match(/Mesero:\s*([^|]+)/);
-    mesero = mm ? mm[1].trim() : '';
-
-    const mn = n.match(/Nota:\s*(.+)$/);
-    nota = mn ? mn[1].trim() : '';
-    return { tipo, destino, cliente, direccion, nota, mesero };
-}
-
-function _horaCorta(isoStr) {
-    if (!isoStr) return '';
-    try {
-        return new Date(isoStr).toLocaleTimeString('es-CO',
-            { hour:'2-digit', minute:'2-digit', timeZone:'America/Bogota' });
-    } catch { return ''; }
-}
-
-const Hist = {
-
-    async cargar() {
-        if (HistState.cargando) return;   // semáforo — evita concurrencia
-        HistState.cargando = true;
-        _histSetLoader(true);
-        if (!State.restaurantId) await _resolverRestaurant();
-        if (!State.restaurantId) {
-            _histSetError('No se pudo identificar el restaurante.');
-            HistState.cargando = false;
-            return;
-        }
-        try {
-            const hoy = todayISO();
-            const { data: ordenes, error } = await db
-                .from('orders')
-                .select(`
-                    id, order_number, status, customer_name,
-                    total_amount, notes, created_at,
-                    order_items (
-                        id, quantity, unit_price, notes, item_status,
-                        menu_items ( name )
-                    )
-                `)
-                .eq('restaurant_id', State.restaurantId)
-                .gte('created_at', `${hoy}T00:00:00`)
-                .lte('created_at', `${hoy}T23:59:59`)
-                .order('created_at', { ascending: false });
-
-            if (error) throw error;
-
-            HistState.pedidos = ordenes || [];
-
-            HistState.cargado = true;
-            this._render();
-            this._suscribirRealtime();
-        } catch (err) {
-            console.error('[Hist] Error:', err);
-            _histSetError(`No se pudo cargar el historial: ${err.message}`);
-        } finally {
-            HistState.cargando = false;   // liberar semáforo siempre
-        }
-    },
-
-    cargarSiNecesario() {
-        if (HistState.cargado) {
-            this._render();
-        } else {
-            this.cargar();
-        }
-    },
-
-    async recargar() {
-        const btn = document.getElementById('btn-refresh-hist');
-        btn?.classList.add('spinning');
-        await this.cargar();
-        btn?.classList.remove('spinning');
-        Toast.ok('Historial actualizado');
-    },
-
-    filtrar(valor, btnEl) {
-        HistState.filtro = valor;
-        document.querySelectorAll('.hfilt-btn').forEach(b => b.classList.remove('active'));
-        btnEl.classList.add('active');
-        this._render();
-    },
-
-    _pedidosFiltrados() {
-        if (HistState.filtro === 'todos') return HistState.pedidos;
-        return HistState.pedidos.filter(p => _parsearNota(p.notes).tipo === HistState.filtro);
-    },
-
-    _render() {
-        const total      = HistState.pedidos.length;
-        const pendientes = HistState.pedidos.filter(p => p.status === 'pending' || p.status === 'preparing').length;
-        const entregados = HistState.pedidos.filter(p => p.status === 'delivered').length;
-
-        const set = (id,v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
-        set('st-total',      total);
-        set('st-pendientes', pendientes);
-        set('st-entregados', entregados);
-
-        const badge = document.getElementById('badge-pendientes');
-        if (badge) {
-            badge.textContent = pendientes;
-            badge.classList.toggle('visible', pendientes > 0);
-        }
-
-        const fechaEl = document.getElementById('hist-fecha');
-        if (fechaEl) fechaEl.textContent = new Date().toLocaleDateString('es-CO',
-            { weekday:'long', year:'numeric', month:'long', day:'numeric', timeZone:'America/Bogota' });
-
-        const lista = document.getElementById('hist-lista');
-        if (!lista) return;
-        lista.innerHTML = '';
-
-        const items = this._pedidosFiltrados();
-
-        if (items.length === 0) {
-            lista.innerHTML = `
-                <div class="empty-state" style="padding:56px 28px;">
-                    <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#b4b4aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg></div>
-                    <p>${HistState.pedidos.length === 0
-                        ? 'Aún no hay pedidos hoy.'
-                        : 'No hay pedidos en esta categoría.'}</p>
-                </div>`;
+window.La26 = {
+
+    ejecutarLogin() {
+        const userInput = (document.getElementById('login-user')?.value || '').trim().toLowerCase();
+        const passInput =  document.getElementById('login-pass')?.value || '';
+        const card      =  document.getElementById('login-card');
+        const btnText   =  document.getElementById('btn-login-text');
+        const btnEl     =  document.getElementById('btn-login');
+
+        _ocultarMsgLogin();
+        document.getElementById('login-user')?.classList.remove('field-error');
+        document.getElementById('login-pass')?.classList.remove('field-error');
+
+        if (!userInput || !passInput) {
+            _mostrarMsgLogin('Completa el usuario y la contraseña.', 'error');
+            if (!userInput) document.getElementById('login-user')?.classList.add('field-error');
+            if (!passInput) document.getElementById('login-pass')?.classList.add('field-error');
+            _shake(card);
             return;
         }
 
-        items.forEach((pedido, i) => {
-            const card = _crearTarjetaPedido(pedido, i);
-            lista.appendChild(card);
-        });
+        const userData = LA26_USERS[userInput];
+        if (!userData || userData.password !== passInput) {
+            _mostrarMsgLogin('Usuario o contraseña incorrectos.', 'error');
+            document.getElementById('login-user')?.classList.add('field-error');
+            document.getElementById('login-pass')?.classList.add('field-error');
+            document.getElementById('login-pass').value = '';
+            document.getElementById('login-pass')?.focus();
+            _shake(card);
+            return;
+        }
+
+        if (btnEl) btnEl.disabled = true;
+        if (btnText) btnText.textContent = 'Verificando…';
+
+        setTimeout(() => {
+            _currentRole = userData.role;
+            _currentUser = userInput;
+            sessionStorage.setItem('user_role', _currentRole);
+            sessionStorage.setItem('user_name', _currentUser);
+            _iniciarApp();
+        }, 600);
     },
 
-    _suscribirRealtime() {
-        if (!State.restaurantId) return;
+    cerrarSesion() {
+        if (_realtimeChannel) { supabaseClient.removeChannel(_realtimeChannel); _realtimeChannel = null; }
+        if (_timerInterval)   { clearInterval(_timerInterval); _timerInterval = null; }
 
-        // No recrear el canal si ya está activo — evita duplicados
-        if (HistState.realtimeChannel) return;
+        sessionStorage.removeItem('user_role');
+        sessionStorage.removeItem('user_name');
+        sessionStorage.removeItem('mesa_id');
+        sessionStorage.removeItem('mesa_nombre');
+        _currentRole = null; _currentUser = null; _allOrders = [];
 
-        HistState.realtimeChannel = db
-            .channel(`la26-hist-v742-${State.restaurantId}`)
-            .on('postgres_changes', {
-                event: '*', schema: 'public', table: 'orders',
-                filter: `restaurant_id=eq.${State.restaurantId}`,
-            }, (payload) => {
-                // Ignorar si ya hay una carga en curso
-                if (HistState.cargando) return;
+        const userEl = document.getElementById('login-user');
+        const passEl = document.getElementById('login-pass');
+        const btnEl  = document.getElementById('btn-login');
+        const btnTxt = document.getElementById('btn-login-text');
+        if (userEl) { userEl.value = ''; userEl.classList.remove('field-error'); }
+        if (passEl) { passEl.value = ''; passEl.classList.remove('field-error'); passEl.type = 'password'; }
+        if (btnEl)  btnEl.disabled = false;
+        if (btnTxt) btnTxt.textContent = 'Ingresar';
+        _ocultarMsgLogin();
 
-                const esNueva = payload.eventType === 'INSERT';
-                Hist.cargar().then(() => {
-                    if (esNueva) Toast.ok('Nuevo pedido registrado');
-                });
-            })
-            .subscribe();
+        document.getElementById('bottom-nav-cocina')?.remove();
+
+        _mostrarLogin();
     },
-};
 
-function _histSetLoader(activo) {
-    const lista = document.getElementById('hist-lista');
-    if (activo && lista) {
-        lista.innerHTML = `<div class="hist-loader"><div class="spinner-sm"></div><p>Cargando pedidos…</p></div>`;
-    }
-}
+    navTo(destino, btn) {
+        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+        if (btn) btn.classList.add('active');
+        if (destino === 'admin')        window.location.href = 'admin.html';
+        else if (destino === 'cliente') window.location.href = 'index-cliente.html';
+        else _mostrarToast('📍 Vista de Cocina', 'info');
+    },
 
-function _histSetError(msg) {
-    const lista = document.getElementById('hist-lista');
-    if (lista) lista.innerHTML = `
-        <div class="empty-state" style="padding:56px 28px;">
-            <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
-            <p>${msg}</p>
-            <button onclick="Hist.recargar()"
-                style="margin-top:12px;padding:11px 24px;border-radius:9999px;
-                       background:var(--oliva);color:#fff;border:none;
-                       font-family:'DM Sans',sans-serif;font-size:13px;
-                       font-weight:500;cursor:pointer;">
-                Reintentar
-            </button>
-        </div>`;
-}
+    async cargarPedidos() {
+        const grid = document.getElementById('contenedor-pedidos');
+        if (!grid) return;
 
-function _crearTarjetaPedido(pedido, idx) {
-    const { tipo, destino, cliente, direccion, nota } = _parsearNota(pedido.notes);
-
-    const tipoIcons  = { mesa:'<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;vertical-align:-1px;"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg>', llevar:'<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;vertical-align:-1px;"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>', domicilio:'<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#1d5fa8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;vertical-align:-1px;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>' };
-    const tipoLabels = { mesa:'Mesa', llevar:'Para Llevar', domicilio:'Domicilio' };
-    const statusLabels = {
-        pending:'Pendiente', preparing:'En cocina',
-        ready:'Listo', delivered:'Entregado', cancelled:'Cancelado',
-    };
-
-    const statusClass = pedido.status || 'pending';
-    const nombreMostrar = pedido.customer_name || cliente || '';
-    const editable = ESTADOS_EDITABLES.includes(pedido.status);
-
-    const items = pedido.order_items || [];
-    const itemsHTML = items.length > 0
-        ? items.map(it => {
-            let nombre = it.menu_items?.name || '';
-            if (!nombre && it.notes) {
-                const m = it.notes.match(/\[nombre\](.+)/);
-                nombre = m ? m[1] : 'Ítem';
-            }
-            if (!nombre) nombre = 'Ítem';
-            const precio = Number(it.unit_price) || 0;
-            return `<div class="item-row">
-                <div class="item-qty">${it.quantity}</div>
-                <span class="item-name">${nombre}</span>
-                <span class="item-price">${precio > 0 ? formatCOP(precio * it.quantity) : '—'}</span>
+        grid.innerHTML = `
+            <div class="loading-state">
+                <div class="spinner"></div>
+                <span>Cargando comandas…</span>
             </div>`;
-        }).join('')
-        : `<p style="font-size:12.5px;color:var(--ink-ghost);padding:4px 0;">Sin detalle de ítems.</p>`;
-
-    const direccionHTML = (tipo === 'domicilio' && direccion)
-        ? `<div class="card-direccion">
-               <span style="display:inline-flex;flex-shrink:0;margin-top:1px;"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#1d5fa8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
-               <span class="card-direccion-text">${direccion}</span>
-           </div>` : '';
-
-    const notaHTML = nota
-        ? `<div class="card-nota">
-               <span style="display:inline-flex;flex-shrink:0;margin-top:1px;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
-               <span class="card-nota-text">${nota}</span>
-           </div>` : '';
-
-    const editarBtnHTML = editable
-        ? `<button class="btn-editar-pedido" onclick="EditarPedido.abrir('${pedido.id}')" title="Editar este pedido">
-               <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Editar pedido
-           </button>`
-        : '';
-
-    const bodyId = `hbody-${pedido.id}`;
-    const chevId = `hchev-${pedido.id}`;
-
-    const card = document.createElement('div');
-    card.className = 'order-card';
-    card.style.animationDelay = `${idx * 0.04}s`;
-
-    card.innerHTML = `
-        <div class="card-head" onclick="toggleHistCard('${bodyId}','${chevId}')">
-            <div class="card-head-left">
-                <div class="card-tipo">
-                    <span style="font-size:13px;">${tipoIcons[tipo]||'<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;vertical-align:-1px;"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg>'}</span>
-                    <span class="tipo-text ${tipo}">${tipoLabels[tipo]||tipo}</span>
-                </div>
-                <p class="card-destino">${destino}</p>
-                ${nombreMostrar ? `<p class="card-cliente"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#78786e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;vertical-align:-1px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ${nombreMostrar}</p>` : ''}
-                <p class="card-hora"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#b4b4aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;vertical-align:-1px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ${_horaCorta(pedido.created_at)}</p>
-            </div>
-            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-                <span class="status-badge ${statusClass}">${statusLabels[statusClass]||statusClass}</span>
-                <span class="card-chevron" id="${chevId}">▼</span>
-            </div>
-        </div>
-        <div class="card-body" id="${bodyId}">
-            ${direccionHTML}
-            ${notaHTML}
-            <div>${itemsHTML}</div>
-            <div class="card-total-row">
-                <span class="card-total-label">Total</span>
-                <span class="card-total-monto">${formatCOP(pedido.total_amount)}</span>
-            </div>
-            <p class="card-order-no"># ${pedido.order_number || '—'}</p>
-            ${editarBtnHTML}
-        </div>`;
-
-    return card;
-}
-
-function toggleHistCard(bodyId, chevId) {
-    const body = document.getElementById(bodyId);
-    const chev = document.getElementById(chevId);
-    if (!body) return;
-    const abierto = body.classList.toggle('open');
-    if (chev) chev.classList.toggle('open', abierto);
-}
-
-// ============================================================
-// ═══ MÓDULO EDITAR PEDIDO (v7.4) ═══
-// ============================================================
-
-const EditarPedido = {
-    _pedidoId:    null,
-    _pedido:      null,
-    _itemsEdit:   [],
-    _notaEdit:    '',
-    _guardando:   false,
-
-    async abrir(pedidoId) {
-        this._pedidoId  = pedidoId;
-        this._guardando = false;
-
-        const modal = document.getElementById('edit-modal');
-        if (!modal) return;
-        modal.classList.add('open');
-        document.body.style.overflow = 'hidden';
-        _editSetLoader(true);
 
         try {
-            const { data: pedido, error } = await db
+            // Capa 1: query principal con join anidado
+            const { data: orders, error } = await supabaseClient
                 .from('orders')
                 .select(`
-                    id, order_number, status, notes, total_amount,
+                    id,
+                    order_number,
+                    status,
+                    customer_name,
+                    total_amount,
+                    created_at,
+                    notes,
+                    tables ( number, label ),
                     order_items (
-                        id, quantity, unit_price, notes, item_status,
+                        id,
+                        order_id,
+                        quantity,
+                        unit_price,
+                        notes,
+                        item_status,
                         menu_item_id,
                         menu_items ( name )
                     )
                 `)
-                .eq('id', pedidoId)
-                .single();
+                .in('status', ['pending', 'confirmed', 'in_kitchen'])
+                .order('created_at', { ascending: true });
 
             if (error) throw error;
-            if (!pedido) throw new Error('Pedido no encontrado.');
 
-            if (!ESTADOS_EDITABLES.includes(pedido.status)) {
-                _editSetError(`Este pedido no se puede editar (estado: ${pedido.status}).`);
-                return;
+            // Capa 2: fallback para órdenes sin ítems (sin join a menu_items)
+            const ordenesSinItems = (orders || []).filter(o =>
+                !o.order_items || o.order_items.length === 0
+            );
+
+            if (ordenesSinItems.length > 0) {
+                const ids = ordenesSinItems.map(o => o.id);
+
+                const { data: itemsDirectos, error: errFallback } = await supabaseClient
+                    .from('order_items')
+                    .select('id, order_id, quantity, unit_price, notes, item_status, menu_item_id')
+                    .in('order_id', ids);
+
+                if (errFallback) {
+                    console.warn('[La 26] Fallback order_items error:', errFallback.message);
+                }
+
+                if (itemsDirectos && itemsDirectos.length > 0) {
+                    (orders || []).forEach(o => {
+                        if (!o.order_items || o.order_items.length === 0) {
+                            o.order_items = itemsDirectos
+                                .filter(i => i.order_id === o.id)
+                                .map(i => ({ ...i, menu_items: null }));
+                        }
+                    });
+                }
             }
 
-            this._pedido = pedido;
+            _allOrders = orders || [];
+            _actualizarContadores();
+            _renderizarPedidos();
 
-            const parsed = _parsearNota(pedido.notes);
-            this._notaEdit = parsed.nota;
-
-            this._itemsEdit = (pedido.order_items || []).map(it => {
-                let nombre = it.menu_items?.name || '';
-                if (!nombre && it.notes) {
-                    const m = it.notes.match(/\[nombre\](.+)/);
-                    nombre = m ? m[1] : 'Ítem';
-                }
-                return {
-                    id:          it.id,
-                    menuItemId:  it.menu_item_id,
-                    nombre:      nombre || 'Ítem',
-                    precio:      Number(it.unit_price) || 0,
-                    cantidad:    it.quantity,
-                    item_status: it.item_status || 'pending',
-                    esNuevo:     false,
-                    eliminado:   false,
-                };
-            });
-
-            this._renderEditor();
+            const ahora   = new Date();
+            const timeStr = ahora.toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' });
+            const el = document.getElementById('last-update-text');
+            if (el) el.textContent = `Actualizado a las ${timeStr} · ${_allOrders.length} comanda(s) activa(s)`;
 
         } catch (err) {
-            console.error('[EditarPedido] Error al abrir:', err);
-            _editSetError(`No se pudo cargar el pedido: ${err.message}`);
-        }
-    },
-
-    cerrar() {
-        const modal = document.getElementById('edit-modal');
-        if (modal) modal.classList.remove('open');
-        document.body.style.overflow = '';
-        this._pedidoId  = null;
-        this._pedido    = null;
-        this._itemsEdit = [];
-        this._notaEdit  = '';
-        this._guardando = false;
-    },
-
-    _renderEditor() {
-        const contenedor = document.getElementById('edit-modal-body');
-        if (!contenedor) return;
-
-        const parsed  = _parsearNota(this._pedido.notes);
-        const statusLabels = {
-            pending:'Pendiente', preparing:'En cocina',
-            ready:'Listo', delivered:'Entregado', cancelled:'Cancelado', confirmed:'Confirmado',
-        };
-
-        const tituloHTML = `
-            <div class="edit-pedido-titulo">
-                <span class="edit-order-no"># ${this._pedido.order_number || '—'}</span>
-                <span class="status-badge ${this._pedido.status}">${statusLabels[this._pedido.status] || this._pedido.status}</span>
-            </div>
-            <p class="edit-destino-label">${parsed.destino}${parsed.cliente ? ` · ${parsed.cliente}` : ''}</p>`;
-
-        const itemsHTML = this._itemsEdit
-            .filter(it => !it.eliminado)
-            .map((it, i) => this._renderItemRow(it, i))
-            .join('');
-
-        const slotsDisponibles = State.slots.filter(s => s.disponible);
-        const opcionesSlots = slotsDisponibles.map(s =>
-            `<option value="${s.id}">${s.nombre}${s.precio > 0 ? ' — ' + formatCOP(s.precio) : ' (Incluido)'}</option>`
-        ).join('');
-
-        contenedor.innerHTML = `
-            ${tituloHTML}
-
-            <div class="edit-section">
-                <p class="edit-section-title">Ítems del pedido</p>
-                <div id="edit-items-list">
-                    ${itemsHTML || '<p class="edit-empty-items">Sin ítems.</p>'}
-                </div>
-            </div>
-
-            <div class="edit-section">
-                <p class="edit-section-title">Agregar ítem</p>
-                <div class="edit-agregar-row">
-                    <select id="edit-slot-select" class="form-input edit-select">
-                        <option value="">— Selecciona un plato o bebida —</option>
-                        ${opcionesSlots}
-                    </select>
-                    <div class="edit-qty-row">
-                        <button class="edit-qty-btn" onclick="EditarPedido._decrementarNuevo()">−</button>
-                        <span id="edit-nueva-qty" class="edit-qty-num">1</span>
-                        <button class="edit-qty-btn" onclick="EditarPedido._incrementarNuevo()">+</button>
-                        <button class="btn-agregar-item" onclick="EditarPedido._agregarItem()">Agregar</button>
+            console.error('[La 26] Error cargando pedidos:', err);
+            grid.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">⚠️</div>
+                    <div class="empty-title">Error de conexión</div>
+                    <div class="empty-sub">${err.message}<br><br>
+                        <button onclick="La26.cargarPedidos()" style="font-size:13px;color:var(--oliva);text-decoration:underline;background:none;border:none;cursor:pointer;">
+                            Reintentar
+                        </button>
                     </div>
-                </div>
-            </div>
-
-            <div class="edit-section">
-                <p class="edit-section-title">Nota del pedido</p>
-                <textarea id="edit-nota-input" class="form-input" rows="2"
-                    placeholder="Sin picante, sin cebolla, alergia a…">${this._notaEdit}</textarea>
-            </div>
-
-            <div class="edit-total-preview">
-                <span class="edit-total-label">Total estimado</span>
-                <span id="edit-total-monto" class="edit-total-monto">${formatCOP(this._calcularTotalEdit())}</span>
-            </div>`;
-
-        this._nuevaQty = 1;
-        _editSetLoader(false);
-    },
-
-    _renderItemRow(it, i) {
-        const noEliminable = ITEM_ESTADOS_NO_ELIMINABLES.includes(it.item_status) && !it.esNuevo;
-        const precioStr    = it.precio > 0 ? formatCOP(it.precio) : 'Incl.';
-        const subtotalStr  = it.precio > 0 ? formatCOP(it.precio * it.cantidad) : '—';
-
-        return `
-            <div class="edit-item-row" id="edit-item-row-${it.id || 'new-'+i}">
-                <div class="edit-item-info">
-                    <span class="edit-item-nombre">${it.nombre}</span>
-                    <span class="edit-item-precio">${precioStr} c/u</span>
-                </div>
-                <div class="edit-item-ctrl">
-                    <button class="edit-qty-btn" onclick="EditarPedido._cambiarCantidad('${it.id || 'new-'+i}', -1)"
-                        ${it.cantidad <= 1 && noEliminable ? 'disabled title="No se puede reducir: ítem en cocina"' : ''}>−</button>
-                    <span class="edit-qty-num">${it.cantidad}</span>
-                    <button class="edit-qty-btn" onclick="EditarPedido._cambiarCantidad('${it.id || 'new-'+i}', +1)">+</button>
-                    <span class="edit-item-subtotal">${subtotalStr}</span>
-                    ${noEliminable
-                        ? `<span class="edit-item-lock" title="En cocina, no se puede eliminar"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>`
-                        : `<button class="edit-item-del" onclick="EditarPedido._eliminarItem('${it.id || 'new-'+i}')" title="Eliminar">✕</button>`
-                    }
-                </div>
-            </div>`;
-    },
-
-    _nuevaQty: 1,
-
-    _decrementarNuevo() {
-        if (this._nuevaQty > 1) {
-            this._nuevaQty--;
-            const el = document.getElementById('edit-nueva-qty');
-            if (el) el.textContent = this._nuevaQty;
+                </div>`;
         }
     },
 
-    _incrementarNuevo() {
-        this._nuevaQty++;
-        const el = document.getElementById('edit-nueva-qty');
-        if (el) el.textContent = this._nuevaQty;
+    setFilter(filter, btn) {
+        _activeFilter = filter;
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        if (btn) btn.classList.add('active');
+        _renderizarPedidos();
     },
 
-    _agregarItem() {
-        const select = document.getElementById('edit-slot-select');
-        const slotId = select?.value;
-        if (!slotId) { Toast.error('Selecciona un plato o bebida.'); return; }
-
-        const slot = State.slots.find(s => s.id === slotId);
-        if (!slot) return;
-
-        const existente = this._itemsEdit.find(it => !it.eliminado && it.menuItemId === slot.menuItemId && it.esNuevo);
-        if (existente) {
-            existente.cantidad += this._nuevaQty;
-        } else {
-            this._itemsEdit.push({
-                id:          `new-${Date.now()}`,
-                menuItemId:  slot.menuItemId,
-                nombre:      slot.nombre,
-                precio:      slot.precio,
-                cantidad:    this._nuevaQty,
-                item_status: 'pending',
-                esNuevo:     true,
-                eliminado:   false,
-            });
-        }
-
-        if (select) select.value = '';
-        this._nuevaQty = 1;
-        const qtyEl = document.getElementById('edit-nueva-qty');
-        if (qtyEl) qtyEl.textContent = '1';
-
-        this._refrescarListaItems();
-        this._actualizarTotalPreview();
-        Toast.ok(`"${slot.nombre}" agregado al pedido.`);
-    },
-
-    _cambiarCantidad(itemId, delta) {
-        const it = this._itemsEdit.find(i => i.id === itemId);
-        if (!it || it.eliminado) return;
-
-        const noEliminable = ITEM_ESTADOS_NO_ELIMINABLES.includes(it.item_status) && !it.esNuevo;
-        const nueva = it.cantidad + delta;
-
-        if (nueva <= 0) {
-            if (noEliminable) {
-                Toast.error(`No se puede eliminar "${it.nombre}": ya está en cocina.`);
-                return;
-            }
-            it.eliminado = true;
-        } else {
-            it.cantidad = nueva;
-        }
-
-        this._refrescarListaItems();
-        this._actualizarTotalPreview();
-    },
-
-    _eliminarItem(itemId) {
-        const it = this._itemsEdit.find(i => i.id === itemId);
-        if (!it) return;
-
-        const noEliminable = ITEM_ESTADOS_NO_ELIMINABLES.includes(it.item_status) && !it.esNuevo;
-        if (noEliminable) {
-            Toast.error(`No se puede eliminar "${it.nombre}": ya está en cocina.`);
-            return;
-        }
-
-        it.eliminado = true;
-        this._refrescarListaItems();
-        this._actualizarTotalPreview();
-    },
-
-    _refrescarListaItems() {
-        const lista = document.getElementById('edit-items-list');
-        if (!lista) return;
-        const activos = this._itemsEdit.filter(it => !it.eliminado);
-        if (activos.length === 0) {
-            lista.innerHTML = '<p class="edit-empty-items">Sin ítems.</p>';
-            return;
-        }
-        lista.innerHTML = activos.map((it, i) => this._renderItemRow(it, i)).join('');
-    },
-
-    _calcularTotalEdit() {
-        return this._itemsEdit
-            .filter(it => !it.eliminado)
-            .reduce((acc, it) => acc + it.precio * it.cantidad, 0);
-    },
-
-    _actualizarTotalPreview() {
-        const el = document.getElementById('edit-total-monto');
-        if (el) el.textContent = formatCOP(this._calcularTotalEdit());
-    },
-
-    async guardar() {
-        if (this._guardando) return;
-        if (!this._pedidoId || !this._pedido) return;
-
-        const btnGuardar = document.getElementById('edit-btn-guardar');
-        this._guardando = true;
-        if (btnGuardar) { btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando…'; }
-
-        try {
-            const notaInput = document.getElementById('edit-nota-input');
-            const nuevaNota = (notaInput?.value || '').trim();
-
-            const parsed = _parsearNota(this._pedido.notes);
-            let notaBase = this._pedido.notes || '';
-            notaBase = notaBase.replace(/\s*\|\s*Nota:\s*.+$/, '');
-            if (nuevaNota) notaBase += ` | Nota: ${nuevaNota}`;
-            const notaFinal = notaBase.trim();
-
-            if (window.La26Core) {
-                const resultado = await La26Core.guardarEdicionAdmin(
-                    this._pedidoId,
-                    this._itemsEdit,
-                    notaFinal,
-                    State.restaurantId
-                );
-                if (!resultado.ok) {
-                    Toast.error(resultado.error || 'No se pudo guardar.');
-                    return;
-                }
-            } else {
-                await this._guardarLegacy(notaFinal);
-            }
-
-            Toast.ok('Pedido actualizado correctamente.');
-            this.cerrar();
-            await Hist.cargar();
-
-        } catch (err) {
-            console.error('[EditarPedido] Error al guardar:', err);
-            Toast.error('No se pudo guardar. Verifica tu conexión.', 5000);
-        } finally {
-            this._guardando = false;
-            const btn = document.getElementById('edit-btn-guardar');
-            if (btn) { btn.disabled = false; btn.textContent = 'Guardar cambios'; }
-        }
-    },
-
-    async _guardarLegacy(notaFinal) {
-        const pedidoId        = this._pedidoId;
-        const pedido          = this._pedido;
-        const itemsOriginales = pedido.order_items || [];
-        const idsOriginales   = new Set(itemsOriginales.map(i => i.id));
-
-        const aEliminar  = this._itemsEdit.filter(it => it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
-        const aActualizar = this._itemsEdit.filter(it => !it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
-        const aNuevos    = this._itemsEdit.filter(it => it.esNuevo && !it.eliminado);
-
-        for (const it of aEliminar) {
-            const { error } = await db.from('order_items').delete().eq('id', it.id);
-            if (error) console.warn('[EditarPedido] Error eliminando ítem:', error.message);
-        }
-
-        for (const it of aActualizar) {
-            const original = itemsOriginales.find(o => o.id === it.id);
-            if (original && original.quantity !== it.cantidad) {
-                const { error } = await db.from('order_items')
-                    .update({ quantity: it.cantidad })
-                    .eq('id', it.id);
-                if (error) console.warn('[EditarPedido] Error actualizando cantidad:', error.message);
-            }
-        }
-
-        if (aNuevos.length > 0) {
-            const { data: todosMenuItems } = await db.from('menu_items')
-                .select('id,name').eq('restaurant_id', State.restaurantId).eq('is_active', true);
-            const listaMenu = todosMenuItems || [];
-
-            const payloadNuevos = aNuevos.map(it => {
-                let menuItemId = it.menuItemId;
-                if (!menuItemId && listaMenu.length > 0) {
-                    const nb = (it.nombre || '').toLowerCase().trim();
-                    const ex = listaMenu.find(m => m.name.toLowerCase().trim() === nb);
-                    menuItemId = ex?.id || listaMenu[0]?.id || null;
-                }
-                return {
-                    order_id:     pedidoId,
-                    menu_item_id: menuItemId,
-                    quantity:     it.cantidad,
-                    unit_price:   it.precio,
-                    item_status:  'pending',
-                    product_name: it.nombre,
-                    notes:        `[nombre]${it.nombre}`,
-                };
-            });
-
-            const { error: errNuevos } = await db.from('order_items').insert(payloadNuevos);
-            if (errNuevos) {
-                if (errNuevos.code === '42703' || errNuevos.message?.includes('product_name')) {
-                    const p2 = payloadNuevos.map(({ product_name, ...rest }) => rest);
-                    const { error: err2 } = await db.from('order_items').insert(p2);
-                    if (err2) console.warn('[EditarPedido] Error insertando nuevos ítems:', err2.message);
-                } else {
-                    console.warn('[EditarPedido] Error insertando nuevos ítems:', errNuevos.message);
-                }
-            }
-        }
-
-        const nuevoTotal = this._calcularTotalEdit();
-        const { error: errUpdate } = await db.from('orders')
-            .update({
-                total_amount: nuevoTotal,
-                notes:        notaFinal,
-                updated_at:   new Date().toISOString(),
-            })
+    async cambiarEstado(pedidoId, nuevoEstado) {
+        const { error } = await supabaseClient
+            .from('orders')
+            .update({ status: nuevoEstado })
             .eq('id', pedidoId);
-        if (errUpdate) console.warn('[EditarPedido] Error actualizando orden:', errUpdate.message);
+
+        if (error) {
+            console.error('[La 26] Error al cambiar estado:', error);
+            _mostrarToast('Error al actualizar el pedido.', 'error');
+        }
+    },
+
+    async despacharPedido(pedidoId) {
+        const tarjeta = document.getElementById(`pedido-${pedidoId}`);
+        if (tarjeta) tarjeta.classList.add('despachando');
+
+        const { error } = await supabaseClient
+            .from('orders')
+            .update({ status: 'delivered' })
+            .eq('id', pedidoId);
+
+        if (error) {
+            console.error('[La 26] Error al despachar:', error);
+            _mostrarToast(`❌ Error al despachar: ${error.message}`, 'error');
+            if (tarjeta) tarjeta.classList.remove('despachando');
+            return;
+        }
+
+        _mostrarToast('✅ Pedido despachado correctamente', 'success');
+        setTimeout(() => La26.cargarPedidos(), 800);
     },
 };
 
-function _editSetLoader(activo) {
-    const body   = document.getElementById('edit-modal-body');
-    const footer = document.getElementById('edit-modal-footer');
-    if (activo) {
-        if (body) body.innerHTML = `
-            <div class="hist-loader" style="padding:60px 0;">
-                <div class="spinner-sm"></div>
-                <p>Cargando pedido…</p>
-            </div>`;
-        if (footer) footer.style.display = 'none';
-    } else {
-        if (footer) footer.style.display = 'flex';
+// Aliases globales para compatibilidad con onclick en HTML
+function cambiarEstado(pedidoId, nuevoEstado) { return La26.cambiarEstado(pedidoId, nuevoEstado); }
+function despacharPedido(pedidoId)            { return La26.despacharPedido(pedidoId); }
+function cargarPedidos()                      { return La26.cargarPedidos(); }
+
+// ============================================================
+// FUNCIONES PRIVADAS
+// ============================================================
+
+function _mostrarLogin() {
+    const scLogin   = document.getElementById('screen-login');
+    const scCocina  = document.getElementById('screen-cocina');
+    const navAdmin  = document.getElementById('nav-admin');
+    const barCocina = document.getElementById('bar-cocina');
+
+    if (scLogin)   scLogin.style.display = 'flex';
+    if (scCocina)  scCocina.classList.remove('visible');
+    if (navAdmin)  navAdmin.classList.remove('visible');
+    if (barCocina) barCocina.classList.remove('visible');
+    document.body.className = '';
+
+    setTimeout(() => document.getElementById('login-user')?.focus(), 300);
+}
+
+function _iniciarApp() {
+    const scLogin = document.getElementById('screen-login');
+    if (scLogin) scLogin.style.display = 'none';
+    document.body.className = `role-${_currentRole}`;
+
+    const userData = LA26_USERS[_currentUser] || {};
+    const navEmoji    = document.getElementById('nav-emoji');
+    const navUsername = document.getElementById('nav-username');
+    if (navEmoji)    navEmoji.textContent    = userData.emoji || '';
+    if (navUsername) navUsername.textContent = _currentUser;
+
+    if (_currentRole === 'admin') {
+        document.getElementById('nav-admin')?.classList.add('visible');
+        _mostrarCocina();
+    } else if (_currentRole === 'cocina') {
+        _mostrarCocina();
+    } else if (_currentRole === 'cliente') {
+        _mostrarMsgLogin('Bienvenido. Redirigiendo…', 'success');
+        if (scLogin) scLogin.style.display = 'flex';
+        setTimeout(() => {
+            window.location.href = `menu.html?usuario=${encodeURIComponent(_currentUser)}`;
+        }, 900);
     }
 }
 
-function _editSetError(msg) {
-    const body   = document.getElementById('edit-modal-body');
-    const footer = document.getElementById('edit-modal-footer');
-    if (body) body.innerHTML = `
-        <div class="empty-state" style="padding:56px 28px;">
-            <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
-            <p>${msg}</p>
-        </div>`;
-    if (footer) footer.style.display = 'none';
+function _mostrarCocina() {
+    document.getElementById('screen-cocina')?.classList.add('visible');
+    document.getElementById('bar-cocina')?.classList.add('visible');
+
+    const barLabel = document.getElementById('bar-user-label');
+    const userData = LA26_USERS[_currentUser] || {};
+    if (barLabel) barLabel.textContent = `${userData.emoji || ''} ${userData.label || ''}`;
+
+    _inyectarBottomNav();
+
+    La26.cargarPedidos();
+    _activarRealtime();
+    _iniciarTimers();
+}
+
+function _inyectarBottomNav() {
+    if (document.getElementById('bottom-nav-cocina')) return;
+
+    const esAdmin = sessionStorage.getItem('user_role') === 'admin';
+
+    const nav = document.createElement('nav');
+    nav.id = 'bottom-nav-cocina';
+    Object.assign(nav.style, {
+        display:        'none',
+        position:       'fixed',
+        bottom:         '0',
+        left:           '0',
+        right:          '0',
+        zIndex:         '9000',
+        background:     '#ffffff',
+        borderTop:      '1.5px solid #e8e8e2',
+        boxShadow:      '0 -4px 20px rgba(26,31,24,0.08)',
+        height:         '66px',
+        alignItems:     'stretch',
+        paddingBottom:  'env(safe-area-inset-bottom, 0px)',
+    });
+
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `
+        @media (max-width: 768px) {
+            #bottom-nav-cocina { display: flex !important; }
+            #screen-cocina .cocina-main { padding-bottom: 80px !important; }
+        }
+        .bnav-cocina-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            padding: 8px 4px;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            color: #78786e;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 10px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: color .18s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .bnav-cocina-item:active { opacity: .7; }
+        .bnav-cocina-icon { font-size: 20px; line-height: 1; }
+        .bnav-cocina-label { font-size: 9.5px; font-weight: 600; letter-spacing: .2px; white-space: nowrap; }
+    `;
+    document.head.appendChild(styleEl);
+
+    nav.innerHTML = `
+        <button class="bnav-cocina-item" onclick="La26.cargarPedidos()" aria-label="Actualizar">
+            <span class="bnav-cocina-icon">🔄</span>
+            <span class="bnav-cocina-label">Actualizar</span>
+        </button>
+        <button class="bnav-cocina-item" onclick="La26.setFilter('all', null)" aria-label="Todos">
+            <span class="bnav-cocina-icon">🍽️</span>
+            <span class="bnav-cocina-label">Todos</span>
+        </button>
+        <button class="bnav-cocina-item" onclick="La26.setFilter('pending', null)" aria-label="Pendientes">
+            <span class="bnav-cocina-icon">⏳</span>
+            <span class="bnav-cocina-label">Pendientes</span>
+        </button>
+        <button class="bnav-cocina-item" onclick="La26.cerrarSesion()" aria-label="Salir">
+            <span class="bnav-cocina-icon">🚪</span>
+            <span class="bnav-cocina-label">Salir</span>
+        </button>
+        ${esAdmin ? `
+        <a class="bnav-cocina-item" href="admin.html" aria-label="Panel Admin"
+           style="color:#4a6741;">
+            <span class="bnav-cocina-icon">📊</span>
+            <span class="bnav-cocina-label" style="color:#4a6741;font-weight:700;">Admin</span>
+        </a>` : ''}
+    `;
+
+    document.body.appendChild(nav);
+}
+
+// ── Realtime ──────────────────────────────────────────────
+function _activarRealtime() {
+    if (_realtimeChannel) supabaseClient.removeChannel(_realtimeChannel);
+
+    let debounceTimer = null;
+    const recargar = (ms = 400) => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => La26.cargarPedidos(), ms);
+    };
+
+    _realtimeChannel = supabaseClient
+        .channel('la26-cocina-v33')
+        .on('postgres_changes', { event:'INSERT', schema:'public', table:'orders' },
+            (payload) => {
+                console.info('[La 26] 📦 Nuevo pedido:', payload.new?.order_number || payload.new?.id);
+                _dispararAlerta(payload.new);
+                recargar(1500);
+            })
+        .on('postgres_changes', { event:'UPDATE', schema:'public', table:'orders' },
+            () => { console.info('[La 26] 🔄 Pedido actualizado'); recargar(300); })
+        .on('postgres_changes', { event:'INSERT', schema:'public', table:'order_items' },
+            (payload) => {
+                console.info('[La 26] 🍽️ Nuevo ítem recibido, recargando comanda…');
+                recargar(1200);
+            })
+        .subscribe((status) => {
+            console.info('[La 26] Canal RT:', status);
+            const dot = document.getElementById('dot-live');
+            if (dot) dot.style.background = status === 'SUBSCRIBED' ? '#4ade80' : '#f87171';
+        });
+}
+
+function _dispararAlerta(pedido) {
+    // [FIX-MESA v3.3] Leer mesa desde notes del pedido, no desde join
+    const notasOrden = pedido?.notes || '';
+    const mesaDesdeNotes = _extraerMesaDesdeNotes(notasOrden);
+    const mesa = mesaDesdeNotes || pedido?.table_id || 'nueva mesa';
+
+    _mostrarToast(`🛎️ Nuevo pedido — ${mesa}`, 'new');
+
+    const banner    = document.getElementById('new-order-banner');
+    const bannerTxt = document.getElementById('banner-text');
+    if (banner && bannerTxt) {
+        bannerTxt.textContent = `¡Nuevo pedido recibido! — ${mesa}`;
+        banner.classList.add('visible');
+        setTimeout(() => banner.classList.remove('visible'), 3500);
+    }
+    _reproducirSonido();
+}
+
+function _reproducirSonido() {
+    try {
+        if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const ctx = _audioCtx, now = ctx.currentTime;
+        [523.25, 659.25, 783.99].forEach((freq, i) => {
+            const osc = ctx.createOscillator(), gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, now + i * 0.13);
+            gain.gain.setValueAtTime(0, now + i * 0.13);
+            gain.gain.linearRampToValueAtTime(0.18, now + i * 0.13 + 0.03);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.13 + 0.38);
+            osc.start(now + i * 0.13);
+            osc.stop(now  + i * 0.13 + 0.45);
+        });
+    } catch(e) { console.warn('[La 26] Audio no disponible:', e); }
+}
+
+function _mostrarToast(mensaje, tipo = 'info') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    if (tipo === 'new')     toast.style.borderLeftColor = '#4ade80';
+    if (tipo === 'error')   toast.style.borderLeftColor = '#ef4444';
+    if (tipo === 'success') toast.style.borderLeftColor = '#22c55e';
+    const iconos = { new:'🛎️', info:'ℹ️', success:'✅', warning:'⚠️', error:'❌' };
+    toast.innerHTML = `<span>${iconos[tipo]||'ℹ️'}</span><span>${_esc(mensaje)}</span>`;
+    container.appendChild(toast);
+    setTimeout(() => { toast.classList.add('out'); setTimeout(() => toast.remove(), 350); }, 4000);
 }
 
 // ============================================================
-// VERIFICAR SI EL SISTEMA ESTÁ HABILITADO
+// _extraerMesaDesdeNotes — helper central [FIX-MESA v3.3]
+//
+// Lee el número/label de mesa directamente del campo `notes`
+// de la orden. Este valor lo escribe menu.js v7.1 con el texto
+// exacto que ingresó el mesero — es la fuente de verdad.
+//
+// Formatos soportados:
+//   "[MESA] Mesa: 5"          → "Mesa 5"
+//   "[MESA] Mesa: Barra"      → "Mesa Barra"
+//   "[PARA LLEVAR] ..."       → null  (se maneja por separado)
+//   "[DOMICILIO] ..."         → null  (se maneja por separado)
+//   "Mesa: 3" (legacy sin []) → "Mesa 3"
 // ============================================================
-async function _verificarSistemaHabilitado() {
+function _extraerMesaDesdeNotes(notes) {
+    if (!notes) return null;
+
+    // Formato v7.1: "[MESA] Mesa: N" — prioridad máxima
+    const matchMesaNuevo = notes.match(/\[MESA\]\s*Mesa:\s*(.+?)(?:\s*\||\s*$)/i);
+    if (matchMesaNuevo) {
+        const val = matchMesaNuevo[1].trim();
+        // Si ya tiene "Mesa" en el valor, devolverlo tal cual; si no, agregar prefijo
+        return val.toLowerCase().startsWith('mesa') ? val : `Mesa ${val}`;
+    }
+
+    // Formato legacy: "Mesa: N" sin prefijo [MESA]
+    const matchMesaLegacy = notes.match(/Mesa:\s*(\S+)/i);
+    if (matchMesaLegacy) {
+        return `Mesa ${matchMesaLegacy[1].trim()}`;
+    }
+
+    return null;
+}
+
+function _renderizarPedidos(nuevoId = null) {
+    const grid = document.getElementById('contenedor-pedidos');
+    if (!grid) return;
+
+    const filtradas = _activeFilter === 'all'
+        ? _allOrders
+        : _allOrders.filter(o => o.status === _activeFilter);
+
+    if (filtradas.length === 0) {
+        const msgs = {
+            all:        { icon:'🍽️', title:'Cocina despejada',     sub:'No hay comandas activas.' },
+            pending:    { icon:'⏳', title:'Sin pendientes',        sub:'Todos los pedidos han sido tomados.' },
+            in_kitchen: { icon:'🔥', title:'Nada en preparación',  sub:'No hay órdenes siendo preparadas.' },
+            confirmed:  { icon:'✅', title:'Sin confirmados',       sub:'Los pedidos confirmados aparecerán aquí.' },
+        };
+        const m = msgs[_activeFilter] || msgs.all;
+        grid.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">${m.icon}</div>
+                <div class="empty-title">${m.title}</div>
+                <div class="empty-sub">${m.sub}</div>
+            </div>`;
+        return;
+    }
+
+    const ORDEN = { pending:0, in_kitchen:1, confirmed:2 };
+    const ordenadas = [...filtradas].sort((a, b) => {
+        const oa = ORDEN[a.status] ?? 9, ob = ORDEN[b.status] ?? 9;
+        return oa !== ob ? oa - ob : new Date(a.created_at) - new Date(b.created_at);
+    });
+
+    grid.innerHTML = ordenadas.map(o => _crearCardHTML(o, o.id === nuevoId)).join('');
+    _actualizarTimers();
+}
+
+// ── _crearCardHTML v3.3 ────────────────────────────────────
+//
+// [FIX-MESA v3.3] PRIORIDAD DE RESOLUCIÓN DEL NÚMERO DE MESA:
+//
+//   1. notes de la orden (campo "[MESA] Mesa: N") ← FUENTE DE VERDAD
+//      → Escrito por menu.js con el número REAL ingresado por el mesero.
+//      → NUNCA se ve afectado por qué table_id se resolvió en BD.
+//
+//   2. tables.label del JOIN (fallback legacy)
+//      → Solo para órdenes antiguas creadas antes de v7.1.
+//      → Puede ser incorrecto si el table_id fue resuelto a Mesa 1.
+//
+//   3. tables.number del JOIN (último recurso)
+//
+// Para modalidades Para Llevar y Domicilio se parsea desde notes
+// de la misma forma que en v3.2.
+//
+// Resolución del nombre del plato (sin cambios desde v3.2):
+//   1. [nombre] en notes del ítem → fuente de verdad
+//   2. notes plano sin prefijo    → legacy
+//   3. menu_items.name del JOIN   → respaldo
+//   4. placeholder
+function _crearCardHTML(order, esNuevo = false) {
+    const notasOrden = order.notes || '';
+
+    // [FIX-MESA v3.3] Leer número de mesa desde notes (prioridad máxima)
+    const mesaDesdeNotes = _extraerMesaDesdeNotes(notasOrden);
+
+    // Fallback legacy: leer desde el JOIN a tables
+    const mesaDesdeJoin = order.tables?.label
+        || (order.tables?.number ? `Mesa ${order.tables.number}` : null);
+
+    // identificadorMesa: notes primero, JOIN como último recurso
+    const identificadorMesa = mesaDesdeNotes || mesaDesdeJoin || 'Mesa Rápida';
+
+    const estadoMap = {
+        pending:    { label:'Pendiente',      cls:'pending'    },
+        confirmed:  { label:'Confirmado',     cls:'confirmed'  },
+        in_kitchen: { label:'En preparación', cls:'in_kitchen' },
+    };
+    const cfg = estadoMap[order.status] || { label: order.status, cls:'pending' };
+
+    // Parsear modalidad de entrega desde notes
+    let   modalidad   = '';
+    let   modalidadCls = '';
+    if (notasOrden.includes('[PARA LLEVAR]')) {
+        modalidad    = '🛍️ Para Llevar / Retiro';
+        modalidadCls = 'modalidad-llevar';
+    } else if (notasOrden.includes('[DOMICILIO]')) {
+        const matchDir = notasOrden.match(/Dirección:\s*(.+)$/);
+        const dir = matchDir ? matchDir[1].trim() : '';
+        modalidad    = `🛵 Domicilio${dir ? ` — ${dir}` : ''}`;
+        modalidadCls = 'modalidad-domicilio';
+    } else if (notasOrden.includes('[MESA]')) {
+        // [FIX-MESA v3.3] Usar identificadorMesa que ya viene de notes
+        modalidad    = `🍽️ En mesa — ${identificadorMesa}`;
+        modalidadCls = 'modalidad-mesa';
+    }
+
+    const items = order.order_items || [];
+
+    let itemsHTML;
+    if (items.length === 0) {
+        itemsHTML = `
+            <p style="font-size:13px;color:#9ca3af;font-style:italic;padding:4px 0;display:flex;align-items:center;gap:6px;">
+                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;
+                      background:#fbbf24;animation:pulse 1.2s infinite;"></span>
+                Preparando comanda… (actualizando)
+            </p>`;
+    } else {
+        itemsHTML = items.map(item => {
+            const parsed = _parsearNotes(item.notes);
+
+            // Prioridad del nombre del plato (sin cambios desde v3.2):
+            // 1. prefijo [nombre] en notes → fuente de verdad del pedido
+            // 2. notes plano sin prefijo   → órdenes antiguas
+            // 3. menu_items.name (JOIN)    → respaldo legacy
+            // 4. placeholder
+            const nombrePlato = parsed.nombrePlato
+                || (item.notes && !item.notes.startsWith('[nombre]') ? item.notes : null)
+                || item.menu_items?.name
+                || '(Plato sin nombre)';
+
+            const notaCliente = parsed.notaCliente;
+
+            return `
+            <div class="order-item">
+                <div class="item-top">
+                    <span class="item-qty">${item.quantity}×</span>
+                    <span class="item-name">${_esc(nombrePlato)}</span>
+                </div>
+                ${notaCliente ? `<div class="item-nota">✏️ ${_esc(notaCliente)}</div>` : ''}
+            </div>`;
+        }).join('');
+    }
+
+    let botonesHTML = '';
+    if (order.status === 'pending' || order.status === 'confirmed') {
+        botonesHTML = `
+            <button class="btn-kitchen en-cocina"
+                    onclick="La26.cambiarEstado('${order.id}', 'in_kitchen')">
+                👨‍🍳 En cocina
+            </button>`;
+    }
+    botonesHTML += `
+        <button class="btn-kitchen despachar"
+                onclick="La26.despacharPedido('${order.id}')">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/>
+            </svg>
+            Despachar
+        </button>`;
+
+    const fechaStr = order.created_at
+        ? new Date(order.created_at).toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' })
+        : '—';
+
+    return `
+    <div id="pedido-${order.id}"
+         class="order-card${esNuevo ? ' is-new' : ''}"
+         data-status="${order.status}"
+         data-created="${order.created_at || ''}">
+        <div class="card-header">
+            <div>
+                <div class="order-number">${_esc(order.order_number || '—')}</div>
+                <div class="customer-name">${_esc(order.customer_name || 'Cliente en Mesa')}</div>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+                <span class="status-badge ${cfg.cls}">${cfg.label}</span>
+                <span class="mesa-tag">📍 ${_esc(identificadorMesa)}</span>
+                <span style="font-size:11px;color:#6b7280;">🕐 ${fechaStr}</span>
+                <span class="card-timer" data-created="${order.created_at || ''}" id="timer-${order.id}"
+                      style="font-size:12px;font-weight:500;color:#9ca3af;">—</span>
+            </div>
+        </div>
+        <div class="card-body">
+            ${modalidad ? `<div class="comanda-modalidad ${modalidadCls}">${_esc(modalidad)}</div>` : ''}
+            ${(() => {
+                const matchNota = notasOrden.match(/\|\s*Nota:\s*(.+?)(\||$)/);
+                const notaCliente = matchNota ? matchNota[1].trim() : null;
+                return notaCliente
+                    ? `<div style="background:#fffbeb;border:1.5px solid #f59e0b;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px;color:#92400e;font-weight:600;">
+                           Nota: ${_esc(notaCliente)}
+                       </div>`
+                    : '';
+            })()}
+            <div class="items-label">Comanda</div>
+            ${itemsHTML}
+        </div>
+        <div class="card-footer">
+            ${botonesHTML}
+        </div>
+    </div>`;
+}
+
+function _iniciarTimers() {
+    if (_timerInterval) clearInterval(_timerInterval);
+    _actualizarTimers();
+    _timerInterval = setInterval(_actualizarTimers, 30000);
+}
+
+function _actualizarTimers() {
+    const ahora = Date.now();
+    document.querySelectorAll('.card-timer[data-created]').forEach(el => {
+        const raw = el.getAttribute('data-created');
+        if (!raw) { el.textContent = '—'; return; }
+        const mins = Math.floor((ahora - new Date(raw).getTime()) / 60000);
+        if (mins < 1)       { el.textContent = 'Ahora mismo';         el.style.color = '#4ade80'; }
+        else if (mins < 10) { el.textContent = `Hace ${mins} min`;    el.style.color = '#9ca3af'; }
+        else if (mins < 20) { el.textContent = `⚠ ${mins} min`;      el.style.color = '#fbbf24'; }
+        else                { el.textContent = `🔴 ${mins} min`;      el.style.color = '#f87171'; }
+    });
+}
+
+function _actualizarContadores() {
+    const counts = _allOrders.reduce((acc, o) => {
+        acc[o.status] = (acc[o.status] || 0) + 1;
+        return acc;
+    }, {});
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val || 0; };
+    set('count-pending',   counts.pending);
+    set('count-preparing', (counts.in_kitchen || 0) + (counts.confirmed || 0));
+    set('count-delivered', counts.delivered);
+}
+
+function _mostrarMsgLogin(texto, tipo) {
+    const el = document.getElementById('login-msg');
+    if (!el) return;
+    el.textContent = texto;
+    el.className = `msg-box ${tipo}`;
+}
+function _ocultarMsgLogin() {
+    const el = document.getElementById('login-msg');
+    if (el) { el.className = 'msg-box'; el.textContent = ''; }
+}
+function _shake(el) {
+    if (!el) return;
+    el.classList.add('shake');
+    setTimeout(() => el.classList.remove('shake'), 450);
+}
+
+function _parsearNotes(notes) {
+    if (!notes) return { nombrePlato: null, notaCliente: null };
+    if (notes.startsWith('[nombre]')) {
+        const partes = notes.replace('[nombre]', '').split(' | ');
+        return { nombrePlato: partes[0]?.trim() || null, notaCliente: partes[1]?.trim() || null };
+    }
+    return { nombrePlato: null, notaCliente: notes };
+}
+function parsearNotes(notes) { return _parsearNotes(notes); }
+
+function _esc(str) {
+    if (typeof str !== 'string') return String(str ?? '');
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+              .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ============================================================
+// FUNCIONES HEREDADAS GLOBALES
+// ============================================================
+async function resolverRestaurantId() {
+    if (_restaurantId) return _restaurantId;
     try {
-        const { data, error } = await db
+        const { data: rest } = await supabaseClient
+            .from('restaurants').select('id').eq('slug', RESTAURANT_SLUG).maybeSingle();
+        if (rest?.id) { _restaurantId = rest.id; return _restaurantId; }
+
+        const { data: any } = await supabaseClient
+            .from('restaurants').select('id').limit(1).maybeSingle();
+        if (any?.id) { _restaurantId = any.id; return _restaurantId; }
+
+        const { data: nuevo } = await supabaseClient
+            .from('restaurants')
+            .insert([{ name:'Restaurante la 26', slug:RESTAURANT_SLUG }])
+            .select('id').single();
+        if (nuevo?.id) { _restaurantId = nuevo.id; return _restaurantId; }
+    } catch(err) { console.error('[La 26] resolverRestaurantId:', err); }
+    return null;
+}
+
+window.abrirMenu = function(mesa, nombre) {
+    if (!mesa) return;
+    sessionStorage.setItem('mesa_id',     mesa);
+    sessionStorage.setItem('mesa_nombre', nombre || 'Comensal');
+    window.location.href = `menu.html?mesa=${encodeURIComponent(mesa)}&nombre=${encodeURIComponent(nombre||'Comensal')}`;
+};
+
+window.simularPedido = async function() {
+    sessionStorage.setItem('mesa_id',     'QR-Demo');
+    sessionStorage.setItem('mesa_nombre', 'Demo');
+    window.location.href = 'menu.html?mesa=QR-Demo&nombre=Demo&modo=simulacion';
+};
+
+function leerParamsURL() {
+    const p = new URLSearchParams(window.location.search);
+    return {
+        mesa:   p.get('mesa')   || sessionStorage.getItem('mesa_id')     || null,
+        nombre: p.get('nombre') || sessionStorage.getItem('mesa_nombre') || 'Comensal',
+        modo:   p.get('modo')   || null,
+    };
+}
+
+const btnSimular = document.getElementById('btn-simular');
+if (btnSimular) btnSimular.addEventListener('click', ejecutarSimulador);
+
+async function ejecutarSimulador() {
+    if (!btnSimular) return;
+    btnSimular.disabled = true; btnSimular.textContent = '⏳ Generando comanda...';
+    try {
+        const restaurantId = await resolverRestaurantId();
+        if (!restaurantId) { alert('No se pudo resolver el ID del restaurante.'); return; }
+
+        const { data: mesa } = await supabaseClient
+            .from('tables').select('id').eq('restaurant_id', restaurantId).limit(1).maybeSingle();
+        if (!mesa) { alert('Crea al menos una mesa en Supabase (tabla "tables").'); return; }
+
+        const { data: platos } = await supabaseClient
+            .from('menu_items').select('id, name, price')
+            .eq('is_active', true).eq('restaurant_id', restaurantId).limit(3);
+
+        let items = platos || [];
+        if (items.length === 0) {
+            const { data: cat } = await supabaseClient
+                .from('menu_categories').select('id').eq('restaurant_id', restaurantId).limit(1).maybeSingle();
+            if (cat?.id) {
+                const { data: nuevo } = await supabaseClient
+                    .from('menu_items')
+                    .insert([{ restaurant_id:restaurantId, category_id:cat.id,
+                               name:'Bandeja Paisa La 26 (Demo)', price:22000,
+                               item_type:'protein', is_active:true }])
+                    .select('id, name, price').single();
+                if (nuevo) items = [nuevo];
+            }
+        }
+        if (items.length === 0) { alert('No hay platos activos en el catálogo.'); return; }
+
+        const rand    = Math.floor(1000 + Math.random() * 9000);
+        const total   = items.reduce((s, p) => s + (p.price || 0), 0);
+        const orderNo = `ORD-LA26-${rand}`;
+
+        const { data: nuevaOrden, error: errOrden } = await supabaseClient
+            .from('orders')
+            .insert([{ restaurant_id:restaurantId, table_id:mesa.id,
+                       order_number:orderNo, status:'pending',
+                       customer_name:'Cliente Demo — La 26', total_amount:total,
+                       notes: '[MESA] Mesa: Demo' }])
+            .select('id').single();
+
+        if (errOrden || !nuevaOrden) throw new Error(errOrden?.message || 'Error creando orden');
+
+        const orderItems = items.map((p, i) => ({
+            order_id: nuevaOrden.id, menu_item_id: p.id,
+            quantity: i === 0 ? 2 : 1, unit_price: p.price || 0,
+            item_status: 'pending',
+            notes: `[nombre]${p.name}${i === 0 ? ' | Sin cebolla por favor 🧅' : ''}`,
+        }));
+
+        const { error: errItems } = await supabaseClient.from('order_items').insert(orderItems);
+        if (errItems) console.error('[La 26] Error en order_items del simulador:', errItems);
+        else console.log(`[La 26] ✅ Pedido simulado ${orderNo} con ${orderItems.length} plato(s).`);
+
+        setTimeout(() => La26.cargarPedidos(), 1800);
+
+    } catch(err) {
+        console.error('[La 26] Error en simulador:', err);
+        alert('Error al simular: ' + err.message);
+    } finally {
+        if (btnSimular) { btnSimular.disabled = false; btnSimular.textContent = '🚀 Simular Pedido desde QR'; }
+    }
+}
+
+// ============================================================
+// INICIALIZACIÓN
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+    const savedRole = sessionStorage.getItem('user_role');
+    const savedUser = sessionStorage.getItem('user_name');
+    const sesionValida = savedRole && savedUser && LA26_USERS[savedUser]?.role === savedRole;
+
+    if (sesionValida) {
+        _currentRole = savedRole;
+        _currentUser = savedUser;
+        _iniciarApp();
+    } else {
+        _mostrarLogin();
+    }
+});
+
+// ═══ GUARD: Verificar si el sistema está habilitado ═══
+async function verificarAccesoPedidos() {
+    try {
+        const { data } = await supabaseClient
             .from('system_settings')
             .select('value')
             .eq('key', 'orders_enabled')
             .maybeSingle();
 
-        if (error || !data) return true;
+        const habilitado = data ? data.value === 'true' : true;
 
-        const habilitado = data.value === 'true';
-        if (!habilitado) _mostrarPantallaFueraDeServicio();
-        return habilitado;
-    } catch (_) {
+        if (!habilitado) {
+            document.getElementById('app-pedidos').style.display = 'none';
+            document.getElementById('panel-fuera-servicio').style.display = 'flex';
+            return false;
+        }
+        return true;
+    } catch {
         return true;
     }
 }
-
-function _mostrarPantallaFueraDeServicio() {
-    const carta     = document.getElementById('vista-carta');
-    const historial = document.getElementById('vista-historial');
-    const cartBar   = document.getElementById('cart-bar');
-    const catsBar   = document.getElementById('cats-bar');
-    if (carta)     carta.style.display     = 'none';
-    if (historial) historial.style.display = 'none';
-    if (cartBar)   cartBar.style.display   = 'none';
-    if (catsBar)   catsBar.style.display   = 'none';
-
-    const loader = document.getElementById('app-loader');
-    if (loader) {
-        loader.style.display = 'flex';
-        loader.innerHTML = `
-            <div style="text-align:center;padding:40px 20px;max-width:300px;">
-                <div style="margin-bottom:20px;display:flex;justify-content:center;"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
-                <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.8rem;
-                           font-weight:400;color:var(--ink);margin-bottom:12px;line-height:1.2;">
-                    Sistema fuera<br>de servicio
-                </h2>
-                <p style="font-size:13px;color:var(--ink-muted);line-height:1.65;">
-                    El restaurante no está recibiendo pedidos en este momento.<br>
-                    Consulta con el administrador.
-                </p>
-            </div>`;
-    }
-}
-
-// ============================================================
-// INIT
-// ============================================================
-(async function init() {
-    try {
-        _programarResetMedianoche();
-        await Sesion.requerir();
-
-        // ── Verificar si el sistema está habilitado ──
-        const _sistemaHabilitado = await _verificarSistemaHabilitado();
-        if (!_sistemaHabilitado) return;
-
-        await _resolverRestaurant();
-        await Menu.cargar();
-
-        // La26Core como canal adicional de realtime si está disponible
-        if (window.La26Core && State.restaurantId) {
-            La26Core.suscribirRealtime(State.restaurantId);
-
-            La26Core.on('onMenuItemChange', ({ payload }) => {
-                const item = payload?.new;
-                if (!item?.id) return;
-                _actualizarSlotDesdeRealtime(item);
-            });
-
-            La26Core.on('onOrderChange', () => {
-                if (HistState.cargado) {
-                    setTimeout(() => Hist.cargar(), 600);
-                }
-            });
-        }
-
-    } catch (err) {
-        console.error('[La 26] Error crítico en init:', err);
-        _mostrarEstado('error', `Error al iniciar la carta: ${err.message}`);
-    }
-})();
