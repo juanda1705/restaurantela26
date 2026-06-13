@@ -1057,6 +1057,7 @@ const Hist = {
         }
         try {
             const hoy = todayISO();
+            const manana = new Date(new Date(`${hoy}T05:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10);
             const { data: ordenes, error } = await db
                 .from('orders')
                 .select(`
@@ -1068,8 +1069,8 @@ const Hist = {
                     )
                 `)
                 .eq('restaurant_id', State.restaurantId)
-                .gte('created_at', `${hoy}T00:00:00`)
-                .lte('created_at', `${hoy}T23:59:59`)
+                .gte('created_at', `${hoy}T05:00:00Z`)
+                .lt('created_at', `${manana}T05:00:00Z`)
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
