@@ -702,7 +702,7 @@ function _crearCardHTML(order, esNuevo = false) {
                 const notaCliente = matchNota ? matchNota[1].trim() : null;
                 return notaCliente
                     ? `<div style="background:#fffbeb;border:1.5px solid #f59e0b;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px;color:#92400e;font-weight:600;">
-                           ⚠️ Nota del cliente: ${_esc(notaCliente)}
+                           Nota: ${_esc(notaCliente)}
                        </div>`
                     : '';
             })()}
