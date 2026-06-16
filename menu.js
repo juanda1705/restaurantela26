@@ -1846,28 +1846,31 @@ function _suscribirNotificacionesCocina() {
             console.info('[La 26] Canal notif mesero:', status);
         });
 
-    // ── 2. Polling fallback (cada 6 s) ──────────────────
-    // Cubre el caso donde Realtime no está habilitado en la tabla
+    // ── 2. Polling fallback (cada 5 s) ──────────────────
     setInterval(async () => {
         try {
-            const query = db
+            const { data, error } = await db
                 .from('waiter_notifications')
                 .select('*')
-                .eq('leida', false)
                 .order('created_at', { ascending: false })
-                .limit(1);
+                .limit(3);
 
-            const { data } = await query;
+            if (error) { console.warn('[Notif mesero] polling error:', error.message); return; }
             if (!data || data.length === 0) return;
-            const n = data[0];
-            if (n.id === _ultimaNotifId) return; // ya mostrada
-            _ultimaNotifId = n.id;
-            _mostrarNotificacionDespacho(n);
 
-            // Marcar como leída
-            await db.from('waiter_notifications').update({ leida: true }).eq('id', n.id);
-        } catch(e) { /* silencioso */ }
-    }, 6000);
+            // Mostrar solo notifs no leídas y no mostradas aún
+            for (const n of data) {
+                if (n.leida) continue;
+                if (n.id === _ultimaNotifId) continue;
+                _ultimaNotifId = n.id;
+                console.log('[Notif mesero] 🔔 Nueva notif por polling:', n);
+                _mostrarNotificacionDespacho(n);
+                // Marcar como leída
+                await db.from('waiter_notifications').update({ leida: true }).eq('id', n.id);
+                break; // una a la vez
+            }
+        } catch(e) { console.warn('[Notif mesero] polling excepción:', e); }
+    }, 5000);
 }
 
 function _mostrarNotificacionDespacho(n) {
