@@ -1827,7 +1827,10 @@ function _mostrarPantallaFueraDeServicio() {
 // ============================================================
 // NOTIFICACIONES DE DESPACHO PARA EL MESERO
 // ============================================================
+let _ultimaNotifId = null;
+
 function _suscribirNotificacionesCocina() {
+    // ── 1. Realtime (principal) ──────────────────────────
     db.channel('waiter-notif-v1')
         .on('postgres_changes', {
             event:  'INSERT',
@@ -1836,9 +1839,35 @@ function _suscribirNotificacionesCocina() {
         }, (payload) => {
             const n = payload.new;
             if (!n) return;
+            _ultimaNotifId = n.id;
             _mostrarNotificacionDespacho(n);
         })
-        .subscribe();
+        .subscribe((status) => {
+            console.info('[La 26] Canal notif mesero:', status);
+        });
+
+    // ── 2. Polling fallback (cada 6 s) ──────────────────
+    // Cubre el caso donde Realtime no está habilitado en la tabla
+    setInterval(async () => {
+        try {
+            const query = db
+                .from('waiter_notifications')
+                .select('*')
+                .eq('leida', false)
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            const { data } = await query;
+            if (!data || data.length === 0) return;
+            const n = data[0];
+            if (n.id === _ultimaNotifId) return; // ya mostrada
+            _ultimaNotifId = n.id;
+            _mostrarNotificacionDespacho(n);
+
+            // Marcar como leída
+            await db.from('waiter_notifications').update({ leida: true }).eq('id', n.id);
+        } catch(e) { /* silencioso */ }
+    }, 6000);
 }
 
 function _mostrarNotificacionDespacho(n) {
