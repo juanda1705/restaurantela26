@@ -259,6 +259,29 @@ window.La26 = {
             return;
         }
 
+        // ── Notificar al mesero ──────────────────────────────
+        try {
+            const orden = _allOrders.find(o => o.id === pedidoId);
+            if (orden) {
+                const mesaDesdeNotes = _extraerMesaDesdeNotes(orden.notes || '');
+                const mesa = mesaDesdeNotes || orden.tables?.label || 'Mesa';
+                const platos = (orden.order_items || [])
+                    .map(i => {
+                        const p = _parsearNotes(i.notes);
+                        return p.nombrePlato || i.menu_items?.name || '(Plato)';
+                    });
+                await supabaseClient.from('waiter_notifications').insert([{
+                    order_id:     pedidoId,
+                    order_number: orden.order_number || '',
+                    mesa:         mesa,
+                    platos:       platos,
+                    leida:        false,
+                    created_at:   new Date().toISOString(),
+                }]);
+            }
+        } catch(e) { console.warn('[La 26] No se pudo crear notificación mesero:', e); }
+        // ────────────────────────────────────────────────────
+
         _mostrarToast('✅ Pedido despachado correctamente', 'success');
         setTimeout(() => La26.cargarPedidos(), 800);
     },
