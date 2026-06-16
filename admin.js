@@ -28,47 +28,6 @@
 // ============================================================
 // CREDENCIALES SUPABASE
 // ============================================================
-// ============================================================
-// LUCIDE ICONS — CDN cargado en admin.html antes de este script:
-// <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-// lucide.createIcons() se llama en DOMContentLoaded y tras
-// cualquier función que inyecte HTML dinámico.
-// ============================================================
-
-// Helper: genera SVG inline de Lucide para usar dentro de
-// template strings de JS (donde createIcons() no alcanza).
-function _lucideSVG(name, size = 14, extra = '') {
-    const icons = {
-        beef:          '<path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2"/><path d="M7 10h2l2 5 2-10 2 5h2"/>',
-        soup:          '<path d="M12 21a9 9 0 0 0 9-9H3a9 9 0 0 0 9 9Z"/><path d="M7 21h10"/><path d="M19.5 12 22 6"/><path d="M16.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.07.83.noggin 1.62 1 1.62"/>',
-        cup_soda:      '<path d="m6 8 1.75 12.28a2 2 0 0 0 2 1.72h4.54a2 2 0 0 0 2-1.72L18 8"/><path d="M5 8h14"/><path d="M7 15a6.47 6.47 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/><rect x="10" y="2" width="4" height="6" rx="2"/>',
-        sparkles:      '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .963L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
-        cake_slice:    '<path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8"/><path d="M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1"/><path d="M2 21h20"/><path d="M7 8v3"/><path d="M12 8v3"/><path d="M17 8v3"/><path d="M7 4h0.01"/><path d="M12 4h0.01"/><path d="M17 4h0.01"/>',
-        utensils:      '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>',
-        credit_card:   '<rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>',
-        banknote:      '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>',
-        smartphone:    '<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>',
-        handshake:     '<path d="m11 17 2 2a1 1 0 1 0 3-3"/><path d="m14 14 2.5 2.5a1 1 0 1 0 3-3l-3.88-3.88a3 3 0 0 0-4.24 0l-.88.88a1 1 0 1 1-3-3l2.81-2.81a5.79 5.79 0 0 1 7.06-.87l.47.28a2 2 0 0 0 1.42.25L21 4"/><path d="m21 3 1 11h-2"/><path d="M3 3 2 14l6.5 6.5a1 1 0 1 0 3-3"/><path d="M3 4h8"/>',
-        file_text:     '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><line x1="10" y1="9" x2="8" y2="9"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
-        receipt:       '<path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8H8"/><path d="M16 12H8"/><path d="M12 16H8"/>',
-        pencil:        '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>',
-        trash_2:       '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
-        alert_triangle:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
-        check_circle:  '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/>',
-        circle_dot:    '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1"/>',
-        lock:          '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
-        circle_check:  '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
-        x_circle:      '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
-        package:       '<path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><path d="m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7"/><path d="m7.5 4.27 9 5.15"/>',
-        clock:         '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
-        refresh_cw:    '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
-        calendar:      '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
-        clipboard_list:'<rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><line x1="12" y1="11" x2="16" y2="11"/><line x1="12" y1="15" x2="16" y2="15"/><line x1="8" y1="11" x2="8.01" y2="11"/><line x1="8" y1="15" x2="8.01" y2="15"/>',
-    };
-    const d = icons[name] || icons['utensils'];
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle;flex-shrink:0;${extra}">${d}</svg>`;
-}
-
 const SUPABASE_URL      = "https://hxmodeduckuhvvspnkxd.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_ESxhljLgqWkGvrnKhvbeEg_iBqaGciv";
 
@@ -151,12 +110,12 @@ function formatCOP(valor) {
 // MAPA DE TIPOS DE PLATO
 // ============================================================
 const MAPA_TIPO = {
-    executive_lunch: { label: 'Proteína con Salsa', icono: 'beef',       porciones: 35, badgeClass: 'badge-protein' },
-    protein:         { label: 'Proteína con Salsa', icono: 'beef',       porciones: 35, badgeClass: 'badge-protein' },
-    side:            { label: 'Principio',           icono: 'soup',       porciones: 50, badgeClass: 'badge-side'    },
-    drink:           { label: 'Bebida',              icono: 'cup_soda',   porciones: 20, badgeClass: 'badge-drink'   },
-    a_la_carte:      { label: 'A la Carta',          icono: 'sparkles',   porciones: 15, badgeClass: 'badge-carte'   },
-    dessert:         { label: 'Postre',              icono: 'cake_slice', porciones: 10, badgeClass: 'badge-dessert' },
+    executive_lunch: { label: 'Proteína con Salsa', icono: '🥩', porciones: 35, badgeClass: 'badge-protein' },
+    protein:         { label: 'Proteína con Salsa', icono: '🥩', porciones: 35, badgeClass: 'badge-protein' },
+    side:            { label: 'Principio',           icono: '🍲', porciones: 50, badgeClass: 'badge-side'    },
+    drink:           { label: 'Bebida',              icono: '🍹', porciones: 20, badgeClass: 'badge-drink'   },
+    a_la_carte:      { label: 'A la Carta',          icono: '✨', porciones: 15, badgeClass: 'badge-carte'   },
+    dessert:         { label: 'Postre',              icono: '🍮', porciones: 10, badgeClass: 'badge-dessert' },
 };
 
 function getRangoByCodigo(codigo) {
@@ -285,10 +244,10 @@ async function cargarDashboardReal() {
                         ? _badgeMetodo(metodo)
                         : `<select onchange="registrarMetodoPago('${ord.id}', this.value)"
                                style="font-size:10.5px;padding:3px 10px;border-radius:999px;height:28px;width:auto;cursor:pointer;background:var(--amber-lt);border-color:rgba(154,108,26,.28);color:var(--amber);">
-                               <option value="">Registrar pago…</option>
-                               <option value="efectivo">Efectivo</option>
-                               <option value="transferencia">Transferencia</option>
-                               <option value="fiado">Fiado</option>
+                               <option value="">💳 Registrar pago…</option>
+                               <option value="efectivo">💵 Efectivo</option>
+                               <option value="transferencia">📲 Transferencia</option>
+                               <option value="fiado">🤝 Fiado</option>
                            </select>`;
 
                     // [FIX-10] Resolución de mesa:
@@ -313,7 +272,7 @@ async function cargarDashboardReal() {
                         mesaLabel = 'P.L.';
                     }
 
-                    tbodyFacturas.insertAdjacentHTML('beforeend', `
+                    tbodyFacturas.insertAdjacentHTML('afterbegin', `
                         <tr class="tbody-row">
                             <td>
                                 <span class="mono" style="font-size:11.5px;font-weight:700;color:var(--olive);">${ord.order_number}</span>
@@ -327,25 +286,25 @@ async function cargarDashboardReal() {
                             <td style="text-align:center;">
                                 <div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;">
                                     <button onclick="exportarReciboPDF('${ord.id}')"
-                                        style="background:var(--surface-2);border:1.5px solid var(--border);color:var(--text-2);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;display:inline-flex;align-items:center;gap:5px;"
+                                        style="background:var(--surface-2);border:1.5px solid var(--border);color:var(--text-2);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
                                         onmouseover="this.style.background='var(--surface-3)'"
                                         onmouseout="this.style.background='var(--surface-2)'">
-                                        <i data-lucide="file-text" style="width:13px;height:13px;stroke-width:2;"></i> PDF
+                                        📄 PDF
                                     </button>
                                     <button onclick="abrirModalFacturaElectronica('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
-                                        style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;display:inline-flex;align-items:center;gap:5px;"
+                                        style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
                                         onmouseover="this.style.background='rgba(74,103,65,.16)'"
                                         onmouseout="this.style.background='var(--olive-lt)'">
-                                        <i data-lucide="receipt" style="width:13px;height:13px;stroke-width:2;"></i> DIAN
+                                        🧾 DIAN
                                     </button>
                                     <button onclick="editarComandaAdmin('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
-                                        style="background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.28);color:var(--blue);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;display:inline-flex;align-items:center;gap:5px;"
+                                        style="background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.28);color:var(--blue);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
                                         onmouseover="this.style.background='rgba(37,99,168,.16)'"
                                         onmouseout="this.style.background='var(--blue-lt)'">
-                                        <i data-lucide="pencil" style="width:13px;height:13px;stroke-width:2;"></i> Editar
+                                        ✏️ Editar
                                     </button>
-                                    <button onclick="eliminarComandaReal('${ord.id}', '${ord.order_number}')" class="btn-danger" style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;">
-                                        <i data-lucide="trash-2" style="width:14px;height:14px;stroke-width:2;"></i>
+                                    <button onclick="eliminarComandaReal('${ord.id}', '${ord.order_number}')" class="btn-danger">
+                                        🗑️
                                     </button>
                                 </div>
                             </td>
@@ -353,7 +312,6 @@ async function cargarDashboardReal() {
                 });
             }
         }
-        if (typeof lucide !== 'undefined') lucide.createIcons();
 
         // Top platos
         const ranking = {};
@@ -414,7 +372,7 @@ async function cargarDashboardReal() {
 // ELIMINAR COMANDA
 // ============================================================
 async function eliminarComandaReal(idComanda, nroOrden) {
-    if (!confirm(`¿Eliminar la orden ${nroOrden}?\nEsto restará el monto de los reportes.`)) return;
+    if (!confirm(`⚠️ ¿Eliminar la orden ${nroOrden}?\nEsto restará el monto de los reportes.`)) return;
     try {
         await supabaseClient.from('order_items').delete().eq('order_id', idComanda);
         const { error } = await supabaseClient.from('orders').delete().eq('id', idComanda);
@@ -468,7 +426,7 @@ async function registrarMetodoPago(orderId, metodo) {
         totalFiado         = parseFloat(sessionStorage.getItem('pm_fiado')         || '0');
         renderizarTotales();
 
-        const label = { efectivo: 'Efectivo', transferencia: 'Transferencia', fiado: 'Fiado' };
+        const label = { efectivo: 'Efectivo 💵', transferencia: 'Transferencia 📲', fiado: 'Fiado 🤝' };
         Toast.ok(`Pago registrado: ${label[metodo] || metodo}`);
 
         _actualizarBadgePago(orderId, metodo, monto);
@@ -499,13 +457,13 @@ function _actualizarBadgePago(orderId, metodo) {
 
 function _badgeMetodo(metodo) {
     const cfg = {
-        efectivo:      { bg: 'var(--olive-lt)',  color: 'var(--olive)', bd: 'var(--olive-bd)',     label: `${_lucideSVG('banknote',12,'margin-right:4px;')} Efectivo`      },
-        transferencia: { bg: 'var(--blue-lt)',   color: 'var(--blue)',  bd: 'rgba(37,99,168,.28)', label: `${_lucideSVG('smartphone',12,'margin-right:4px;')} Transferencia` },
-        fiado:         { bg: 'var(--amber-lt)',  color: 'var(--amber)', bd: 'rgba(154,108,26,.28)',label: `${_lucideSVG('handshake',12,'margin-right:4px;')} Fiado`         },
+        efectivo:      { bg: 'var(--olive-lt)',  color: 'var(--olive)', bd: 'var(--olive-bd)',     label: '💵 Efectivo'      },
+        transferencia: { bg: 'var(--blue-lt)',   color: 'var(--blue)',  bd: 'rgba(37,99,168,.28)', label: '📲 Transferencia' },
+        fiado:         { bg: 'var(--amber-lt)',  color: 'var(--amber)', bd: 'rgba(154,108,26,.28)',label: '🤝 Fiado'         },
     };
     const c = cfg[metodo] || cfg.efectivo;
     return `<span style="font-size:10px;font-weight:600;padding:3px 11px;border-radius:999px;
-        background:${c.bg};color:${c.color};border:1.5px solid ${c.bd};display:inline-flex;align-items:center;gap:4px;">
+        background:${c.bg};color:${c.color};border:1.5px solid ${c.bd};display:inline-block;">
         ${c.label}</span>`;
 }
 
@@ -683,7 +641,7 @@ async function descontarInsumosPorOrden(orderId) {
             .eq('id', s.id);
     }
 
-    console.log(`[La 26] Inventario descontado automáticamente para orden ${orderId}`);
+    console.log(`[La 26] 📦 Inventario descontado automáticamente para orden ${orderId}`);
 }
 
 // ============================================================
@@ -803,7 +761,7 @@ async function generarFacturaElectronica() {
         elResult.style.display = 'block';
         elResult.innerHTML = `
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-                <span style="font-size:18px;color:var(--olive);display:flex;">${_lucideSVG('check_circle',20)}</span>
+                <span style="font-size:18px;">✅</span>
                 <span style="font-size:13px;font-weight:700;color:var(--olive);">CUFE Generado — Enviado a DIAN</span>
             </div>
             <p style="font-size:11.5px;color:var(--text-2);line-height:1.7;">
@@ -815,7 +773,7 @@ async function generarFacturaElectronica() {
                 <strong>Total Factura:</strong> ${formatCOP(_feBaseTotal)}
             </p>`;
     }
-    console.log('[La 26] Payload DIAN generado:', payload);
+    console.log('✅ Payload DIAN generado:', payload);
 }
 
 // ============================================================
@@ -865,7 +823,7 @@ async function cargarSlotsMenuReal() {
         });
 
         itemsOrdenados.forEach((item, animIdx) => {
-            const cfg            = MAPA_TIPO[item.item_type] || { label: item.item_type, icono: 'utensils', porciones: 20, badgeClass: '' };
+            const cfg            = MAPA_TIPO[item.item_type] || { label: item.item_type, icono: '🍽️', porciones: 20, badgeClass: '' };
             const nombreEscapado = (item.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
             const codigo         = '—';
             const rango          = { color: 'var(--text-3)' };
@@ -875,13 +833,13 @@ async function cargarSlotsMenuReal() {
                     <div style="display:flex;justify-content:space-between;align-items:flex-start;">
                         <div style="display:flex;align-items:center;gap:8px;min-width:0;">
                             <span style="font-size:11px;font-weight:700;color:${rango.color};background:rgba(0,0,0,.04);border:1.5px solid rgba(0,0,0,.07);border-radius:999px;padding:3px 9px;flex-shrink:0;" class="mono">#${codigo}</span>
-                            <span class="badge ${cfg.badgeClass}" style="display:inline-flex;align-items:center;gap:4px;">${_lucideSVG(cfg.icono,13)} ${cfg.label}</span>
+                            <span class="badge ${cfg.badgeClass}">${cfg.icono} ${cfg.label}</span>
                         </div>
                         <button onclick="eliminarComponenteCatalogo('${item.id}','${nombreEscapado}')"
-                            style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:15px;padding:0;flex-shrink:0;transition:color .2s;display:flex;align-items:center;justify-content:center;"
+                            style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:15px;padding:0;flex-shrink:0;transition:color .2s;"
                             onmouseover="this.style.color='var(--red)'"
                             onmouseout="this.style.color='var(--text-3)'"
-                            title="Dar de baja">${_lucideSVG('trash_2',16)}</button>
+                            title="Dar de baja">🗑️</button>
                     </div>
 
                     <h4 style="font-size:13.5px;font-weight:600;color:var(--text-1);line-height:1.4;margin:0;">
@@ -908,15 +866,11 @@ async function cargarSlotsMenuReal() {
                         <button data-switch-id="${item.id}"
                             onclick="alternarVisibilidadPlatoReal('${item.id}', ${item.is_active})"
                             class="${item.is_active ? 'sw-on' : 'sw-off'}">
-                            ${item.is_active
-                                ? `<span style="display:inline-flex;align-items:center;gap:5px;">${_lucideSVG('circle_check',14,'color:var(--olive);')} Activo</span>`
-                                : `<span style="display:inline-flex;align-items:center;gap:5px;">${_lucideSVG('x_circle',14,'color:var(--red);')} Agotado</span>`}
+                            ${item.is_active ? '🟢 Activo' : '🔴 Agotado'}
                         </button>
                     </div>
                 </div>`);
         });
-
-        if (typeof lucide !== 'undefined') lucide.createIcons();
 
     } catch (err) {
         console.error('Error cargando menú:', err);
@@ -1064,7 +1018,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ============================================================
 async function eliminarComponenteCatalogo(idItem, nombreItem) {
     if (!confirm(
-        `¿Dar de baja "${nombreItem}" del catálogo?\n\n` +
+        `⚠️ ¿Dar de baja "${nombreItem}" del catálogo?\n\n` +
         `Si el plato tiene ventas históricas se ocultará del menú pero ` +
         `su historial se conservará intacto.`
     )) return;
@@ -1158,9 +1112,7 @@ function _actualizarSwitchDOM(idPlato, activo) {
     const btn = document.querySelector(`[data-switch-id="${idPlato}"]`);
     if (!btn) return;
     btn.className   = activo ? 'sw-on' : 'sw-off';
-    btn.innerHTML   = activo
-        ? `<span style="display:inline-flex;align-items:center;gap:5px;">${_lucideSVG('circle_check',14,'color:var(--olive);')} Activo</span>`
-        : `<span style="display:inline-flex;align-items:center;gap:5px;">${_lucideSVG('x_circle',14,'color:var(--red);')} Agotado</span>`;
+    btn.textContent = activo ? '🟢 Activo' : '🔴 Agotado';
     btn.setAttribute('onclick', `alternarVisibilidadPlatoReal('${idPlato}', ${activo})`);
 }
 
@@ -1342,7 +1294,7 @@ async function cargarInventarioReal() {
         stock.forEach(inv => {
             const cant = parseFloat(inv.current_stock);
             const alertaCell = cant <= 5
-                ? `<span style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px;">${_lucideSVG('alert_triangle',12)} ${cant} Stock bajo</span>`
+                ? `<span style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;">${cant} ⚠️ Stock bajo</span>`
                 : `<span class="mono" style="font-size:13px;color:var(--text-1);font-weight:600;">${cant}</span>`;
             const nombreEscapado = (inv.item_name || '').replace(/'/g, "\\'");
 
@@ -1365,14 +1317,12 @@ async function cargarInventarioReal() {
                         </div>
                     </td>
                     <td style="text-align:right;">
-                        <button onclick="eliminarInsumoReal('${inv.id}','${nombreEscapado}')" class="btn-danger" style="display:inline-flex;align-items:center;gap:5px;">
-                            <i data-lucide="trash-2" style="width:13px;height:13px;stroke-width:2;"></i> Dar de baja
+                        <button onclick="eliminarInsumoReal('${inv.id}','${nombreEscapado}')" class="btn-danger">
+                            🗑️ Dar de baja
                         </button>
                     </td>
                 </tr>`);
         });
-
-        if (typeof lucide !== 'undefined') lucide.createIcons();
 
     } catch (err) {
         console.error('Error cargando kárdex:', err);
@@ -1432,7 +1382,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function eliminarInsumoReal(idInsumo, nombreInsumo) {
-    if (!confirm(`¿Dar de baja "${nombreInsumo}"?`)) return;
+    if (!confirm(`⚠️ ¿Dar de baja "${nombreInsumo}"?`)) return;
     try {
         const { error } = await supabaseClient
             .from('inventory_supplies')
@@ -1508,7 +1458,7 @@ async function realizarCierre() {
             .from('historial_cierres')
             .insert([cierrePayload]);
         if (error) throw error;
-        Toast.ok(`Cierre del ${hoy} archivado en el calendario.`, 6000);
+        Toast.ok(`✅ Cierre del ${hoy} archivado en el calendario.`, 6000);
     } catch (err) {
         console.warn('historial_cierres no disponible — guardando localmente:', err.message);
         const histLocal = JSON.parse(localStorage.getItem('cierres_local') || '[]');
@@ -1607,13 +1557,13 @@ async function cargarCalendarioCierres(resetPagina = true) {
         resumen.innerHTML = `
             <div style="margin-bottom:18px;">
                 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
-                    <label style="font-size:12px;font-weight:600;color:var(--text-2);display:inline-flex;align-items:center;gap:5px;">${_lucideSVG('calendar',14)} Filtrar por fecha:</label>
+                    <label style="font-size:12px;font-weight:600;color:var(--text-2);">📆 Filtrar por fecha:</label>
                     <input type="date" id="inp-filtro-fecha-cierres"
                         value="${_cierresState.filtroFecha}"
                         onchange="_aplicarFiltroCierres(this.value)"
                         style="width:180px;border-radius:999px;padding:5px 14px;font-size:12.5px;height:36px;">
                     ${_cierresState.filtroFecha
-                        ? `<button onclick="_aplicarFiltroCierres('')" class="btn-ghost" style="font-size:12px;padding:5px 14px;height:36px;">× Quitar filtro</button>`
+                        ? `<button onclick="_aplicarFiltroCierres('')" class="btn-ghost" style="font-size:12px;padding:5px 14px;height:36px;">✕ Quitar filtro</button>`
                         : ''}
                     <div style="flex:1;"></div>
                     ${_cierresState.pagina > 0
@@ -1674,8 +1624,6 @@ function _paginaCierres(delta) {
 // INICIALIZACIÓN PRINCIPAL
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
-    if (typeof lucide !== 'undefined') lucide.createIcons();
-
     const elFecha = document.getElementById('fecha-actual');
     if (elFecha) {
         elFecha.textContent = new Date().toLocaleDateString('es-CO', {
@@ -1757,8 +1705,8 @@ async function toggleEstadoSistema() {
         if (error) throw error;
 
         const msg = nuevoEstado
-            ? 'Sistema habilitado: los meseros pueden tomar pedidos.'
-            : 'Sistema bloqueado: los meseros verán aviso de "Fuera de servicio".';
+            ? '✅ Sistema habilitado: los meseros pueden tomar pedidos.'
+            : '🔒 Sistema bloqueado: los meseros verán aviso de "Fuera de servicio".';
         Toast.ok(msg, 5000);
     } catch (err) {
         console.error('Error al persistir estado del sistema:', err);
@@ -1776,7 +1724,7 @@ function _renderToggleSistema(habilitado) {
 
     if (habilitado) {
         btn.className = 'sw-on';
-        btn.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;">${_lucideSVG('circle_check',15,'color:var(--olive);')} Pedidos Habilitados</span>`;
+        btn.innerHTML = '🟢 Pedidos Habilitados';
         if (estadoBadge) {
             estadoBadge.textContent = 'Operativo';
             estadoBadge.style.cssText = 'background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;';
@@ -1784,7 +1732,7 @@ function _renderToggleSistema(habilitado) {
         if (desc) desc.textContent = 'Los meseros pueden crear y registrar pedidos con normalidad.';
     } else {
         btn.className = 'sw-off';
-        btn.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;">${_lucideSVG('lock',15,'color:var(--red);')} Pedidos Bloqueados</span>`;
+        btn.innerHTML = '🔴 Pedidos Bloqueados';
         if (estadoBadge) {
             estadoBadge.textContent = 'Fuera de Servicio';
             estadoBadge.style.cssText = 'background:var(--red-lt);color:var(--red);border:1.5px solid var(--red-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;';
@@ -1855,11 +1803,10 @@ function _renderTablaRecetas() {
             <td style="font-size:12px;color:var(--text-3);">${r.description || '—'}</td>
             <td><div style="display:flex;flex-wrap:wrap;gap:4px;padding:4px 0;">${ings || '<span style="color:var(--text-3);font-size:11.5px;">Sin ingredientes</span>'}</div></td>
             <td style="text-align:center;">
-                <button onclick="eliminarReceta('${r.id}','${(r.name||'').replace(/'/g,"\\'")}') " class="btn-danger" style="display:inline-flex;align-items:center;gap:5px;"><i data-lucide="trash-2" style="width:13px;height:13px;stroke-width:2;"></i> Eliminar</button>
+                <button onclick="eliminarReceta('${r.id}','${(r.name||'').replace(/'/g,"\\'")}') " class="btn-danger">🗑️ Eliminar</button>
             </td>
         </tr>`;
     }).join('');
-    if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 async function guardarReceta() {
@@ -2034,9 +1981,9 @@ function _renderResultadoCalculo() {
         const restante     = i.stockActual !== null ? Math.max(0, i.stockActual - _qpd3 * platosEstimados).toFixed(3) : '—';
         const stockLabel   = i.stockActual !== null
             ? `<span class="mono" style="font-size:12.5px;font-weight:600;">${i.stockActual} ${i.unit}</span>`
-            : `<span style="color:var(--amber);font-size:11.5px;font-weight:600;display:inline-flex;align-items:center;gap:4px;">${_lucideSVG('alert_triangle',12,'color:var(--amber);')} Sin link inventario</span>`;
+            : `<span style="color:var(--amber);font-size:11.5px;font-weight:600;">⚠️ Sin link inventario</span>`;
         const cuelloLabel  = cuello
-            ? `<span style="font-size:9.5px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.4px;display:inline-flex;align-items:center;gap:3px;">${_lucideSVG('x_circle',11,'color:var(--red);')} Cuello</span>` : '';
+            ? `<span style="font-size:9.5px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.4px;">🔴 Cuello</span>` : '';
 
         return `<tr style="border-bottom:1px solid var(--border);${cuello ? 'background:rgba(192,57,43,.04);' : ''}">
             <td style="padding:9px 12px;font-size:12.5px;font-weight:600;color:var(--text-1);">${i.supply_name} ${cuelloLabel}</td>
@@ -2064,7 +2011,7 @@ function _renderResultadoCalculo() {
             </div>
             ${platosEstimados > 0 ? `
             <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px 18px;">
-                <p style="font-size:11px;font-weight:700;color:var(--olive);margin-bottom:8px;display:flex;align-items:center;gap:5px;">${_lucideSVG('clipboard_list',13)} Siguiente paso</p>
+                <p style="font-size:11px;font-weight:700;color:var(--olive);margin-bottom:8px;">📋 Siguiente paso</p>
                 <p style="font-size:12px;color:var(--text-2);line-height:1.6;">Ve a <strong>Control de Menú</strong> y pon<br><strong>${platosEstimados}</strong> en "Porciones del día".</p>
             </div>` : ''}
         </div>
@@ -2085,21 +2032,20 @@ function _renderResultadoCalculo() {
         </div>
         ${platosEstimados > 0 ? `
         <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:12px;padding:14px 16px;">
-            <p style="font-size:12px;font-weight:700;color:var(--olive);margin-bottom:10px;display:flex;align-items:center;gap:5px;">${_lucideSVG('package',13)} Descontar insumos al cerrar el día</p>
+            <p style="font-size:12px;font-weight:700;color:var(--olive);margin-bottom:10px;">📦 Descontar insumos al cerrar el día</p>
             <p style="font-size:11.5px;color:var(--text-2);margin-bottom:10px;">Ingresa cuántos platos se vendieron realmente.</p>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                 <label style="font-size:12.5px;font-weight:600;color:var(--text-2);margin:0;white-space:nowrap;">Platos vendidos:</label>
                 <input type="number" id="inp-platos-vendidos" value="${platosEstimados}" min="1" max="${platosEstimados}"
                     style="width:90px;font-size:14px;font-weight:700;text-align:center;border-radius:999px;padding:6px 12px;border:1.5px solid var(--olive-bd);">
-                <button onclick="descontarInsumos()" class="btn-olive" style="display:inline-flex;align-items:center;gap:5px;">${_lucideSVG('package',13,'color:currentColor;')} Descontar del Inventario</button>
+                <button onclick="descontarInsumos()" class="btn-olive">📦 Descontar del Inventario</button>
                 <span style="font-size:11px;color:var(--text-3);">(máx. ${platosEstimados})</span>
             </div>
         </div>` : `
         <div style="background:var(--red-lt);border:1.5px solid var(--red-bd);border-radius:12px;padding:14px 16px;">
-            <p style="font-size:13px;font-weight:700;color:var(--red);display:flex;align-items:center;gap:6px;">${_lucideSVG('alert_triangle',15,'color:var(--red);')} Stock insuficiente para producir al menos un plato.</p>
+            <p style="font-size:13px;font-weight:700;color:var(--red);">⚠️ Stock insuficiente para producir al menos un plato.</p>
             <p style="font-size:12px;color:var(--text-2);margin-top:4px;">Revisa el insumo cuello de botella y repón stock.</p>
         </div>`}`;
-    if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 async function descontarInsumos() {
@@ -2125,7 +2071,7 @@ async function descontarInsumos() {
     }
 
     if (errores === 0) {
-        Toast.ok(`${platosVendidos} plato(s) descontados del inventario correctamente.`);
+        Toast.ok(`✅ ${platosVendidos} plato(s) descontados del inventario correctamente.`);
     } else {
         Toast.error(`${errores} insumo(s) no se actualizaron. Revisa la consola.`);
     }
@@ -2144,7 +2090,7 @@ async function descontarInsumos() {
 // ============================================================
 async function actualizarDashboard() {
     const btn = document.getElementById('btn-actualizar-dashboard');
-    if (btn) { btn.disabled = true; btn.innerHTML = `<span style="display:inline-flex;align-items:center;gap:5px;">${_lucideSVG('clock',14)} Actualizando…</span>`; }
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Actualizando…'; }
     try {
         await cargarDashboardReal();
         renderizarTotales();
@@ -2153,7 +2099,7 @@ async function actualizarDashboard() {
         console.error('[Admin] Error actualizando dashboard:', err);
         Toast.error('Error al actualizar. Revisa la consola.');
     } finally {
-        if (btn) { btn.disabled = false; btn.innerHTML = `<span style="display:inline-flex;align-items:center;gap:5px;">${_lucideSVG('refresh_cw',14)} Actualizar</span>`; }
+        if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualizar'; }
     }
 }
 
