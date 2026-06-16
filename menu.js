@@ -1814,8 +1814,149 @@ function _mostrarPantallaFueraDeServicio() {
             });
         }
 
+        // ── Notificaciones de despacho desde cocina ──────────
+        _suscribirNotificacionesCocina();
+        // ─────────────────────────────────────────────────────
+
     } catch (err) {
         console.error('[La 26] Error crítico en init:', err);
         _mostrarEstado('error', `Error al iniciar la carta: ${err.message}`);
     }
 })();
+
+// ============================================================
+// NOTIFICACIONES DE DESPACHO PARA EL MESERO
+// ============================================================
+function _suscribirNotificacionesCocina() {
+    db.channel('waiter-notif-v1')
+        .on('postgres_changes', {
+            event:  'INSERT',
+            schema: 'public',
+            table:  'waiter_notifications',
+        }, (payload) => {
+            const n = payload.new;
+            if (!n) return;
+            _mostrarNotificacionDespacho(n);
+        })
+        .subscribe();
+}
+
+function _mostrarNotificacionDespacho(n) {
+    // Vibración en móvil
+    if (navigator.vibrate) {
+        navigator.vibrate([200, 100, 200, 100, 400]);
+    }
+
+    // Sonido de notificación
+    _sonarNotificacionMesero();
+
+    // Toast visual con los platos
+    const platosTexto = Array.isArray(n.platos) && n.platos.length > 0
+        ? n.platos.join(', ')
+        : 'Pedido listo';
+
+    const mesa = n.mesa || 'Mesa';
+
+    // Banner grande visible
+    _mostrarBannerDespacho(mesa, platosTexto, n.order_number);
+}
+
+function _sonarNotificacionMesero() {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const now = ctx.currentTime;
+        // Tres tonos ascendentes más llamativos que los de cocina
+        [[880, 0], [1047, 0.18], [1318, 0.36]].forEach(([freq, offset]) => {
+            const osc  = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, now + offset);
+            gain.gain.setValueAtTime(0,    now + offset);
+            gain.gain.linearRampToValueAtTime(0.22, now + offset + 0.04);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.45);
+            osc.start(now + offset);
+            osc.stop(now  + offset + 0.5);
+        });
+    } catch(e) { /* silencioso si no hay contexto de audio */ }
+}
+
+function _mostrarBannerDespacho(mesa, platos, orderNumber) {
+    // Crear o reutilizar el banner de despacho
+    let banner = document.getElementById('banner-despacho-mesero');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'banner-despacho-mesero';
+        Object.assign(banner.style, {
+            position:     'fixed',
+            top:          '0',
+            left:         '0',
+            right:        '0',
+            zIndex:       '99999',
+            background:   'linear-gradient(135deg,#4a6741,#2e4028)',
+            color:        '#fff',
+            padding:      '18px 20px 14px',
+            boxShadow:    '0 6px 32px rgba(0,0,0,0.28)',
+            fontFamily:   "'DM Sans',sans-serif",
+            display:      'none',
+            flexDirection:'column',
+            gap:          '6px',
+            borderBottom: '3px solid #a3c96e',
+            animation:    'slideDownBanner .35s ease',
+        });
+        document.head.insertAdjacentHTML('beforeend', `
+            <style>
+                @keyframes slideDownBanner {
+                    from { transform: translateY(-100%); opacity: 0; }
+                    to   { transform: translateY(0);    opacity: 1; }
+                }
+                #banner-despacho-mesero .bd-title {
+                    font-size: 15px;
+                    font-weight: 700;
+                    letter-spacing: .2px;
+                }
+                #banner-despacho-mesero .bd-platos {
+                    font-size: 13px;
+                    opacity: .88;
+                    font-weight: 500;
+                }
+                #banner-despacho-mesero .bd-dismiss {
+                    position:absolute; top:10px; right:14px;
+                    background:rgba(255,255,255,.18); border:none;
+                    color:#fff; border-radius:50%; width:26px; height:26px;
+                    font-size:14px; cursor:pointer; line-height:1;
+                    display:flex; align-items:center; justify-content:center;
+                }
+            </style>
+        `);
+        document.body.appendChild(banner);
+    }
+
+    const numText = orderNumber ? ` · ${orderNumber}` : '';
+    banner.innerHTML = `
+        <div class="bd-title">🍽️ Pedido listo para entregar — ${_esc(mesa)}${_esc(numText)}</div>
+        <div class="bd-platos">📋 ${_esc(platos)}</div>
+        <button class="bd-dismiss" onclick="document.getElementById('banner-despacho-mesero').style.display='none'">✕</button>
+    `;
+    banner.style.display      = 'flex';
+    banner.style.animation    = 'none';
+    banner.offsetHeight; // reflow
+    banner.style.animation    = 'slideDownBanner .35s ease';
+
+    // Toast adicional
+    Toast.show(`🚀 Listo para entregar — ${mesa}`, 'ok', 6000);
+
+    // Auto-ocultar después de 12 segundos
+    clearTimeout(banner._autoHide);
+    banner._autoHide = setTimeout(() => {
+        banner.style.display = 'none';
+    }, 12000);
+}
+
+// Helper local de escape (igual al de app.js)
+function _esc(str) {
+    if (typeof str !== 'string') return String(str ?? '');
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+              .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
