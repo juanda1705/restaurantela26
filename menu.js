@@ -1977,8 +1977,6 @@ function _mostrarBannerDespacho(mesa, platos, orderNumber) {
     banner.style.animation    = 'slideDownBanner .35s ease';
 
     // Toast adicional
-    Toast.show(`🚀 Listo para entregar — ${mesa}`, 'ok', 6000);
-
     // Auto-ocultar después de 12 segundos
     clearTimeout(banner._autoHide);
     banner._autoHide = setTimeout(() => {
