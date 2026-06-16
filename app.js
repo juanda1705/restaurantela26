@@ -262,6 +262,7 @@ window.La26 = {
         // ── Notificar al mesero ──────────────────────────────
         try {
             const orden = _allOrders.find(o => o.id === pedidoId);
+            console.log('[Notif] Orden encontrada:', !!orden, pedidoId);
             if (orden) {
                 const mesaDesdeNotes = _extraerMesaDesdeNotes(orden.notes || '');
                 const mesa = mesaDesdeNotes || orden.tables?.label || 'Mesa';
@@ -270,16 +271,25 @@ window.La26 = {
                         const p = _parsearNotes(i.notes);
                         return p.nombrePlato || i.menu_items?.name || '(Plato)';
                     });
-                await supabaseClient.from('waiter_notifications').insert([{
-                    order_id:     pedidoId,
-                    order_number: orden.order_number || '',
-                    mesa:         mesa,
-                    platos:       platos,
-                    leida:        false,
-                    created_at:   new Date().toISOString(),
-                }]);
+                console.log('[Notif] Insertando en waiter_notifications:', { mesa, platos });
+                const { data: notifData, error: notifErr } = await supabaseClient
+                    .from('waiter_notifications')
+                    .insert([{
+                        order_id:     pedidoId,
+                        order_number: orden.order_number || '',
+                        mesa:         mesa,
+                        platos:       platos,
+                        leida:        false,
+                        created_at:   new Date().toISOString(),
+                    }])
+                    .select();
+                if (notifErr) {
+                    console.error('[Notif] ❌ Error al insertar notificación:', notifErr);
+                } else {
+                    console.log('[Notif] ✅ Notificación insertada:', notifData);
+                }
             }
-        } catch(e) { console.warn('[La 26] No se pudo crear notificación mesero:', e); }
+        } catch(e) { console.error('[Notif] ❌ Excepción al notificar mesero:', e); }
         // ────────────────────────────────────────────────────
 
         _mostrarToast('✅ Pedido despachado correctamente', 'success');
