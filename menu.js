@@ -1863,10 +1863,9 @@ function _suscribirNotificacionesCocina() {
                 if (n.leida) continue;
                 if (n.id === _ultimaNotifId) continue;
                 _ultimaNotifId = n.id;
-                console.log('[Notif mesero] 🔔 Nueva notif por polling:', n);
-                _mostrarNotificacionDespacho(n);
-                // Marcar como leída
+                // Marcar como leída PRIMERO para que no se repita aunque falle el display
                 await db.from('waiter_notifications').update({ leida: true }).eq('id', n.id);
+                _mostrarNotificacionDespacho(n);
                 break; // una a la vez
             }
         } catch(e) { console.warn('[Notif mesero] polling excepción:', e); }
