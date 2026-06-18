@@ -1,6 +1,15 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE ADMINISTRACIÓN
-// admin.js · Versión 3.5
+// admin.js · Versión 3.6
+// FIXES v3.6 (nuevos):
+//  [FIX-PEDIDOS] La pantalla "Pedidos" salía vacía por la noche: el
+//             cálculo de la fecha del día tenía el signo de zona horaria
+//             invertido (-5 en vez de +5), así que de noche calculaba el
+//             día de mañana y dejaba los pedidos de hoy fuera del rango.
+//             Además se quitó el filtro .in('status', [...]) que dejaba
+//             por fuera pedidos con estados no listados. Ahora la consulta
+//             es idéntica a la del Dashboard; los cancelados se descartan
+//             en memoria. Por Cobrar = sin pago; Historial de pagados = con pago.
 // FIXES v3.5 (nuevos):
 //  [FIX-CIERRE] El corte del cierre de caja se guarda en localStorage
 //             (persiste al cerrar/reabrir la app), con piso por día.
@@ -2623,7 +2632,11 @@ async function cargarHistorialPedidos() {
 
     try {
         const _ahora     = new Date();
-        const _offsetMs  = -5 * 60 * 60 * 1000;
+        // [v3.6 · FIX-PEDIDOS] Bogotá = UTC-5. Antes este offset tenía el signo
+        // invertido (-5) y por la noche calculaba el día de MAÑANA, dejando los
+        // pedidos de hoy fuera del rango → la pantalla salía vacía. Ahora es
+        // idéntico al Dashboard (que sí funciona).
+        const _offsetMs  = 5 * 60 * 60 * 1000;
         const _hoyLocal  = new Date(_ahora.getTime() - _offsetMs);
         const _yyyy      = _hoyLocal.getUTCFullYear();
         const _mm        = String(_hoyLocal.getUTCMonth() + 1).padStart(2, '0');
@@ -2633,27 +2646,25 @@ async function cargarHistorialPedidos() {
         // [v3.4 · FIX-CIERRE] Corte persistente (localStorage), con piso por día
         const _inicioDiaEfectivo = _resolverInicioDiaEfectivo(_inicioDia);
 
-        // Filtra solo los status válidos del enum (evita error 400 al usar 'canceled'/'cancelled'
-        // que no existen en order_status_enum de esta BD)
-        let query = supabaseClient
+        // [v3.6 · FIX-PEDIDOS] SIN filtro de status en la consulta (igual que el
+        // Dashboard). Antes el .in('status', [...]) dejaba por fuera pedidos con
+        // estados no listados y la pantalla salía vacía. Los cancelados se
+        // descartan en memoria (no en la query, porque 'canceled' no existe en
+        // el enum de esta BD y daría error 400).
+        const { data: ordersRaw, error } = await supabaseClient
             .from('orders')
             .select(`id, order_number, customer_name, total_amount, status, notes, payment_method, table_id,
                      order_items ( quantity, notes, unit_price )`)
             .gte('created_at', _inicioDiaEfectivo)
             .lte('created_at', _finDia)
-            .in('status', ['pending', 'confirmed', 'in_kitchen', 'delivered', 'paid']);
-
-        // [v3.4 · CAMBIO-3/4] El split Pagados/Pendientes ya NO depende de
-        // status='paid' (eso sacaba el pedido de la pantalla de cocina).
-        // Ahora "Pagado" = tiene método de pago registrado (payment_method
-        // o nota [pago]); el filtrado se hace en memoria.
-        query = query.order('created_at', { ascending: false });
-
-        const { data: ordersRaw, error } = await query;
+            .order('created_at', { ascending: false });
         if (error) throw error;
 
-        const _estaPagado = (o) => !!(o.payment_method || _extraerMetodoDeNotes(o.notes || ''));
-        const orders = (ordersRaw || []).filter(o =>
+        const _estaPagado  = (o) => !!(o.payment_method || _extraerMetodoDeNotes(o.notes || ''));
+        const _noCancelado = (ordersRaw || []).filter(o =>
+            o.status !== 'canceled' && o.status !== 'cancelled'
+        );
+        const orders = _noCancelado.filter(o =>
             _vistaHistorialPedidos === 'pagados' ? _estaPagado(o) : !_estaPagado(o)
         );
 
