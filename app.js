@@ -8,7 +8,7 @@
 //  [FIX-MESA] _crearCardHTML: identificadorMesa ahora lee el
 //             número de mesa DESDE NOTES con máxima prioridad.
 //             El formato en notes es "[MESA] Mesa: N" y se
-//             extrae con regex. El JOIN a tables solo se usa
+//             extrae con regex. El JOIN a tables solo se usa 
 //             como último recurso para compatibilidad legacy.
 //
 //             PROBLEMA ORIGINAL:
