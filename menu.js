@@ -1,6 +1,19 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE MESERO
-// menu.js · Versión 7.6
+// menu.js · Versión 7.7
+//
+// CAMBIOS v7.7 — PEDIDO POR PLATO (#5):
+//  El almuerzo ahora se arma POR PLATO. Cada toque de una proteína
+//  crea un plato independiente (3 pechugas = 3 platos). En la pantalla
+//  de revisión, cada plato elige su PRINCIPIO (de los productos tipo
+//  'side'), su NOTA y si va "para llevar". Los principios ya no se
+//  muestran sueltos en el menú. Las bebidas, postres, a la carta y
+//  menú ejecutivo siguen agregándose como ítems sueltos.
+//  Cada plato se guarda como UNA línea de order_items: la proteína
+//  (con precio), con el principio dentro del nombre y la nota del
+//  plato en la nota del ítem → cocina lo ve junto ("Pechuga · Frijol —
+//  sin ensalada"). El recargo de desechable aplica por plato para llevar.
+//  Nuevo estado State.platos y controlador Platos.
 //
 // CAMBIOS v7.6:
 //  [CAMBIO-10] Código secuencial diario LLV-### para pedidos PARA
@@ -125,14 +138,104 @@ function _itemViajaParaLlevar(item, modalidad) {
     return !!item.paraLlevar;
 }
 
-// Recargo total de empaque del carrito según la modalidad actual
+// Recargo total de empaque según la modalidad actual.
+// Cuenta: (1) almuerzos sueltos del cart (ej. menú ejecutivo) para llevar,
+//         (2) cada PLATO (proteína) que va para llevar — cada plato = 1 empaque.
 function calcularRecargoEmpaque(modalidad = _modalidadActual()) {
-    return State.cart.reduce((acc, item) => {
+    const esLlevarTodo = (modalidad === 'llevar' || modalidad === 'domicilio');
+
+    const recargoCart = State.cart.reduce((acc, item) => {
         const slot = State.slots.find(s => s.id === item.slotId);
         if (!slot || !_esAlmuerzo(slot)) return acc;
         if (!_itemViajaParaLlevar(item, modalidad)) return acc;
         return acc + RECARGO_DESECHABLE * item.cantidad;
     }, 0);
+
+    const recargoPlatos = State.platos.reduce((acc, p) => {
+        const viaja = esLlevarTodo || !!p.paraLlevar;
+        return acc + (viaja ? RECARGO_DESECHABLE : 0);
+    }, 0);
+
+    return recargoCart + recargoPlatos;
+}
+
+// Proteínas y principios disponibles (desde el menú real)
+function _proteinas()  { return State.slots.filter(s => s.itemType === 'protein'); }
+function _principios() { return State.slots.filter(s => s.itemType === 'side'); }
+
+// ============================================================
+// [v7.7] CONSTRUCTOR DE PLATOS (almuerzo = proteína + principio + nota)
+// ------------------------------------------------------------
+// Cada toque de una proteína crea un PLATO independiente. El principio
+// y la nota se asignan por plato en la pantalla de revisión. Tres
+// pechugas = tres platos (cada uno con su principio y su nota).
+// ============================================================
+let _platoSeq = 0;
+const Platos = {
+    agregar(proteinaSlotId) {
+        const prot = State.slots.find(s => s.id === proteinaSlotId);
+        if (!prot || !prot.disponible) return;
+        const usados = State.platos.filter(p => p.proteinaSlotId === proteinaSlotId).length;
+        if (prot.porciones < 999 && usados >= prot.porciones) {
+            Toast.error(`Solo quedan ${prot.porciones} porciones de "${prot.nombre}".`);
+            return;
+        }
+        State.platos.push({
+            uid: `pl${++_platoSeq}`,
+            proteinaSlotId,
+            principioSlotId: null,
+            nota: '',
+            paraLlevar: false,
+        });
+        _refrescarTarjeta(proteinaSlotId);
+        _actualizarCartBar();
+        _refrescarSummarySiAbierto();
+    },
+
+    quitarUltimo(proteinaSlotId) {
+        for (let i = State.platos.length - 1; i >= 0; i--) {
+            if (State.platos[i].proteinaSlotId === proteinaSlotId) {
+                State.platos.splice(i, 1);
+                break;
+            }
+        }
+        _refrescarTarjeta(proteinaSlotId);
+        _actualizarCartBar();
+        _refrescarSummarySiAbierto();
+    },
+
+    quitarPorUid(uid) {
+        const idx = State.platos.findIndex(p => p.uid === uid);
+        if (idx === -1) return;
+        const protId = State.platos[idx].proteinaSlotId;
+        State.platos.splice(idx, 1);
+        _refrescarTarjeta(protId);
+        _actualizarCartBar();
+        Cart._renderSummary();
+    },
+
+    setPrincipio(uid, sideSlotId) {
+        const p = State.platos.find(x => x.uid === uid);
+        if (p) p.principioSlotId = sideSlotId || null;
+    },
+
+    setNota(uid, txt) {
+        const p = State.platos.find(x => x.uid === uid);
+        if (p) p.nota = txt;   // se guarda en cada tecla; sin re-render para no perder el foco
+    },
+
+    toggleLlevar(uid, checked) {
+        const p = State.platos.find(x => x.uid === uid);
+        if (!p) return;
+        p.paraLlevar = !!checked;
+        Cart._renderSummary();   // refresca recargo y total (la nota ya está guardada)
+        _actualizarCartBar();
+    },
+};
+
+function _refrescarSummarySiAbierto() {
+    const modal = document.getElementById('order-modal');
+    if (modal?.classList.contains('open')) Cart._renderSummary();
 }
 
 // Estados que permiten edición
@@ -146,7 +249,8 @@ const ITEM_ESTADOS_NO_ELIMINABLES = ['preparing', 'delivered'];
 const State = {
     restaurantId:    null,
     slots:           [],
-    cart:            [],
+    cart:            [],   // ítems sueltos: bebidas, a la carta, postres, menú ejecutivo
+    platos:          [],   // [v7.7] almuerzos armados por plato (proteína + principio + nota)
     filtro:          'todos',
     isSubmitting:    false,
     realtimeChannel: null,
@@ -367,19 +471,28 @@ async function _generarNumeroOrden(modalidad) {
 }
 
 function calcularTotal() {
-    const base = State.cart.reduce((acc, item) => {
+    const baseCart = State.cart.reduce((acc, item) => {
         const slot = State.slots.find(s => s.id === item.slotId);
         return acc + (slot ? slot.precio * item.cantidad : 0);
     }, 0);
-    // [v7.6 · CAMBIO-11] Suma el recargo por desechable de los almuerzos para llevar
-    return base + calcularRecargoEmpaque();
+    // [v7.7] Suma el precio de la proteína de cada plato
+    const basePlatos = State.platos.reduce((acc, p) => {
+        const prot = State.slots.find(s => s.id === p.proteinaSlotId);
+        return acc + (prot ? prot.precio : 0);
+    }, 0);
+    // [v7.6 · CAMBIO-11] + recargo por desechable de los almuerzos para llevar
+    return baseCart + basePlatos + calcularRecargoEmpaque();
 }
 function calcularCantidadTotal() {
-    return State.cart.reduce((acc, item) => acc + item.cantidad, 0);
+    const qCart = State.cart.reduce((acc, item) => acc + item.cantidad, 0);
+    return qCart + State.platos.length;   // [v7.7] cada plato cuenta como 1
 }
 function slotsFiltrados() {
-    if (State.filtro === 'todos') return State.slots;
-    return State.slots.filter(s => s.itemType === State.filtro);
+    // [v7.7] Los principios (side) ya no se muestran sueltos en el menú:
+    // se eligen por plato. Se ocultan de la grilla.
+    const visibles = State.slots.filter(s => s.itemType !== 'side');
+    if (State.filtro === 'todos') return visibles;
+    return visibles.filter(s => s.itemType === State.filtro);
 }
 
 // ============================================================
@@ -570,7 +683,8 @@ function _renderizarCatsBar() {
     btnTodos.onclick     = () => _cambiarFiltro('todos');
     bar.appendChild(btnTodos);
 
-    const tipos = [...new Set(State.slots.map(s => s.itemType))].filter(t => CATEGORIAS[t]);
+    // [v7.7] 'side' (Principio) se elige por plato, no se muestra como filtro suelto
+    const tipos = [...new Set(State.slots.map(s => s.itemType))].filter(t => CATEGORIAS[t] && t !== 'side');
     tipos.sort((a,b) => (CATEGORIAS[a]?.orden||99) - (CATEGORIAS[b]?.orden||99))
         .forEach(tipo => {
             const cfg = CATEGORIAS[tipo];
@@ -627,8 +741,12 @@ function _renderizarMenu() {
 function _crearTarjeta(slot) {
     const disponible = slot.disponible && slot.porciones > 0;
     const pocas      = disponible && slot.porciones > 0 && slot.porciones < 999 && slot.porciones <= 5;
+    const esProteina = slot.itemType === 'protein';
     const enCarrito  = State.cart.find(c => c.slotId === slot.id);
-    const qty        = enCarrito ? enCarrito.cantidad : 0;
+    // [v7.7] Para proteínas, la "cantidad" es el número de platos con esa proteína
+    const qty        = esProteina
+        ? State.platos.filter(p => p.proteinaSlotId === slot.id).length
+        : (enCarrito ? enCarrito.cantidad : 0);
 
     let badgeHTML = '';
     if (!disponible) badgeHTML = `<span class="badge-agotado">Agotado</span>`;
@@ -640,12 +758,16 @@ function _crearTarjeta(slot) {
 
     let ctrlHTML = '';
     if (disponible) {
+        // [v7.7] Proteínas → constructor de platos. Demás ítems → carrito normal.
+        const fnAdd   = esProteina ? `Platos.agregar('${slot.id}')`      : `Cart.agregar('${slot.id}')`;
+        const fnMenos = esProteina ? `Platos.quitarUltimo('${slot.id}')` : `Cart.cambiar('${slot.id}',-1)`;
+        const fnMas   = esProteina ? `Platos.agregar('${slot.id}')`      : `Cart.cambiar('${slot.id}',+1)`;
         ctrlHTML = qty === 0
-            ? `<button class="btn-add" onclick="Cart.agregar('${slot.id}')" aria-label="Agregar ${slot.nombre}">+</button>`
+            ? `<button class="btn-add" onclick="${fnAdd}" aria-label="Agregar ${slot.nombre}">+</button>`
             : `<div class="qty-chip">
-                   <button onclick="Cart.cambiar('${slot.id}',-1)" aria-label="Quitar">−</button>
+                   <button onclick="${fnMenos}" aria-label="Quitar">−</button>
                    <span>${qty}</span>
-                   <button onclick="Cart.cambiar('${slot.id}',+1)" aria-label="Agregar">+</button>
+                   <button onclick="${fnMas}" aria-label="Agregar">+</button>
                </div>`;
     }
 
@@ -711,7 +833,7 @@ const Cart = {
     },
 
     abrir() {
-        if (State.cart.length === 0) return;
+        if (State.cart.length === 0 && State.platos.length === 0) return;
         this._renderSummary();
         document.getElementById('order-modal').classList.add('open');
         document.body.style.overflow = 'hidden';
@@ -727,11 +849,61 @@ const Cart = {
         const totalEl = document.getElementById('summary-total');
         if (!listEl) return;
         listEl.innerHTML = '';
-        if (State.cart.length === 0) {
+
+        if (State.cart.length === 0 && State.platos.length === 0) {
             listEl.innerHTML = `<div style="text-align:center;padding:36px 0;"><p style="font-size:13px;color:var(--ink-ghost);">Tu pedido está vacío.</p></div>`;
             if (totalEl) totalEl.textContent = '$0';
             return;
         }
+
+        // ── [v7.7] PLATOS (almuerzos): proteína + principio + nota + para llevar ──
+        const principios = _principios();
+        const modLlevarTodo = ['llevar', 'domicilio'].includes(_modalidadActual());
+        State.platos.forEach((p, i) => {
+            const prot = State.slots.find(s => s.id === p.proteinaSlotId);
+            if (!prot) return;
+            const opciones = [`<option value="">Sin principio</option>`]
+                .concat(principios.map(s =>
+                    `<option value="${s.id}" ${p.principioSlotId === s.id ? 'selected' : ''}>${s.nombre}</option>`
+                )).join('');
+
+            const marcado    = modLlevarTodo || !!p.paraLlevar;
+            const checkboxHtml = modLlevarTodo
+                ? `<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-soft,#666);">
+                       <input type="checkbox" checked disabled style="width:16px;height:16px;">
+                       Para llevar (todo el pedido) · +${formatCOP(RECARGO_DESECHABLE)} empaque
+                   </label>`
+                : `<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-soft,#666);cursor:pointer;">
+                       <input type="checkbox" ${marcado ? 'checked' : ''}
+                           onchange="Platos.toggleLlevar('${p.uid}', this.checked)" style="width:16px;height:16px;">
+                       Este plato es para llevar (+${formatCOP(RECARGO_DESECHABLE)} empaque)
+                   </label>`;
+
+            const row = document.createElement('div');
+            row.className = 'summary-row';
+            row.style.cssText = 'flex-direction:column;align-items:stretch;gap:8px;';
+            row.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                    <p class="summary-name">Plato ${i + 1} · ${prot.nombre}</p>
+                    <span style="display:flex;align-items:center;gap:8px;">
+                        <span class="summary-price">${prot.precio > 0 ? formatCOP(prot.precio) : '—'}</span>
+                        <button onclick="Platos.quitarPorUid('${p.uid}')" aria-label="Quitar plato"
+                            style="background:none;border:none;color:var(--danger,#c0392b);font-size:18px;line-height:1;cursor:pointer;padding:0 2px;">×</button>
+                    </span>
+                </div>
+                <select onchange="Platos.setPrincipio('${p.uid}', this.value)"
+                    style="width:100%;font-size:13px;padding:7px 10px;border-radius:8px;border:1.5px solid var(--line,#e3e0d8);background:#fff;font-family:inherit;">
+                    ${opciones}
+                </select>
+                <input type="text" value="${(p.nota || '').replace(/"/g, '&quot;')}"
+                    oninput="Platos.setNota('${p.uid}', this.value)"
+                    placeholder="Nota de este plato (opcional)"
+                    style="width:100%;font-size:13px;padding:7px 10px;border-radius:8px;border:1.5px solid var(--line,#e3e0d8);font-family:inherit;">
+                ${checkboxHtml}`;
+            listEl.appendChild(row);
+        });
+
+        // ── Ítems sueltos (bebidas, a la carta, postres, menú ejecutivo) ──
         State.cart.forEach(item => {
             const slot = State.slots.find(s => s.id === item.slotId);
             if (!slot) return;
@@ -755,7 +927,7 @@ const Cart = {
             rowR.innerHTML = `
                 <div style="flex:1;min-width:0;">
                     <p class="summary-name">Empaque desechable</p>
-                    <p class="summary-qty">${cantAlmuerzos} × ${formatCOP(RECARGO_DESECHABLE)} · pedido para llevar</p>
+                    <p class="summary-qty">${cantAlmuerzos} × ${formatCOP(RECARGO_DESECHABLE)} · para llevar</p>
                 </div>
                 <span class="summary-price">${formatCOP(recargo)}</span>`;
             listEl.appendChild(rowR);
@@ -918,7 +1090,7 @@ async function _descontarPorciones(cartSnapshot) {
 const Order = {
     async enviar() {
         if (State.isSubmitting) return;
-        if (State.cart.length === 0) { Toast.error('Agrega al menos un plato al pedido.'); return; }
+        if (State.cart.length === 0 && State.platos.length === 0) { Toast.error('Agrega al menos un plato al pedido.'); return; }
 
         const btnEl       = document.getElementById('btn-enviar');
         const mesaEl      = document.getElementById('form-mesa');
@@ -950,7 +1122,9 @@ const Order = {
 
         // [FIX-PORCIONES-CRITICO] Capturar snapshot del carrito ANTES de limpiarlo
         // para usarlo en _descontarPorciones() después de confirmar la orden.
-        const cartSnapshot = State.cart.map(item => ({ ...item }));
+        // [v7.7] Incluye también la proteína de cada plato (cada plato = 1 porción).
+        const cartSnapshot = State.cart.map(item => ({ ...item }))
+            .concat(State.platos.map(p => ({ slotId: p.proteinaSlotId, cantidad: 1 })));
 
         try {
             if (!State.restaurantId) await _resolverRestaurant();
@@ -1018,6 +1192,40 @@ const Order = {
                 };
             }).filter(Boolean);
 
+            // [v7.7] PLATOS → una línea por plato (la proteína es la que tiene precio;
+            // el principio va dentro del nombre y la nota del plato en la nota del ítem).
+            const esLlevarTodo = (modalidad === 'llevar' || modalidad === 'domicilio');
+            State.platos.forEach(p => {
+                const prot = State.slots.find(s => s.id === p.proteinaSlotId);
+                if (!prot) return;
+                const sideSlot = p.principioSlotId ? State.slots.find(s => s.id === p.principioSlotId) : null;
+
+                let menuItemId = prot.menuItemId;
+                if (!menuItemId && listaItems.length > 0) {
+                    const nb  = (prot.nombre || '').toLowerCase().trim();
+                    const ex  = listaItems.find(m => m.name.toLowerCase().trim() === nb);
+                    const par = !ex && listaItems.find(m => m.name.toLowerCase().includes(nb.split(' ')[0]));
+                    menuItemId = ex?.id || par?.id || fallbackId;
+                }
+
+                const llevaEmpaque = esLlevarTodo || !!p.paraLlevar;
+                const precioFinal  = (prot.precio || 0) + (llevaEmpaque ? RECARGO_DESECHABLE : 0);
+                const nombrePlato  = prot.nombre + (sideSlot ? ` · ${sideSlot.nombre}` : '');
+
+                const partesNota = [];
+                if (p.nota && p.nota.trim()) partesNota.push(p.nota.trim());
+                if (llevaEmpaque)            partesNota.push('Empaque desechable incluido');
+                const notaItem = `[nombre]${nombrePlato}${partesNota.length ? ' | ' + partesNota.join(' · ') : ''}`;
+
+                payload.push({
+                    order_id: orden.id, menu_item_id: menuItemId,
+                    quantity: 1, unit_price: precioFinal,
+                    item_status: 'pending',
+                    product_name: nombrePlato,
+                    notes: notaItem,
+                });
+            });
+
             if (payload.length > 0) {
                 const { error: errItems } = await db.from('order_items').insert(payload);
                 if (errItems) {
@@ -1065,7 +1273,8 @@ const Order = {
         const el = document.getElementById('success-order-no');
         if (el) el.textContent = numeroOrden;
         document.getElementById('success-modal').classList.add('open');
-        State.cart = [];
+        State.cart   = [];
+        State.platos = [];   // [v7.7] limpiar platos armados
         _actualizarCartBar();
         // [v7.5 · CAMBIO-1] Dejar el formulario en blanco para el próximo pedido
         _resetFormularioPedido();
@@ -1131,6 +1340,14 @@ function _actualizarSlotDesdeRealtime(item) {
             State.cart.splice(idx2, 1);
             _actualizarCartBar();
             Toast.error(`"${nombre}" se agotó y fue removido de tu pedido.`, 5000);
+        }
+        // [v7.7] También quitar los platos que usaban esta proteína
+        const platosAntes = State.platos.length;
+        State.platos = State.platos.filter(p => p.proteinaSlotId !== item.id);
+        if (State.platos.length !== platosAntes) {
+            _actualizarCartBar();
+            _refrescarSummarySiAbierto();
+            Toast.error(`"${State.slots[idx].nombre}" se agotó y se quitó de tus platos.`, 5000);
         }
     }
 }
