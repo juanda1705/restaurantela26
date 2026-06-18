@@ -155,7 +155,7 @@ window.La26 = {
                     total_amount,
                     created_at,
                     notes,
-                    tables ( number, label ),
+                    tables!left ( number, label ),
                     order_items (
                         id,
                         order_id,
