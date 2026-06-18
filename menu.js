@@ -896,19 +896,14 @@ const Cart = {
                        </label>`;
 
                 const card = document.createElement('div');
-                card.style.cssText = 'margin:10px 16px;border:1.5px solid var(--oliva-bd,#c2d09c);border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 2px 8px rgba(74,90,40,0.07);';
+                card.className = 'plato-card';
                 card.innerHTML = `
-                    <div style="display:flex;align-items:center;justify-content:space-between;
-                        padding:13px 16px;background:var(--oliva-pale,#f0f3e8);
-                        border-bottom:1.5px solid var(--oliva-bd,#c2d09c);">
+                    <div class="plato-card-head">
                         <div style="display:flex;align-items:center;gap:10px;">
-                            <span style="display:flex;align-items:center;justify-content:center;
-                                width:30px;height:30px;border-radius:50%;
-                                background:var(--oliva,#4a5a28);color:#fff;
-                                font-size:14px;font-weight:700;flex-shrink:0;">${i + 1}</span>
+                            <span class="plato-card-num">${i + 1}</span>
                             <div>
-                                <div style="font-size:15px;font-weight:600;color:var(--ink);">${prot.nombre}</div>
-                                <div style="font-size:12px;color:${principio ? 'var(--oliva)' : 'var(--ink-ghost)'};font-weight:500;margin-top:1px;">
+                                <div class="plato-card-nombre">${prot.nombre}</div>
+                                <div class="plato-card-sub" style="color:${principio ? 'var(--oliva)' : 'var(--ink-ghost)'};">
                                     ${principio ? `con ${principio.nombre}` : 'sin principio aún'}
                                 </div>
                             </div>
@@ -916,33 +911,25 @@ const Cart = {
                         <div style="display:flex;align-items:center;gap:10px;">
                             ${prot.precio > 0 ? `<span style="font-family:'Cormorant Garamond',serif;font-size:1.2rem;font-weight:600;color:var(--oliva);">${formatCOP(prot.precio)}</span>` : ''}
                             <button onclick="Platos.quitarPorUid('${p.uid}')" aria-label="Quitar"
-                                style="width:30px;height:30px;border-radius:50%;
-                                    background:rgba(184,50,50,0.10);color:#b83232;
-                                    border:1px solid rgba(184,50,50,0.20);font-size:17px;
-                                    cursor:pointer;display:flex;align-items:center;justify-content:center;">×</button>
+                                style="width:30px;height:30px;border-radius:50%;background:rgba(184,50,50,0.10);color:#b83232;border:1px solid rgba(184,50,50,0.20);font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;">×</button>
                         </div>
                     </div>
-                    <div style="padding:13px 16px;border-bottom:1px solid var(--border-lt);">
-                        <div style="font-size:10.5px;font-weight:700;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">🥘 Principio</div>
-                        <select onchange="Platos.setPrincipio('${p.uid}', this.value)"
-                            style="width:100%;font-size:14px;padding:11px 14px;border-radius:10px;
-                                border:1.5px solid var(--border);background:#fff;
-                                font-family:inherit;color:var(--ink);">
+                    <div class="plato-card-section">
+                        <div class="plato-section-label">🥘 Principio</div>
+                        <select class="plato-select" onchange="Platos.setPrincipio('${p.uid}', this.value)">
                             ${opciones}
                         </select>
                     </div>
-                    <div style="padding:13px 16px;border-bottom:1px solid var(--border-lt);">
-                        <div style="font-size:10.5px;font-weight:700;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">✏️ Nota del plato</div>
-                        <input type="text" value="${(p.nota || '').replace(/"/g, '&quot;')}"
+                    <div class="plato-card-section">
+                        <div class="plato-section-label">✏️ Nota del plato</div>
+                        <input class="plato-input" type="text"
+                            value="${(p.nota || '').replace(/"/g, '&quot;')}"
                             oninput="Platos.setNota('${p.uid}', this.value)"
-                            placeholder="Ej: sin ensalada, sin cebolla…"
-                            style="width:100%;font-size:14px;padding:11px 14px;border-radius:10px;
-                                border:1.5px solid var(--border);font-family:inherit;
-                                background:#fff;color:var(--ink);outline:none;"
-                            onfocus="this.style.borderColor='var(--oliva)'"
-                            onblur="this.style.borderColor='var(--border)'">
+                            placeholder="Ej: sin ensalada, sin cebolla…">
                     </div>
-                    <div style="padding:12px 16px;">${seccionLlevar}</div>`;
+                    <div class="plato-card-section">
+                        ${seccionLlevar}
+                    </div>`;
 
                 listEl.appendChild(card);
             });
