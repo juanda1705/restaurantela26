@@ -2558,15 +2558,15 @@ async function cargarHistorialPedidos() {
         const _cierreDesde = sessionStorage.getItem('cierre_desde');
         const _inicioDiaEfectivo = _cierreDesde || _inicioDia;
 
-        // Pendientes = cualquier status que NO sea 'paid', 'canceled', 'cancelled'
-        // Pagados    = status 'paid'
+        // Filtra solo los status válidos del enum (evita error 400 al usar 'canceled'/'cancelled'
+        // que no existen en order_status_enum de esta BD)
         let query = supabaseClient
             .from('orders')
             .select(`id, order_number, customer_name, total_amount, status, notes, payment_method, table_id,
                      order_items ( quantity, notes, unit_price )`)
             .gte('created_at', _inicioDiaEfectivo)
             .lte('created_at', _finDia)
-            .not('status', 'in', '("canceled","cancelled")');
+            .in('status', ['pending', 'confirmed', 'in_kitchen', 'delivered', 'paid']);
 
         if (_vistaHistorialPedidos === 'pagados') {
             query = query.eq('status', 'paid');
