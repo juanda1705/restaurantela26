@@ -1,6 +1,17 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE ADMINISTRACIÓN
-// admin.js · Versión 3.4
+// admin.js · Versión 3.5
+// FIXES v3.5 (nuevos):
+//  [FIX-CIERRE] El corte del cierre de caja se guarda en localStorage
+//             (persiste al cerrar/reabrir la app), con piso por día.
+//             Helper _resolverInicioDiaEfectivo().
+//  [CAMBIO-A] La tabla "Historial de Facturación" se quitó del Dashboard
+//             (ahora vive en la pestaña "Pedidos"). Los KPIs por método
+//             de pago se calculan SIEMPRE, fuera del bloque de la tabla.
+//  [CAMBIO-B] revertirPagoOrden(): botón "↩️ Por cobrar" en los pedidos
+//             pagados para deshacer un pago registrado por error. Quita
+//             payment_method y resta del acumulado. NO toca el status,
+//             así que no afecta la pantalla de cocina.
 // FIXES v3.4 (nuevos):
 //  [CAMBIO-3] registrarMetodoPago ya NO marca status='paid'. El pago
 //             se guarda solo en payment_method (+ nota [pago]) para que
@@ -242,6 +253,29 @@ async function cargarDashboardReal() {
 
         const elPedidos2 = document.getElementById('total-pedidos');
         if (elPedidos2) elPedidos2.textContent = `${ordenesValidas.length} pedidos`;
+
+        // [v3.5 · CAMBIO-A] KPIs por método de pago (Efectivo / Transferencia /
+        // Fiado). Se calculan SIEMPRE, independientemente de la tabla del
+        // Dashboard (que se movió a la pestaña "Pedidos"). Antes este cálculo
+        // vivía DENTRO del bloque de la tabla y, al quitarla, los KPIs habrían
+        // quedado en cero.
+        {
+            let _ef = 0, _tr = 0, _fi = 0;
+            ordenesValidas.forEach(ord => {
+                const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
+                const monto  = parseFloat(ord.total_amount) || 0;
+                if (metodo === 'efectivo')           _ef += monto;
+                else if (metodo === 'transferencia') _tr += monto;
+                else if (metodo === 'fiado')         _fi += monto;
+            });
+            sessionStorage.setItem('pm_efectivo',      String(_ef));
+            sessionStorage.setItem('pm_transferencia', String(_tr));
+            sessionStorage.setItem('pm_fiado',         String(_fi));
+            totalEfectivo      = _ef;
+            totalTransferencia = _tr;
+            totalFiado         = _fi;
+            renderizarTotales();
+        }
 
         const tbodyFacturas = document.getElementById('tabla-facturas');
         if (tbodyFacturas) {
@@ -2732,6 +2766,11 @@ async function cargarHistorialPedidos() {
                             style="flex:1;min-width:60px;background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.28);color:var(--blue);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
                             ✏️ Editar
                         </button>
+                        ${metodo ? `<button onclick="revertirPagoOrden('${ord.id}')"
+                            style="flex:1;min-width:60px;background:var(--amber-lt);border:1.5px solid rgba(154,108,26,.28);color:var(--amber);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;"
+                            title="Quitar el pago y devolver el pedido a Por cobrar">
+                            ↩️ Por cobrar
+                        </button>` : ''}
                         <button onclick="eliminarComandaReal('${ord.id}', '${ord.order_number}')"
                             style="background:var(--red-lt,#fff0f0);border:1.5px solid rgba(185,28,28,.22);color:var(--red);border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;">
                             🗑️
@@ -2828,5 +2867,56 @@ async function cambiarMetodoPago(orderId) {
     } catch (err) {
         console.error('[La 26] Error cambiando método de pago:', err);
         Toast.error('No se pudo cambiar el método de pago.');
+    }
+}
+
+// ============================================================
+// [v3.5 · CAMBIO-B] DEVOLVER UN PEDIDO PAGADO A "POR COBRAR"
+// ------------------------------------------------------------
+// Para cuando el administrador registró el pago en la orden
+// equivocada o por error: quita el método de pago (payment_method
+// = null y borra la nota [pago]) y resta el monto de los
+// acumulados por método. El pedido vuelve a aparecer en "Por
+// cobrar". NO toca el status, así que NO afecta la pantalla de
+// cocina (un pedido para llevar pagado de una vez sigue en cocina
+// hasta que se despache).
+// ============================================================
+async function revertirPagoOrden(orderId) {
+    if (!confirm('¿Devolver este pedido a "Por cobrar"?\nSe quitará el método de pago registrado.')) return;
+    try {
+        const { data: ordData, error: errRead } = await supabaseClient
+            .from('orders')
+            .select('total_amount, notes, payment_method')
+            .eq('id', orderId)
+            .single();
+        if (errRead) throw errRead;
+
+        const monto        = parseFloat(ordData.total_amount) || 0;
+        const metodoAnt    = ordData.payment_method || _extraerMetodoDeNotes(ordData.notes || '');
+        const notesLimpias = (ordData.notes || '').replace(/\|\[pago\][^|]*/g, '').trimEnd() || null;
+
+        const { error } = await supabaseClient
+            .from('orders')
+            .update({ payment_method: null, notes: notesLimpias })
+            .eq('id', orderId);
+        if (error) throw error;
+
+        // Restar del acumulado del método anterior
+        if (metodoAnt) {
+            const key  = `pm_${metodoAnt}`;
+            const acum = parseFloat(sessionStorage.getItem(key) || '0');
+            sessionStorage.setItem(key, String(Math.max(0, acum - monto)));
+            totalEfectivo      = parseFloat(sessionStorage.getItem('pm_efectivo')      || '0');
+            totalTransferencia = parseFloat(sessionStorage.getItem('pm_transferencia') || '0');
+            totalFiado         = parseFloat(sessionStorage.getItem('pm_fiado')         || '0');
+            renderizarTotales();
+        }
+
+        Toast.ok('Pedido devuelto a "Por cobrar".');
+        cargarHistorialPedidos();
+
+    } catch (err) {
+        console.error('[La 26] Error devolviendo a por cobrar:', err);
+        Toast.error('No se pudo devolver el pedido a "Por cobrar".');
     }
 }
