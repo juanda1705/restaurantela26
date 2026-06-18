@@ -178,6 +178,29 @@ async function _buildTableMap() {
 
     return map;   // mapa vacío → fallback al UUID truncado
 }
+
+// ============================================================
+// [v3.4 · FIX-CIERRE] CORTE DEL ÚLTIMO CIERRE — PERSISTENTE
+// ------------------------------------------------------------
+// Antes el corte (cierre_desde) se guardaba en sessionStorage,
+// que se borra al cerrar la pestaña / salir de la app. Por eso,
+// tras cerrar caja y volver a entrar, reaparecían las ventas del
+// día (el dashboard volvía a contar desde las 00:00).
+//
+// Ahora se lee desde localStorage (persiste entre sesiones del
+// mismo dispositivo) con respaldo a sessionStorage para la
+// transición. Solo se aplica si el corte es de HOY; si es de un
+// día anterior se usa el inicio del día, para que cada jornada
+// arranque limpia sin arrastrar el corte viejo.
+// ============================================================
+function _resolverInicioDiaEfectivo(inicioDiaISO) {
+    const cierreDesde = localStorage.getItem('cierre_desde')
+                     || sessionStorage.getItem('cierre_desde');
+    if (!cierreDesde) return inicioDiaISO;
+    const tsCierre = new Date(cierreDesde).getTime();
+    const tsInicio = new Date(inicioDiaISO).getTime();
+    return (isFinite(tsCierre) && tsCierre > tsInicio) ? cierreDesde : inicioDiaISO;
+}
 // ============================================================
 // 1. DASHBOARD — CONTABILIDAD Y COMANDAS
 // [FIX-10] Se agrega consulta de mesas para resolver table_id
@@ -193,8 +216,8 @@ async function cargarDashboardReal() {
         const _inicioDia = `${_yyyy}-${_mm}-${_dd}T00:00:00-05:00`;
         const _finDia    = `${_yyyy}-${_mm}-${_dd}T23:59:59-05:00`;
 
-        const _cierreDesde = sessionStorage.getItem('cierre_desde');
-        const _inicioDiaEfectivo = _cierreDesde || _inicioDia;
+        // [v3.4 · FIX-CIERRE] Corte persistente (localStorage), con piso por día
+        const _inicioDiaEfectivo = _resolverInicioDiaEfectivo(_inicioDia);
 
         // [FIX-10] Cargar mapa de mesas en paralelo con las órdenes
         const [{ data: orders, error }, tableMap] = await Promise.all([
@@ -1516,7 +1539,11 @@ async function realizarCierre() {
     }
 
     const ahoraCierre = new Date().toISOString();
-    sessionStorage.setItem('cierre_desde', ahoraCierre);
+    // [v3.4 · FIX-CIERRE] Persistir el corte en localStorage para que
+    // sobreviva al cerrar/reabrir la app. Se borra el de sessionStorage
+    // (versión vieja) para que no haya dos fuentes en conflicto.
+    localStorage.setItem('cierre_desde', ahoraCierre);
+    sessionStorage.removeItem('cierre_desde');
 
     ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(k));
     totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
@@ -2569,8 +2596,8 @@ async function cargarHistorialPedidos() {
         const _dd        = String(_hoyLocal.getUTCDate()).padStart(2, '0');
         const _inicioDia = `${_yyyy}-${_mm}-${_dd}T00:00:00-05:00`;
         const _finDia    = `${_yyyy}-${_mm}-${_dd}T23:59:59-05:00`;
-        const _cierreDesde = sessionStorage.getItem('cierre_desde');
-        const _inicioDiaEfectivo = _cierreDesde || _inicioDia;
+        // [v3.4 · FIX-CIERRE] Corte persistente (localStorage), con piso por día
+        const _inicioDiaEfectivo = _resolverInicioDiaEfectivo(_inicioDia);
 
         // Filtra solo los status válidos del enum (evita error 400 al usar 'canceled'/'cancelled'
         // que no existen en order_status_enum de esta BD)
