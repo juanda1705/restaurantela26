@@ -1,9 +1,19 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE MESERO
-// menu.js · Versión 7.5
+// menu.js · Versión 7.6
+//
+// CAMBIOS v7.6:
+//  [CAMBIO-10] Código secuencial diario LLV-### para pedidos PARA
+//    LLEVAR / DOMICILIO (reinicia cada día). Los pedidos en mesa
+//    conservan su número aleatorio. Ver _generarNumeroOrden().
+//  [CAMBIO-11] Recargo de $1.000 por desechable a cada almuerzo
+//    (proteína / menú ejecutivo) que va para llevar. Se carga dentro
+//    del unit_price del ítem para que el total cuadre y se conserve
+//    al editar. Se muestra como línea aparte en el resumen del pedido.
+//    NOTA: lógica preparada para marcar ítems sueltos (#12) más adelante.
 //
 // CAMBIOS v7.5:
-//  [CAMBIO-1] Al enviar un pedido se reinicia TODO el formulario 
+//  [CAMBIO-1] Al enviar un pedido se reinicia TODO el formulario
 //    (mesa, nombre del cliente, notas, dirección) y la modalidad
 //    vuelve a "mesa". Antes el número de mesa y el nombre quedaban
 //    pegados del pedido anterior. Nuevo helper _resetFormularioPedido()
@@ -86,6 +96,44 @@ const CATEGORIAS = {
 };
 
 const ITEM_TYPES_VALIDOS = ['executive_lunch','a_la_carte','drink','dessert','side'];
+
+// ============================================================
+// [v7.6 · CAMBIO-11] RECARGO POR DESECHABLE (pedidos para llevar)
+// ------------------------------------------------------------
+// $1.000 por cada ALMUERZO/PROTEÍNA que se va para llevar
+// (es el costo del empaque desechable). NO aplica a bebidas,
+// principios incluidos, postres ni platos a la carta.
+// ============================================================
+const RECARGO_DESECHABLE = 1000;
+const TIPOS_ALMUERZO     = ['protein', 'executive_lunch'];
+
+function _esAlmuerzo(slot) {
+    return !!slot && TIPOS_ALMUERZO.includes(slot.itemType);
+}
+
+// Modalidad actualmente seleccionada en el formulario (default 'mesa')
+function _modalidadActual() {
+    const r = document.querySelector('input[name="form-modalidad"]:checked');
+    return r?.value || 'mesa';
+}
+
+// ¿Un ítem del carrito viaja para llevar?
+// - Si todo el pedido es 'llevar'/'domicilio' → sí.
+// - Si el ítem fue marcado individualmente (item.paraLlevar) → sí. (#12, siguiente paso)
+function _itemViajaParaLlevar(item, modalidad) {
+    if (modalidad === 'llevar' || modalidad === 'domicilio') return true;
+    return !!item.paraLlevar;
+}
+
+// Recargo total de empaque del carrito según la modalidad actual
+function calcularRecargoEmpaque(modalidad = _modalidadActual()) {
+    return State.cart.reduce((acc, item) => {
+        const slot = State.slots.find(s => s.id === item.slotId);
+        if (!slot || !_esAlmuerzo(slot)) return acc;
+        if (!_itemViajaParaLlevar(item, modalidad)) return acc;
+        return acc + RECARGO_DESECHABLE * item.cantidad;
+    }, 0);
+}
 
 // Estados que permiten edición
 const ESTADOS_EDITABLES = ['pending', 'preparing', 'confirmed'];
@@ -289,11 +337,42 @@ function todayISO() {
 function generarNumeroOrden() {
     return `LA26-${Math.floor(10000000 + Math.random() * 89999999)}`;
 }
+
+// [v7.6 · CAMBIO-10] Código secuencial diario para pedidos PARA LLEVAR/DOMICILIO.
+// Formato LLV-001, LLV-002… Reinicia cada día (cuenta desde las 00:00 Bogotá).
+// Los pedidos en mesa conservan su número aleatorio normal.
+async function _generarNumeroOrden(modalidad) {
+    if (modalidad !== 'llevar' && modalidad !== 'domicilio') {
+        return generarNumeroOrden();
+    }
+    try {
+        const hoy    = todayISO();
+        const manana = new Date(new Date(`${hoy}T05:00:00Z`).getTime() + 86400000)
+                         .toISOString().slice(0, 10);
+        let q = db.from('orders')
+            .select('notes')
+            .gte('created_at', `${hoy}T05:00:00Z`)
+            .lt('created_at',  `${manana}T05:00:00Z`);
+        if (State.restaurantId) q = q.eq('restaurant_id', State.restaurantId);
+        const { data, error } = await q;
+        if (error) throw error;
+        const n = (data || []).filter(o =>
+            /\[PARA LLEVAR\]|\[DOMICILIO\]/.test(o.notes || '')
+        ).length + 1;
+        return `LLV-${String(n).padStart(3, '0')}`;
+    } catch (err) {
+        console.warn('[La 26] No se pudo generar código de llevar, uso aleatorio:', err.message);
+        return generarNumeroOrden();
+    }
+}
+
 function calcularTotal() {
-    return State.cart.reduce((acc, item) => {
+    const base = State.cart.reduce((acc, item) => {
         const slot = State.slots.find(s => s.id === item.slotId);
         return acc + (slot ? slot.precio * item.cantidad : 0);
     }, 0);
+    // [v7.6 · CAMBIO-11] Suma el recargo por desechable de los almuerzos para llevar
+    return base + calcularRecargoEmpaque();
 }
 function calcularCantidadTotal() {
     return State.cart.reduce((acc, item) => acc + item.cantidad, 0);
@@ -666,6 +745,22 @@ const Cart = {
                 <span class="summary-price">${slot.precio > 0 ? formatCOP(slot.precio * item.cantidad) : '—'}</span>`;
             listEl.appendChild(row);
         });
+
+        // [v7.6 · CAMBIO-11] Línea del recargo por desechable (solo si aplica)
+        const recargo = calcularRecargoEmpaque();
+        if (recargo > 0) {
+            const cantAlmuerzos = recargo / RECARGO_DESECHABLE;
+            const rowR = document.createElement('div');
+            rowR.className = 'summary-row';
+            rowR.innerHTML = `
+                <div style="flex:1;min-width:0;">
+                    <p class="summary-name">Empaque desechable</p>
+                    <p class="summary-qty">${cantAlmuerzos} × ${formatCOP(RECARGO_DESECHABLE)} · pedido para llevar</p>
+                </div>
+                <span class="summary-price">${formatCOP(recargo)}</span>`;
+            listEl.appendChild(rowR);
+        }
+
         if (totalEl) totalEl.textContent = formatCOP(calcularTotal());
     },
 };
@@ -879,7 +974,8 @@ const Order = {
             if (mesero) notaCocina += ` | Mesero: ${mesero}`;
             if (notas)  notaCocina += ` | Nota: ${notas}`;
 
-            const numeroOrden = generarNumeroOrden();
+            // [v7.6 · CAMBIO-10] Código diario LLV-### para llevar/domicilio; aleatorio para mesa
+            const numeroOrden = await _generarNumeroOrden(modalidad);
             const total       = calcularTotal();
 
             const { data: orden, error: errOrd } = await db.from('orders').insert([{
@@ -908,12 +1004,17 @@ const Order = {
                     const par = !ex && listaItems.find(m => m.name.toLowerCase().includes(nb.split(' ')[0]));
                     menuItemId = ex?.id || par?.id || fallbackId;
                 }
+                // [v7.6 · CAMBIO-11] Cargar el desechable en el precio del almuerzo
+                // si va para llevar. Va dentro del unit_price para que el total
+                // cuadre con la suma de ítems y se mantenga al editar el pedido.
+                const llevaEmpaque = _esAlmuerzo(slot) && _itemViajaParaLlevar(item, modalidad);
+                const precioFinal  = slot.precio + (llevaEmpaque ? RECARGO_DESECHABLE : 0);
                 return {
                     order_id: orden.id, menu_item_id: menuItemId,
-                    quantity: item.cantidad, unit_price: slot.precio,
+                    quantity: item.cantidad, unit_price: precioFinal,
                     item_status: 'pending',
                     product_name: slot.nombre,
-                    notes: `[nombre]${slot.nombre}`,
+                    notes: `[nombre]${slot.nombre}${llevaEmpaque ? ' | Empaque desechable incluido' : ''}`,
                 };
             }).filter(Boolean);
 
