@@ -359,6 +359,7 @@ function _mostrarCocina() {
     La26.cargarPedidos();
     _activarRealtime();
     _iniciarTimers();
+    CocinaHist._programarReset();
 }
 
 function _inyectarBottomNav() {
@@ -922,6 +923,164 @@ async function ejecutarSimulador() {
     } finally {
         if (btnSimular) { btnSimular.disabled = false; btnSimular.textContent = '🚀 Simular Pedido desde QR'; }
     }
+}
+
+// ============================================================
+// HISTORIAL COCINA
+// ============================================================
+
+const CocinaHist = {
+    _pedidos: [],
+    _cargado: false,
+    _canal: null,
+
+    _hoy() {
+        // Día de operación: inicia a las 05:00 UTC (medianoche Bogotá)
+        const ahora = new Date();
+        const corte = new Date(ahora);
+        corte.setUTCHours(5, 0, 0, 0);
+        if (ahora < corte) corte.setUTCDate(corte.getUTCDate() - 1);
+        const inicio = corte.toISOString();
+        const fin    = new Date(corte.getTime() + 86400000).toISOString();
+        return { inicio, fin };
+    },
+
+    async cargar() {
+        const grid = document.getElementById('hist-cocina-grid');
+        if (!grid) return;
+        grid.innerHTML = `<div class="loading-state"><div class="spinner"></div><span>Cargando historial…</span></div>`;
+
+        const { inicio, fin } = this._hoy();
+        const { data, error } = await supabaseClient
+            .from('orders')
+            .select(`id, order_number, status, customer_name, total_amount, created_at, notes,
+                     order_items ( id, quantity, unit_price, notes, item_status, menu_items ( name ) )`)
+            .eq('status', 'delivered')
+            .gte('created_at', inicio)
+            .lt('created_at', fin)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            grid.innerHTML = `<div class="empty-state"><div class="empty-title">Error al cargar historial</div><div class="empty-sub">${error.message}</div></div>`;
+            return;
+        }
+
+        this._pedidos = data || [];
+        this._cargado = true;
+        this._render();
+        this._suscribir();
+    },
+
+    _render() {
+        const grid = document.getElementById('hist-cocina-grid');
+        if (!grid) return;
+        const countEl = document.getElementById('hist-cocina-count');
+        if (countEl) countEl.textContent = this._pedidos.length;
+
+        if (this._pedidos.length === 0) {
+            grid.innerHTML = `<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-title">Sin despachos aún hoy</div><div class="empty-sub">Los pedidos marcados como despachados aparecerán aquí.</div></div>`;
+            return;
+        }
+
+        grid.innerHTML = this._pedidos.map(p => {
+            const hora = p.created_at
+                ? new Date(p.created_at).toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' })
+                : '—';
+            const mesa = (() => {
+                const m = (p.notes || '').match(/Mesa:\s*([^\|]+)/);
+                return m ? m[1].trim() : (p.customer_name || 'Cliente');
+            })();
+            const items = (p.order_items || []).map(i => {
+                const np = (i.notes || '');
+                const nombre = np.startsWith('[nombre]') ? np.slice(8).split('|')[0].trim() : (i.menu_items?.name || '(Plato)');
+                return `<span class="hist-item-chip">${i.quantity}× ${_esc(nombre)}</span>`;
+            }).join('');
+
+            return `
+            <div class="hist-card" id="hcard-${p.id}">
+                <div class="hist-card-head">
+                    <div>
+                        <div class="hist-card-num">${_esc(p.order_number || '—')}</div>
+                        <div class="hist-card-mesa">📍 ${_esc(mesa)}</div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+                        <span class="hist-hora">🕐 ${hora}</span>
+                        <button class="btn-reactivar" onclick="CocinaHist.reactivar('${p.id}')">↩ Reactivar</button>
+                    </div>
+                </div>
+                <div class="hist-card-items">${items || '<span style="color:#9ca3af;font-size:12px;">Sin ítems</span>'}</div>
+            </div>`;
+        }).join('');
+    },
+
+    async reactivar(pedidoId) {
+        const btn = document.querySelector(`#hcard-${pedidoId} .btn-reactivar`);
+        if (btn) { btn.disabled = true; btn.textContent = '…'; }
+
+        const { error } = await supabaseClient
+            .from('orders')
+            .update({ status: 'in_kitchen' })
+            .eq('id', pedidoId);
+
+        if (error) {
+            _mostrarToast(`❌ Error al reactivar: ${error.message}`, 'error');
+            if (btn) { btn.disabled = false; btn.textContent = '↩ Reactivar'; }
+            return;
+        }
+
+        _mostrarToast('↩ Pedido reactivado — vuelve a la pantalla activa', 'success');
+        this._pedidos = this._pedidos.filter(p => p.id !== pedidoId);
+        this._render();
+        // Recargar comandas activas también
+        setTimeout(() => La26.cargarPedidos(), 400);
+    },
+
+    _suscribir() {
+        if (this._canal) return;
+        const restaurantId = sessionStorage.getItem('restaurant_id');
+        if (!restaurantId) return;
+        this._canal = supabaseClient
+            .channel(`hist-cocina-${restaurantId}`)
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders',
+                filter: `restaurant_id=eq.${restaurantId}` }, () => {})
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders',
+                filter: `restaurant_id=eq.${restaurantId}` }, (payload) => {
+                    if (payload.new?.status === 'delivered') {
+                        // Un pedido nuevo fue despachado — recargar si historial está visible
+                        if (document.getElementById('hist-cocina-section')?.style.display !== 'none') {
+                            CocinaHist.cargar();
+                        }
+                    }
+                })
+            .subscribe();
+    },
+
+    _programarReset() {
+        const ahora   = new Date();
+        const corte   = new Date(ahora);
+        corte.setUTCHours(5, 0, 0, 0); // 00:00 Bogotá = 05:00 UTC
+        if (ahora >= corte) corte.setUTCDate(corte.getUTCDate() + 1);
+        const msHastaMedianoche = corte.getTime() - ahora.getTime();
+        setTimeout(() => {
+            this._pedidos = [];
+            this._cargado = false;
+            this._render();
+            this._programarReset();
+        }, msHastaMedianoche);
+    },
+};
+
+function _mostrarSeccionHistCocina() {
+    document.getElementById('cocina-main-section').style.display  = 'none';
+    document.getElementById('hist-cocina-section').style.display  = 'block';
+    document.getElementById('btn-filter-hist').classList.add('active');
+    document.querySelectorAll('.filter-btn:not(#btn-filter-hist)').forEach(b => b.classList.remove('active'));
+    CocinaHist.cargar();
+}
+
+function _mostrarSeccionActiva() {
+    document.getElementById('hist-cocina-section').style.display  = 'none';
+    document.getElementById('cocina-main-section').style.display  = 'block';
 }
 
 // ============================================================
