@@ -242,13 +242,10 @@ async function cargarDashboardReal() {
                     const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
                     const badgeMetodo = metodo
                         ? _badgeMetodo(metodo)
-                        : `<select onchange="registrarMetodoPago('${ord.id}', this.value)"
-                               style="font-size:10.5px;padding:3px 10px;border-radius:999px;height:28px;width:auto;cursor:pointer;background:var(--amber-lt);border-color:rgba(154,108,26,.28);color:var(--amber);">
-                               <option value="">💳 Registrar pago…</option>
-                               <option value="efectivo">💵 Efectivo</option>
-                               <option value="transferencia">📲 Transferencia</option>
-                               <option value="fiado">🤝 Fiado</option>
-                           </select>`;
+                        : `<span style="font-size:10px;font-weight:600;padding:3px 11px;border-radius:999px;
+                            background:var(--amber-lt);color:var(--amber);border:1.5px solid rgba(154,108,26,.28);
+                            display:inline-block;cursor:pointer;" onclick="cambiarTab('pedidos')"
+                            title="Ir a Historial de Pedidos para registrar el pago">⏳ Pendiente</span>`;
 
                     // [FIX-10] Resolución de mesa:
                     // 1. Busca [MESA ...] o [PARA LLEVAR] / [DOMICILIO] en notes
@@ -429,7 +426,13 @@ async function registrarMetodoPago(orderId, metodo) {
         const label = { efectivo: 'Efectivo 💵', transferencia: 'Transferencia 📲', fiado: 'Fiado 🤝' };
         Toast.ok(`Pago registrado: ${label[metodo] || metodo}`);
 
-        _actualizarBadgePago(orderId, metodo, monto);
+        // Recargar historial de pedidos si el tab está abierto
+        const tabPedidos = document.getElementById('tab-pedidos');
+        if (tabPedidos && tabPedidos.style.display !== 'none') {
+            cargarHistorialPedidos();
+        } else {
+            _actualizarBadgePago(orderId, metodo, monto);
+        }
 
         descontarInsumosPorOrden(orderId).catch(err =>
             console.warn('[La 26] Auto-descuento inventario falló silenciosamente:', err.message)
@@ -2511,5 +2514,272 @@ async function reactivarProducto(idItem, nombreItem) {
     } catch (err) {
         console.error('[La 26] Error reactivando producto:', err);
         Toast.error('No se pudo reactivar el producto.');
+    }
+}
+
+// ============================================================
+// HISTORIAL DE PEDIDOS — tab-pedidos
+// ============================================================
+
+let _vistaHistorialPedidos = 'pendientes'; // 'pendientes' | 'pagados'
+
+function filtrarHistorialPedidos(vista) {
+    _vistaHistorialPedidos = vista;
+    // Estilos botones filtro
+    const btnP = document.getElementById('btn-hp-pendientes');
+    const btnPg = document.getElementById('btn-hp-pagados');
+    if (btnP && btnPg) {
+        if (vista === 'pendientes') {
+            btnP.style.background  = 'var(--amber-lt)';  btnP.style.color  = 'var(--amber)';   btnP.style.borderColor  = 'var(--amber)';
+            btnPg.style.background = 'var(--surface-2)'; btnPg.style.color = 'var(--text-3)';  btnPg.style.borderColor = 'var(--border)';
+        } else {
+            btnPg.style.background = 'var(--olive-lt)';  btnPg.style.color = 'var(--olive)';   btnPg.style.borderColor = 'var(--olive-bd)';
+            btnP.style.background  = 'var(--surface-2)'; btnP.style.color  = 'var(--text-3)';  btnP.style.borderColor  = 'var(--border)';
+        }
+    }
+    cargarHistorialPedidos();
+}
+
+async function cargarHistorialPedidos() {
+    const grid = document.getElementById('grid-historial-pedidos');
+    if (!grid) return;
+
+    grid.innerHTML = `<p style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">Cargando pedidos…</p>`;
+
+    try {
+        const _ahora     = new Date();
+        const _offsetMs  = -5 * 60 * 60 * 1000;
+        const _hoyLocal  = new Date(_ahora.getTime() - _offsetMs);
+        const _yyyy      = _hoyLocal.getUTCFullYear();
+        const _mm        = String(_hoyLocal.getUTCMonth() + 1).padStart(2, '0');
+        const _dd        = String(_hoyLocal.getUTCDate()).padStart(2, '0');
+        const _inicioDia = `${_yyyy}-${_mm}-${_dd}T00:00:00-05:00`;
+        const _finDia    = `${_yyyy}-${_mm}-${_dd}T23:59:59-05:00`;
+        const _cierreDesde = sessionStorage.getItem('cierre_desde');
+        const _inicioDiaEfectivo = _cierreDesde || _inicioDia;
+
+        // Pendientes = cualquier status que NO sea 'paid', 'canceled', 'cancelled'
+        // Pagados    = status 'paid'
+        let query = supabaseClient
+            .from('orders')
+            .select(`id, order_number, customer_name, total_amount, status, notes, payment_method, table_id,
+                     order_items ( quantity, notes, unit_price )`)
+            .gte('created_at', _inicioDiaEfectivo)
+            .lte('created_at', _finDia)
+            .not('status', 'in', '("canceled","cancelled")');
+
+        if (_vistaHistorialPedidos === 'pagados') {
+            query = query.eq('status', 'paid');
+        } else {
+            query = query.neq('status', 'paid');
+        }
+
+        query = query.order('created_at', { ascending: false });
+
+        const { data: orders, error } = await query;
+        if (error) throw error;
+
+        const tableMap = await _buildTableMap();
+        grid.innerHTML = '';
+
+        if (!orders || orders.length === 0) {
+            grid.innerHTML = `<p style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">
+                Sin pedidos ${_vistaHistorialPedidos === 'pagados' ? 'pagados' : 'pendientes'} hoy.</p>`;
+            return;
+        }
+
+        orders.forEach(ord => {
+            const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
+
+            // Resolver mesa
+            const mesaMatch = (ord.notes || '').match(/\[MESA\]\s*Mesa:\s*([^|]+)/i);
+            const esPL  = (ord.notes || '').includes('[PARA LLEVAR]');
+            const esDom = (ord.notes || '').includes('[DOMICILIO]');
+            let mesaLabel;
+            if (mesaMatch)                           mesaLabel = mesaMatch[1].trim();
+            else if (esPL)                           mesaLabel = 'Para Llevar';
+            else if (esDom)                          mesaLabel = 'Domicilio';
+            else if (ord.table_id && tableMap[ord.table_id]) mesaLabel = tableMap[ord.table_id];
+            else if (ord.table_id)                   mesaLabel = String(ord.table_id).slice(-4).toUpperCase();
+            else                                     mesaLabel = 'P.L.';
+
+            // Resumen de items
+            const itemsResumen = (ord.order_items || []).map(it => {
+                let nombre = 'Ítem';
+                if (it.notes && it.notes.includes('[nombre]'))
+                    nombre = it.notes.split('[nombre]')[1].split('|')[0].trim();
+                return `${it.quantity}× ${nombre}`;
+            }).join(', ') || '—';
+
+            // Badge método — en pendientes muestra select; en pagados muestra badge + botón cambiar
+            let metodoCelda;
+            if (_vistaHistorialPedidos === 'pagados') {
+                const badgeHtml = metodo ? _badgeMetodo(metodo) : `<span style="font-size:10px;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--surface-2);color:var(--text-3);border:1.5px solid var(--border);">Sin método</span>`;
+                metodoCelda = `
+                    <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
+                        <div id="badge-metodo-${ord.id}">${badgeHtml}</div>
+                        <button onclick="cambiarMetodoPago('${ord.id}')"
+                            style="font-size:10px;font-weight:600;padding:3px 10px;border-radius:999px;border:1.5px solid var(--border);background:var(--surface-2);color:var(--text-3);cursor:pointer;font-family:'DM Sans',sans-serif;display:inline-flex;align-items:center;gap:4px;">
+                            <i data-lucide="pencil" style="width:10px;height:10px;"></i> Cambiar
+                        </button>
+                    </div>`;
+            } else {
+                metodoCelda = `
+                    <select onchange="registrarMetodoPago('${ord.id}', this.value)"
+                        style="font-size:11px;padding:4px 10px;border-radius:8px;height:32px;width:100%;cursor:pointer;background:var(--amber-lt);border:1.5px solid rgba(154,108,26,.28);color:var(--amber);font-family:'DM Sans',sans-serif;">
+                        <option value="">💳 Registrar pago…</option>
+                        <option value="efectivo">💵 Efectivo</option>
+                        <option value="transferencia">📲 Transferencia</option>
+                        <option value="fiado">🤝 Fiado</option>
+                    </select>`;
+            }
+
+            grid.insertAdjacentHTML('beforeend', `
+                <div class="card" style="display:flex;flex-direction:column;gap:12px;border-radius:14px;">
+                    <!-- Cabecera -->
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="mono" style="font-size:13px;font-weight:700;color:var(--olive);">${ord.order_number}</span>
+                        <span style="font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;
+                            background:${_vistaHistorialPedidos === 'pagados' ? 'var(--olive-lt)' : 'var(--amber-lt)'};
+                            color:${_vistaHistorialPedidos === 'pagados' ? 'var(--olive)' : 'var(--amber)'};
+                            border:1.5px solid ${_vistaHistorialPedidos === 'pagados' ? 'var(--olive-bd)' : 'rgba(154,108,26,.28)'};">
+                            ${_vistaHistorialPedidos === 'pagados' ? '✅ Pagado' : '⏳ Pendiente'}
+                        </span>
+                    </div>
+
+                    <!-- Info -->
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;">
+                        <div>
+                            <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">Mesa</p>
+                            <p style="font-size:13px;font-weight:600;color:var(--text-1);">${mesaLabel}</p>
+                        </div>
+                        <div>
+                            <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">Cliente</p>
+                            <p style="font-size:12px;font-weight:500;color:var(--text-2);">${ord.customer_name || 'Consumidor Final'}</p>
+                        </div>
+                    </div>
+
+                    <!-- Ítems -->
+                    <p style="font-size:11.5px;color:var(--text-2);line-height:1.5;border-left:3px solid var(--border);padding-left:10px;">${itemsResumen}</p>
+
+                    <!-- Total + método -->
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;border-top:1.5px solid var(--border);padding-top:10px;">
+                        <div>
+                            <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">Total</p>
+                            <span class="mono" style="font-size:16px;font-weight:700;color:var(--olive);">${formatCOP(ord.total_amount)}</span>
+                        </div>
+                        <div style="text-align:right;min-width:0;">${metodoCelda}</div>
+                    </div>
+
+                    <!-- Acciones -->
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <button onclick="exportarReciboPDF('${ord.id}')"
+                            style="flex:1;min-width:60px;background:var(--surface-2);border:1.5px solid var(--border);color:var(--text-2);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                            📄 PDF
+                        </button>
+                        <button onclick="abrirModalFacturaElectronica('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
+                            style="flex:1;min-width:60px;background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                            🧾 DIAN
+                        </button>
+                        <button onclick="editarComandaAdmin('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
+                            style="flex:1;min-width:60px;background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.28);color:var(--blue);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                            ✏️ Editar
+                        </button>
+                        <button onclick="eliminarComandaReal('${ord.id}', '${ord.order_number}')"
+                            style="background:var(--red-lt,#fff0f0);border:1.5px solid rgba(185,28,28,.22);color:var(--red);border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;">
+                            🗑️
+                        </button>
+                    </div>
+                </div>`);
+        });
+
+        if (window.lucide) lucide.createIcons();
+
+    } catch (err) {
+        console.error('[La 26] Error cargando historial pedidos:', err);
+        grid.innerHTML = `<p style="color:var(--red);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">Error al cargar los pedidos. Revisa la consola.</p>`;
+    }
+}
+
+// ============================================================
+// CAMBIAR MÉTODO DE PAGO EN PEDIDO YA PAGADO
+// ============================================================
+async function cambiarMetodoPago(orderId) {
+    const metodos = ['efectivo', 'transferencia', 'fiado'];
+    const labels  = { efectivo: '💵 Efectivo', transferencia: '📲 Transferencia', fiado: '🤝 Fiado' };
+
+    // Mini-modal inline — confirmar nuevo método
+    const elegido = await new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;';
+        overlay.innerHTML = `
+            <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:18px;padding:24px;min-width:260px;display:flex;flex-direction:column;gap:14px;box-shadow:0 8px 32px rgba(0,0,0,.18);">
+                <h3 style="font-size:14px;font-weight:700;color:var(--text-1);margin:0;">Cambiar método de pago</h3>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    ${metodos.map(m => `
+                        <button data-metodo="${m}"
+                            style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface-2);color:var(--text-1);font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;">
+                            ${labels[m]}
+                        </button>`).join('')}
+                </div>
+                <button data-metodo="" style="font-size:12px;color:var(--text-3);background:none;border:none;cursor:pointer;font-family:'DM Sans',sans-serif;">Cancelar</button>
+            </div>`;
+        overlay.querySelectorAll('button[data-metodo]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.body.removeChild(overlay);
+                resolve(btn.dataset.metodo || null);
+            });
+        });
+        document.body.appendChild(overlay);
+    });
+
+    if (!elegido) return;
+
+    try {
+        const { data: ordData, error: errRead } = await supabaseClient
+            .from('orders')
+            .select('total_amount, notes, payment_method')
+            .eq('id', orderId)
+            .single();
+        if (errRead) throw errRead;
+
+        const monto = parseFloat(ordData.total_amount) || 0;
+        const metodoAnterior = ordData.payment_method || _extraerMetodoDeNotes(ordData.notes || '');
+
+        // Ajustar sessionStorage
+        if (metodoAnterior && metodoAnterior !== elegido) {
+            const keyViejo  = `pm_${metodoAnterior}`;
+            const acumViejo = parseFloat(sessionStorage.getItem(keyViejo) || '0');
+            sessionStorage.setItem(keyViejo, String(Math.max(0, acumViejo - monto)));
+        }
+        if (metodoAnterior !== elegido) {
+            const keyNuevo = `pm_${elegido}`;
+            const acumNuevo = parseFloat(sessionStorage.getItem(keyNuevo) || '0');
+            sessionStorage.setItem(keyNuevo, String(acumNuevo + monto));
+        }
+
+        totalEfectivo      = parseFloat(sessionStorage.getItem('pm_efectivo')      || '0');
+        totalTransferencia = parseFloat(sessionStorage.getItem('pm_transferencia') || '0');
+        totalFiado         = parseFloat(sessionStorage.getItem('pm_fiado')         || '0');
+        renderizarTotales();
+
+        const notesBase  = (ordData.notes || '').replace(/\|\[pago\][^|]*/g, '').trimEnd();
+        const notesNuevo = `${notesBase}|[pago]${elegido}`;
+
+        const { error } = await supabaseClient
+            .from('orders')
+            .update({ payment_method: elegido, notes: notesNuevo })
+            .eq('id', orderId);
+        if (error) throw error;
+
+        Toast.ok(`Método cambiado a ${labels[elegido]}`);
+
+        // Actualizar badge en la tarjeta sin recargar todo
+        const badgeEl = document.getElementById(`badge-metodo-${orderId}`);
+        if (badgeEl) badgeEl.innerHTML = _badgeMetodo(elegido);
+
+    } catch (err) {
+        console.error('[La 26] Error cambiando método de pago:', err);
+        Toast.error('No se pudo cambiar el método de pago.');
     }
 }
