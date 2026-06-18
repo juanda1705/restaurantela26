@@ -951,10 +951,16 @@ const CocinaHist = {
         grid.innerHTML = `<div class="loading-state"><div class="spinner"></div><span>Cargando historial…</span></div>`;
 
         const { inicio, fin } = this._hoy();
+        const restaurantId = await resolverRestaurantId();
+        if (!restaurantId) {
+            grid.innerHTML = `<div class="empty-state"><div class="empty-title">No se pudo identificar el restaurante</div></div>`;
+            return;
+        }
         const { data, error } = await supabaseClient
             .from('orders')
             .select(`id, order_number, status, customer_name, total_amount, created_at, notes,
                      order_items ( id, quantity, unit_price, notes, item_status, menu_items ( name ) )`)
+            .eq('restaurant_id', restaurantId)
             .eq('status', 'delivered')
             .gte('created_at', inicio)
             .lt('created_at', fin)
