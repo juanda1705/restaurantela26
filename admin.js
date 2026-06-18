@@ -1,6 +1,6 @@
 // ========================================================== ==
 // RESTAURANTE LA 26 — PANEL DE ADMINISTRACIÓN
-// admin.js · Versión 3.4
+// admin.js · Versión 3.4 
 // FIXES v3.4 (nuevos):
 //  [CAMBIO-3] registrarMetodoPago ya NO marca status='paid'. El pago
 //             se guarda solo en payment_method (+ nota [pago]) para que
