@@ -10,7 +10,7 @@
 // FIXES v3.2 (heredados):
 //  [FIX-6] SOFT DELETE en eliminarComponenteCatalogo.
 //  [FIX-7] cargarSlotsMenuReal: filtro .neq('is_active', false).
-//  [FIX-8] Modal de edición de comandas en admin.html.
+//  [FIX-8] Modal de edición de comandas en admin.html. 
 // FIXES v3.3 (nuevos):
 //  [FIX-9]  _guardarEdicionLegacyAdmin: reemplaza TODOS los
 //           .catch() encadenados por try/catch con await.
