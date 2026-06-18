@@ -463,7 +463,8 @@ async function _generarNumeroOrden(modalidad) {
         const n = (data || []).filter(o =>
             /\[PARA LLEVAR\]|\[DOMICILIO\]/.test(o.notes || '')
         ).length + 1;
-        return `LLV-${String(n).padStart(3, '0')}`;
+        const sufijo = Date.now().toString().slice(-4);
+        return `LLV-${String(n).padStart(3, '0')}-${sufijo}`;
     } catch (err) {
         console.warn('[La 26] No se pudo generar código de llevar, uso aleatorio:', err.message);
         return generarNumeroOrden();
