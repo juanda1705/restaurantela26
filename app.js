@@ -728,7 +728,7 @@ function _crearCardHTML(order, esNuevo = false) {
 
     return `
     <div id="pedido-${order.id}"
-         class="order-card${esNuevo ? ' is-new' : ''}"
+         class="order-card${esNuevo ? ' is-new' : ''}${(notasOrden.includes('[PARA LLEVAR]') || notasOrden.includes('[DOMICILIO]')) ? ' es-llevar' : ''}"
          data-status="${order.status}"
          data-created="${order.created_at || ''}">
         <div class="card-header">
