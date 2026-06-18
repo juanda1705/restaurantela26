@@ -1622,17 +1622,35 @@ function _crearTarjetaPedido(pedido, idx) {
     const items = pedido.order_items || [];
     const itemsHTML = items.length > 0
         ? items.map(it => {
-            let nombre = it.menu_items?.name || '';
-            if (!nombre && it.notes) {
-                const m = it.notes.match(/\[nombre\](.+)/);
-                nombre = m ? m[1] : 'Ítem';
+            // Formato: [nombre]Proteína · Principio | Nota · Empaque
+            let nombreCompleto = it.menu_items?.name || '';
+            let notaItem = '';
+            if (it.notes && it.notes.startsWith('[nombre]')) {
+                const sinPrefijo = it.notes.slice(8);
+                const partes     = sinPrefijo.split(' | ');
+                nombreCompleto   = partes[0] || nombreCompleto;
+                notaItem         = partes.slice(1).join(' · ').trim();
+            } else if (!nombreCompleto && it.notes) {
+                nombreCompleto = it.notes;
             }
-            if (!nombre) nombre = 'Ítem';
+            if (!nombreCompleto) nombreCompleto = 'Ítem';
+
+            // Separar proteína y principio (guardados como "Proteína · Principio")
+            const parteNombre = nombreCompleto.split(' · ');
+            const proteina    = parteNombre[0];
+            const principio   = parteNombre.slice(1).join(' · ');
+
             const precio = Number(it.unit_price) || 0;
-            return `<div class="item-row">
-                <div class="item-qty">${it.quantity}</div>
-                <span class="item-name">${nombre}</span>
-                <span class="item-price">${precio > 0 ? formatCOP(precio * it.quantity) : '—'}</span>
+            return `<div class="item-row" style="flex-direction:column;align-items:flex-start;gap:2px;padding-bottom:8px;border-bottom:1px solid var(--border-lt);margin-bottom:4px;">
+                <div style="display:flex;justify-content:space-between;width:100%;align-items:center;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <div class="item-qty">${it.quantity}</div>
+                        <span class="item-name">${proteina}</span>
+                    </div>
+                    <span class="item-price">${precio > 0 ? formatCOP(precio * it.quantity) : '—'}</span>
+                </div>
+                ${principio ? `<div style="font-size:12px;color:var(--oliva);padding-left:28px;">🥘 ${principio}</div>` : ''}
+                ${notaItem  ? `<div style="font-size:12px;color:#b45309;padding-left:28px;">✏️ ${notaItem}</div>`  : ''}
             </div>`;
         }).join('')
         : `<p style="font-size:12.5px;color:var(--ink-ghost);padding:4px 0;">Sin detalle de ítems.</p>`;
