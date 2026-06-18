@@ -241,7 +241,7 @@ async function cargarDashboardReal() {
                 ordenesValidas.forEach(ord => {
                     const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
                     const badgeMetodo = metodo
-                        ? _badgeMetodo(metodo)
+                        ? _badgeMetodoEditable(ord.id, metodo)
                         : `<select onchange="registrarMetodoPago('${ord.id}', this.value)"
                                style="font-size:10.5px;padding:3px 10px;border-radius:999px;height:28px;width:auto;cursor:pointer;background:var(--amber-lt);border-color:rgba(154,108,26,.28);color:var(--amber);">
                                <option value="">💳 Registrar pago…</option>
@@ -379,6 +379,7 @@ async function eliminarComandaReal(idComanda, nroOrden) {
         if (error) throw error;
         Toast.ok(`Orden ${nroOrden} eliminada correctamente.`);
         cargarDashboardReal();
+        if (document.getElementById('tab-pedidos')?.style.display !== 'none') cargarPedidosTab();
     } catch (err) {
         console.error('Error eliminando comanda:', err);
         Toast.error('Error al eliminar el registro.');
@@ -405,7 +406,7 @@ async function registrarMetodoPago(orderId, metodo) {
 
         const { error } = await supabaseClient
             .from('orders')
-            .update({ status: 'paid', notes: notesNuevo, payment_method: metodo })
+            .update({ notes: notesNuevo, payment_method: metodo }) // no cambia status: cocina sigue viendo la orden
             .eq('id', orderId);
         if (error) throw error;
 
@@ -447,12 +448,52 @@ function _extraerMetodoDeNotes(notes) {
 }
 
 function _actualizarBadgePago(orderId, metodo) {
-    const selects = document.querySelectorAll('#tabla-facturas select');
-    selects.forEach(sel => {
-        if (sel.getAttribute('onchange')?.includes(orderId)) {
-            sel.outerHTML = _badgeMetodo(metodo);
-        }
+    // Actualizar en todas las vistas posibles (lista dashboard + grids de tarjetas)
+    ['tabla-facturas', 'grid-pedidos-pendientes', 'grid-pedidos-pagados'].forEach(id => {
+        const container = document.getElementById(id);
+        if (!container) return;
+        container.querySelectorAll('select').forEach(sel => {
+            if (sel.getAttribute('onchange')?.includes(orderId)) {
+                sel.outerHTML = _badgeMetodoEditable(orderId, metodo);
+            }
+        });
+        container.querySelectorAll('[data-badge-id]').forEach(el => {
+            if (el.dataset.badgeId === orderId) {
+                el.outerHTML = _badgeMetodoEditable(orderId, metodo);
+            }
+        });
     });
+    // Si el tab de pedidos está activo, refrescar los grids completos para mover la tarjeta
+    if (document.getElementById('tab-pedidos')?.style.display !== 'none') {
+        setTimeout(() => cargarPedidosTab(), 300);
+    }
+}
+
+// Badge con método ya registrado — clic para cambiar
+function _badgeMetodoEditable(orderId, metodo) {
+    const cfg = {
+        efectivo:      { bg: 'var(--olive-lt)',  color: 'var(--olive)', bd: 'var(--olive-bd)',      icon: 'banknote',      label: 'Efectivo'      },
+        transferencia: { bg: 'var(--blue-lt)',   color: 'var(--blue)',  bd: 'rgba(37,99,168,.28)',  icon: 'smartphone',    label: 'Transferencia' },
+        fiado:         { bg: 'var(--amber-lt)',  color: 'var(--amber)', bd: 'rgba(154,108,26,.28)', icon: 'handshake',     label: 'Fiado'         },
+    };
+    const c = cfg[metodo] || cfg.efectivo;
+    return `<span data-badge-id="${orderId}" title="Clic para cambiar método de pago"
+        onclick="this.outerHTML=_selectCambiarMetodo('${orderId}','${metodo}')"
+        style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:600;padding:3px 10px;border-radius:999px;cursor:pointer;
+        background:${c.bg};color:${c.color};border:1.5px solid ${c.bd};">
+        <i data-lucide="${c.icon}" style="width:11px;height:11px;"></i> ${c.label}
+        <i data-lucide="pencil" style="width:9px;height:9px;opacity:.6;"></i>
+    </span>`;
+}
+
+function _selectCambiarMetodo(orderId, metodoActual) {
+    return `<select onchange="registrarMetodoPago('${orderId}', this.value)"
+        style="font-size:10.5px;padding:3px 10px;border-radius:999px;height:28px;cursor:pointer;background:var(--amber-lt);border:1.5px solid rgba(154,108,26,.28);color:var(--amber);">
+        <option value="">Cambiar metodo...</option>
+        <option value="efectivo"${metodoActual==='efectivo'?' selected':''}>Efectivo</option>
+        <option value="transferencia"${metodoActual==='transferencia'?' selected':''}>Transferencia</option>
+        <option value="fiado"${metodoActual==='fiado'?' selected':''}>Fiado</option>
+    </select>`;
 }
 
 function _badgeMetodo(metodo) {
@@ -1473,6 +1514,7 @@ async function realizarCierre() {
     ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(k));
     totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
     globalIngresos = 0; globalEgresos = 0;
+    renderizarTotales(); // resetear UI a $0 inmediatamente
 
     const panelApertura = document.getElementById('panel-apertura-caja');
     const inputBase     = document.getElementById('input-base-caja');
@@ -2463,3 +2505,165 @@ function cerrarModalEditarComanda() {
 //   SELECT id, name, number, table_number FROM tables LIMIT 5;
 //
 // ============================================================
+// ============================================================
+// TAB: PEDIDOS DEL DÍA — Tarjetas con sub-tabs
+// ============================================================
+let _pedidosSubTab = 'pendientes';
+
+function cambiarSubTabPedidos(cual) {
+    _pedidosSubTab = cual;
+    const btnPend   = document.getElementById('btn-subtab-pendientes');
+    const btnPag    = document.getElementById('btn-subtab-pagados');
+    const panelPend = document.getElementById('panel-pedidos-pendientes');
+    const panelPag  = document.getElementById('panel-pedidos-pagados');
+
+    if (cual === 'pendientes') {
+        if (btnPend) { btnPend.style.background='var(--surface)'; btnPend.style.color='var(--olive)'; btnPend.style.zIndex='1'; btnPend.style.position='relative'; }
+        if (btnPag)  { btnPag.style.background='var(--surface-2)'; btnPag.style.color='var(--text-3)'; btnPag.style.zIndex=''; btnPag.style.position=''; }
+        if (panelPend) panelPend.style.display = '';
+        if (panelPag)  panelPag.style.display  = 'none';
+    } else {
+        if (btnPag)  { btnPag.style.background='var(--surface)'; btnPag.style.color='var(--olive)'; btnPag.style.zIndex='1'; btnPag.style.position='relative'; }
+        if (btnPend) { btnPend.style.background='var(--surface-2)'; btnPend.style.color='var(--text-3)'; btnPend.style.zIndex=''; btnPend.style.position=''; }
+        if (panelPend) panelPend.style.display = 'none';
+        if (panelPag)  panelPag.style.display  = '';
+    }
+}
+
+async function cargarPedidosTab() {
+    const gridPend = document.getElementById('grid-pedidos-pendientes');
+    const gridPag  = document.getElementById('grid-pedidos-pagados');
+    if (!gridPend && !gridPag) return;
+
+    const _hoy      = new Date();
+    const _fecha    = _hoy.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    const _inicioDia = `${_fecha}T00:00:00-05:00`;
+    const _finDia    = `${_fecha}T23:59:59-05:00`;
+    const _desde     = sessionStorage.getItem('cierre_desde') || _inicioDia;
+
+    const [{ data: orders, error }, tableMap] = await Promise.all([
+        supabaseClient
+            .from('orders')
+            .select(`id, order_number, customer_name, total_amount, status, notes, payment_method, table_id,
+                     order_items ( quantity, notes, unit_price, product_name )`)
+            .gte('created_at', _desde)
+            .lte('created_at', _finDia)
+            .order('created_at', { ascending: false }),
+        _buildTableMap()
+    ]);
+
+    if (error) { console.error('[La 26] cargarPedidosTab:', error); return; }
+
+    const validas    = (orders || []).filter(o => o.status !== 'canceled' && o.status !== 'cancelled');
+    const pendientes = validas.filter(o => !o.payment_method && !_extraerMetodoDeNotes(o.notes || ''));
+    const pagadas    = validas.filter(o =>  o.payment_method ||  _extraerMetodoDeNotes(o.notes || ''));
+
+    _renderGridPedidos(gridPend, pendientes, tableMap);
+    _renderGridPedidos(gridPag,  pagadas,    tableMap);
+
+    // Re-inicializar iconos Lucide en las nuevas tarjetas
+    if (window.lucide) lucide.createIcons();
+}
+
+function _renderGridPedidos(grid, orders, tableMap) {
+    if (!grid) return;
+    if (orders.length === 0) {
+        grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:56px 20px;color:var(--text-3);font-size:13px;">
+            Sin pedidos en esta sección.</div>`;
+        return;
+    }
+    grid.innerHTML = orders.map(ord => _cardPedido(ord, tableMap)).join('');
+}
+
+function _cardPedido(ord, tableMap) {
+    const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
+    const monto  = parseFloat(ord.total_amount) || 0;
+
+    // Resolver mesa
+    const mesaMatch = (ord.notes || '').match(/\[MESA\]\s*Mesa:\s*([^|]+)/i);
+    const esPL  = (ord.notes || '').includes('[PARA LLEVAR]');
+    const esDom = (ord.notes || '').includes('[DOMICILIO]');
+    let mesaLabel;
+    if (mesaMatch)                              mesaLabel = mesaMatch[1].trim();
+    else if (esPL)                              mesaLabel = 'Para Llevar';
+    else if (esDom)                             mesaLabel = 'Domicilio';
+    else if (ord.table_id && tableMap[ord.table_id]) mesaLabel = tableMap[ord.table_id];
+    else if (ord.table_id)                      mesaLabel = String(ord.table_id).slice(-4).toUpperCase();
+    else                                        mesaLabel = 'P.L.';
+
+    // Items
+    const itemsHtml = (ord.order_items || []).map(it => {
+        let nombre = it.product_name || 'Plato';
+        if (!it.product_name && it.notes?.includes('[nombre]')) {
+            nombre = it.notes.split('[nombre]')[1].split('|')[0].trim();
+        }
+        const subtotal = (it.unit_price || 0) * (it.quantity || 1);
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);">
+            <span style="font-size:12px;color:var(--text-1);">${it.quantity || 1}× ${nombre}</span>
+            <span style="font-size:11.5px;color:var(--text-2);font-weight:600;">${formatCOP(subtotal)}</span>
+        </div>`;
+    }).join('');
+
+    // Badge o selector de pago
+    const badgeHtml = metodo
+        ? _badgeMetodoEditable(ord.id, metodo)
+        : `<select onchange="registrarMetodoPago('${ord.id}', this.value)"
+               style="font-size:10.5px;padding:3px 10px;border-radius:999px;height:28px;cursor:pointer;background:var(--amber-lt);border:1.5px solid rgba(154,108,26,.28);color:var(--amber);">
+               <option value="">Registrar pago...</option>
+               <option value="efectivo">Efectivo</option>
+               <option value="transferencia">Transferencia</option>
+               <option value="fiado">Fiado</option>
+           </select>`;
+
+    const borderColor = metodo === 'efectivo'      ? 'var(--olive-bd)'
+                      : metodo === 'transferencia' ? 'rgba(37,99,168,.28)'
+                      : metodo === 'fiado'         ? 'rgba(154,108,26,.28)'
+                      : 'var(--border)';
+
+    const headerBg = metodo ? 'var(--surface-2)' : 'var(--surface)';
+
+    return `<div style="background:var(--surface);border:1.5px solid ${borderColor};border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.04);display:flex;flex-direction:column;">
+        <!-- Cabecera -->
+        <div style="background:${headerBg};padding:14px 16px;border-bottom:1.5px solid ${borderColor};display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div>
+                <span style="font-size:10.5px;font-weight:700;color:var(--olive);font-family:'DM Mono',monospace;letter-spacing:.3px;">${ord.order_number}</span>
+                <p style="font-size:13.5px;font-weight:700;color:var(--text-1);margin-top:3px;">${ord.customer_name || 'Consumidor Final'}</p>
+                <p style="font-size:11.5px;color:var(--text-3);margin-top:2px;display:flex;align-items:center;gap:4px;">
+                    <i data-lucide="map-pin" style="width:11px;height:11px;"></i> ${mesaLabel}
+                </p>
+            </div>
+            <div style="text-align:right;">
+                <p style="font-size:10px;color:var(--text-3);margin-bottom:2px;">Total</p>
+                <span style="font-size:18px;font-weight:700;color:var(--olive);font-family:'DM Mono',monospace;">${formatCOP(monto)}</span>
+            </div>
+        </div>
+        <!-- Items -->
+        <div style="padding:10px 16px;flex:1;max-height:140px;overflow-y:auto;">
+            ${itemsHtml || '<span style="font-size:11.5px;color:var(--text-3);">Sin ítems registrados</span>'}
+        </div>
+        <!-- Pago -->
+        <div style="padding:10px 16px;border-top:1.5px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <span style="font-size:10.5px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;">Método de pago</span>
+            ${badgeHtml}
+        </div>
+        <!-- Acciones -->
+        <div style="padding:10px 16px;border-top:1.5px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;">
+            <button onclick="exportarReciboPDF('${ord.id}')"
+                style="flex:1;display:inline-flex;align-items:center;justify-content:center;gap:5px;background:var(--surface-2);border:1.5px solid var(--border);color:var(--text-2);border-radius:999px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                <i data-lucide="file-text" style="width:12px;height:12px;"></i> PDF
+            </button>
+            <button onclick="abrirModalFacturaElectronica('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
+                style="flex:1;display:inline-flex;align-items:center;justify-content:center;gap:5px;background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                <i data-lucide="receipt" style="width:12px;height:12px;"></i> DIAN
+            </button>
+            <button onclick="editarComandaAdmin('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
+                style="flex:1;display:inline-flex;align-items:center;justify-content:center;gap:5px;background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.28);color:var(--blue);border-radius:999px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                <i data-lucide="pencil" style="width:12px;height:12px;"></i> Editar
+            </button>
+            <button onclick="eliminarComandaReal('${ord.id}', '${ord.order_number}')" class="btn-danger"
+                style="display:inline-flex;align-items:center;justify-content:center;gap:4px;border-radius:999px;padding:6px 10px;font-size:11px;">
+                <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
+            </button>
+        </div>
+    </div>`;
+}
