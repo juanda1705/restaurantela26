@@ -1180,6 +1180,14 @@ const UI = {
 
         document.getElementById('form-mesa')?.classList.remove('error');
         document.getElementById('form-direccion')?.classList.remove('error');
+
+        // [v7.6 · CAMBIO-11] Al cambiar la modalidad, recalcular el total
+        // para reflejar el recargo por desechable de los almuerzos para llevar.
+        if (typeof Cart !== 'undefined' && typeof Cart._renderSummary === 'function'
+            && document.getElementById('order-modal')?.classList.contains('open')) {
+            Cart._renderSummary();
+        }
+        if (typeof _actualizarCartBar === 'function') _actualizarCartBar();
     }
 };
 
