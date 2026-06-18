@@ -2736,8 +2736,12 @@ async function cargarHistorialPedidos() {
                     </select>`;
             }
 
+            const esLlevarAdmin = esPL || esDom;
+            const styleCardAdmin = esLlevarAdmin
+                ? 'display:flex;flex-direction:column;gap:12px;border-radius:14px;background:#fef08a;border:2px solid #eab308;box-shadow:0 2px 8px rgba(234,179,8,0.35),0 6px 20px rgba(234,179,8,0.20);'
+                : 'display:flex;flex-direction:column;gap:12px;border-radius:14px;';
             grid.insertAdjacentHTML('beforeend', `
-                <div class="card" style="display:flex;flex-direction:column;gap:12px;border-radius:14px;">
+                <div class="card" style="${styleCardAdmin}">
                     <!-- Cabecera -->
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span class="mono" style="font-size:13px;font-weight:700;color:var(--olive);">${ord.order_number}</span>
