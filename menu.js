@@ -3,7 +3,7 @@
 // menu.js · Versión 7.5
 //
 // CAMBIOS v7.5:
-//  [CAMBIO-1] Al enviar un pedido se reinicia TODO el formulario
+//  [CAMBIO-1] Al enviar un pedido se reinicia TODO el formulario 
 //    (mesa, nombre del cliente, notas, dirección) y la modalidad
 //    vuelve a "mesa". Antes el número de mesa y el nombre quedaban
 //    pegados del pedido anterior. Nuevo helper _resetFormularioPedido()
