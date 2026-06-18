@@ -1844,16 +1844,31 @@ const EditarPedido = {
             <div class="edit-section">
                 <p class="edit-section-title">Agregar ítem</p>
                 <div class="edit-agregar-row">
-                    <select id="edit-slot-select" class="form-input edit-select">
+                    <select id="edit-slot-select" class="form-input edit-select" onchange="EditarPedido._onSlotChange()">
                         <option value="">— Selecciona un plato o bebida —</option>
                         ${opcionesSlots}
                     </select>
-                    <div class="edit-qty-row">
-                        <button class="edit-qty-btn" onclick="EditarPedido._decrementarNuevo()">−</button>
-                        <span id="edit-nueva-qty" class="edit-qty-num">1</span>
-                        <button class="edit-qty-btn" onclick="EditarPedido._incrementarNuevo()">+</button>
-                        <button class="btn-agregar-item" onclick="EditarPedido._agregarItem()">Agregar</button>
+                </div>
+                <div id="edit-proteina-extra" style="display:none;margin-top:10px;background:var(--oliva-pale);border:1.5px solid var(--oliva-bd);border-radius:14px;padding:14px 16px;display:none;flex-direction:column;gap:10px;">
+                    <div>
+                        <div class="plato-section-label">🥘 Principio</div>
+                        <select id="edit-principio-select" class="plato-select">
+                            <option value="">— Sin principio —</option>
+                            ${State.slots.filter(s => s.itemType === 'side' && s.disponible).map(s =>
+                                `<option value="${s.id}">${s.nombre}</option>`
+                            ).join('')}
+                        </select>
                     </div>
+                    <div>
+                        <div class="plato-section-label">✏️ Nota del plato</div>
+                        <input id="edit-nota-plato" class="plato-input" type="text" placeholder="Ej: sin ensalada, sin cebolla…">
+                    </div>
+                </div>
+                <div class="edit-qty-row" style="margin-top:10px;">
+                    <button class="edit-qty-btn" onclick="EditarPedido._decrementarNuevo()">−</button>
+                    <span id="edit-nueva-qty" class="edit-qty-num">1</span>
+                    <button class="edit-qty-btn" onclick="EditarPedido._incrementarNuevo()">+</button>
+                    <button class="btn-agregar-item" onclick="EditarPedido._agregarItem()">Agregar</button>
                 </div>
             </div>
 
@@ -1899,6 +1914,21 @@ const EditarPedido = {
 
     _nuevaQty: 1,
 
+    _onSlotChange() {
+        const select = document.getElementById('edit-slot-select');
+        const extra  = document.getElementById('edit-proteina-extra');
+        if (!select || !extra) return;
+        const slot = State.slots.find(s => s.id === select.value);
+        const esProteina = slot && (slot.itemType === 'protein' || slot.itemType === 'executive_lunch');
+        extra.style.display = esProteina ? 'flex' : 'none';
+        if (!esProteina) {
+            const ps = document.getElementById('edit-principio-select');
+            const np = document.getElementById('edit-nota-plato');
+            if (ps) ps.value = '';
+            if (np) np.value = '';
+        }
+    },
+
     _decrementarNuevo() {
         if (this._nuevaQty > 1) {
             this._nuevaQty--;
@@ -1921,30 +1951,53 @@ const EditarPedido = {
         const slot = State.slots.find(s => s.id === slotId);
         if (!slot) return;
 
-        const existente = this._itemsEdit.find(it => !it.eliminado && it.menuItemId === slot.menuItemId && it.esNuevo);
-        if (existente) {
-            existente.cantidad += this._nuevaQty;
-        } else {
-            this._itemsEdit.push({
-                id:          `new-${Date.now()}`,
-                menuItemId:  slot.menuItemId,
-                nombre:      slot.nombre,
-                precio:      slot.precio,
-                cantidad:    this._nuevaQty,
-                item_status: 'pending',
-                esNuevo:     true,
-                eliminado:   false,
-            });
+        const esProteina = slot.itemType === 'protein' || slot.itemType === 'executive_lunch';
+        let principioNombre = '';
+        let notaPlato       = '';
+        if (esProteina) {
+            const ps = document.getElementById('edit-principio-select');
+            const np = document.getElementById('edit-nota-plato');
+            const sidId = ps?.value;
+            if (sidId) {
+                const side = State.slots.find(s => s.id === sidId);
+                if (side) principioNombre = side.nombre;
+            }
+            notaPlato = (np?.value || '').trim();
         }
 
+        const nombreCompleto = principioNombre
+            ? `${slot.nombre} · ${principioNombre}`
+            : slot.nombre;
+        const partesNota = [];
+        if (notaPlato) partesNota.push(notaPlato);
+        const notesItem = `[nombre]${nombreCompleto}${partesNota.length ? ' | ' + partesNota.join(' · ') : ''}`;
+
+        this._itemsEdit.push({
+            id:          `new-${Date.now()}`,
+            menuItemId:  slot.menuItemId,
+            nombre:      nombreCompleto,
+            notesItem,
+            precio:      slot.precio,
+            cantidad:    this._nuevaQty,
+            item_status: 'pending',
+            esNuevo:     true,
+            eliminado:   false,
+        });
+
         if (select) select.value = '';
+        const extra = document.getElementById('edit-proteina-extra');
+        if (extra) extra.style.display = 'none';
+        const ps2 = document.getElementById('edit-principio-select');
+        const np2 = document.getElementById('edit-nota-plato');
+        if (ps2) ps2.value = '';
+        if (np2) np2.value = '';
         this._nuevaQty = 1;
         const qtyEl = document.getElementById('edit-nueva-qty');
         if (qtyEl) qtyEl.textContent = '1';
 
         this._refrescarListaItems();
         this._actualizarTotalPreview();
-        Toast.ok(`"${slot.nombre}" agregado al pedido.`);
+        Toast.ok(`"${nombreCompleto}" agregado al pedido.`);
     },
 
     _cambiarCantidad(itemId, delta) {
@@ -2096,7 +2149,7 @@ const EditarPedido = {
                     unit_price:   it.precio,
                     item_status:  'pending',
                     product_name: it.nombre,
-                    notes:        `[nombre]${it.nombre}`,
+                    notes:        it.notesItem || `[nombre]${it.nombre}`,
                 };
             });
 
