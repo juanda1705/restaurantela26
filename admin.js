@@ -1,2133 +1,2832 @@
 // ============================================================
-// RESTAURANTE LA 26 — PANEL DE MESERO
-// menu.js · Versión 7.6
-//
-// CAMBIOS v7.6:
-//  [CAMBIO-10] Código secuencial diario LLV-### para pedidos PARA
-//    LLEVAR / DOMICILIO (reinicia cada día). Los pedidos en mesa
-//    conservan su número aleatorio. Ver _generarNumeroOrden().
-//  [CAMBIO-11] Recargo de $1.000 por desechable a cada almuerzo
-//    (proteína / menú ejecutivo) que va para llevar. Se carga dentro
-//    del unit_price del ítem para que el total cuadre y se conserve
-//    al editar. Se muestra como línea aparte en el resumen del pedido.
-//    NOTA: lógica preparada para marcar ítems sueltos (#12) más adelante.
-//
-// CAMBIOS v7.5:
-//  [CAMBIO-1] Al enviar un pedido se reinicia TODO el formulario
-//    (mesa, nombre del cliente, notas, dirección) y la modalidad
-//    vuelve a "mesa". Antes el número de mesa y el nombre quedaban
-//    pegados del pedido anterior. Nuevo helper _resetFormularioPedido()
-//    llamado desde Order._mostrarExito() y Order.nuevoPedido().
-//    NO afecta la sesión del mesero.
-//
-// CAMBIOS v7.4.2 (patches aplicados sobre v7.4.1):
-//  [FIX-PORCIONES-CRITICO]
-//    Order.enviar(): el descuento de porciones ya NO depende
-//    exclusivamente de La26Core. Se agrega _descontarPorciones()
-//    como función directa sobre Supabase (usando `db`) que se
-//    ejecuta SIEMPRE después de insertar los order_items.
-//    La26Core sigue llamándose en paralelo si está disponible,
-//    pero nunca es el único camino. Esto resuelve el escenario
-//    donde menu.html no carga la26-core.js.
-//
-//  [FIX-PORCIONES-FILTRO]
-//    _descontarPorciones(): filtra correctamente por menuItemId
-//    no-null Y disponibilidad del slot (porciones < 999).
-//    Solo descuenta ítems que tienen control real de porciones
-//    (portions_today != null en la BD). Usa UPDATE con
-//    decrement seguro: portions_today - cantidad, con mínimo 0
-//    via GREATEST(portions_today - cantidad, 0).
-//
-//  [FIX-PORCIONES-OPTIMISTIC]
-//    Después del descuento en BD, actualiza State.slots en
-//    memoria para que la UI refleje el nuevo stock sin esperar
-//    el ciclo de realtime.
-//
-// CAMBIOS v7.4.1 (patches aplicados sobre v7.4):
-//  [PATCH-1] Order.enviar(): llama La26Core.descontarPorcionesOrden
-//            y La26Core.ajustarInventarioPorItems después de insertar
-//            los order_items. Silencioso si La26Core no está disponible.
-//
-//  [PATCH-2] init(): se suscribe a La26Core.on('onMenuItemChange')
-//            y La26Core.on('onOrderChange') para actualizaciones
-//            en tiempo real sin recargar todo el menú.
-//
-//  [PATCH-3] EditarPedido.guardar(): delega a La26Core.guardarEdicionAdmin
-//            para control de inventario consistente con admin.
-//            Incluye _guardarLegacy() como fallback sin La26Core.
-//
-// CAMBIOS v7.4:
-//  [ADD-SESION]      Sesión de mesero por nombre (sessionStorage).
-//  [ADD-MEDIANOCHE]  Reset automático del historial a las 00:00.
-//  [DEL-VENTA]       Stats row solo muestra Total, Pendientes, Entregados.
-//  [ADD-EDITAR]      Módulo EditarPedido completo.
-//
-// CAMBIOS v7.3:
-//  [ADD-HISTORIAL] Módulo Hist integrado directamente en este archivo.
-//
-// CAMBIOS v7.2:
-//  [ADD-DIRECCION] Campo de dirección en pedidos a domicilio.
-//
-// CAMBIOS v7.1:
-//  [FIX-MESA] _resolverTableId sin fallback a Mesa 1.
+// RESTAURANTE LA 26 — PANEL DE ADMINISTRACIÓN
+// admin.js · Versión 3.4
+// FIXES v3.4 (nuevos):
+//  [CAMBIO-3] registrarMetodoPago ya NO marca status='paid'. El pago
+//             se guarda solo en payment_method (+ nota [pago]) para que
+//             el pedido siga apareciendo en la pantalla de cocina hasta
+//             que se despache. cargarHistorialPedidos divide
+//             Pagados/Pendientes por payment_method, no por status.
+//  [CAMBIO-4] La celda de método en el historial muestra "Cambiar"
+//             siempre que haya un método registrado, permitiendo
+//             corregir un método elegido por error en cualquier momento.
+// FIXES v3.1 (heredados):
+//  [FIX-1] SELECT orders: eliminado 'payment_method' (columna inexistente → error 400).
+//  [FIX-2] UPDATE orders: cambiado status 'completed' → 'paid'
+//  [FIX-3] cargarDashboardReal: totales por método de pago desde sessionStorage.
+//  [FIX-4] registrarMetodoPago: guarda método en sessionStorage + BD.
+//  [FIX-5] eliminarComponenteCatalogo: patrón .catch() → try/catch con await.
+// FIXES v3.2 (heredados):
+//  [FIX-6] SOFT DELETE en eliminarComponenteCatalogo.
+//  [FIX-7] cargarSlotsMenuReal: filtro .neq('is_active', false).
+//  [FIX-8] Modal de edición de comandas en admin.html. 
+// FIXES v3.3 (nuevos):
+//  [FIX-9]  _guardarEdicionLegacyAdmin: reemplaza TODOS los
+//           .catch() encadenados por try/catch con await.
+//           Supabase JS v2 devuelve {data, error}, NO promesas
+//           con .catch(). Esto causaba el error
+//           "supabaseClient.from(...).insert(...).catch is not a function".
+//  [FIX-10] cargarDashboardReal: resuelve el número/nombre de
+//           mesa correctamente. Ahora consulta la tabla de mesas
+//           (tables / restaurant_tables) para convertir table_id
+//           al nombre visible. Fallback: "[MESA ...]" en notes,
+//           luego table_id truncado, luego "P.L.".
+// Bucaramanga, Santander — Colombia
 // ============================================================
-
-'use strict';
 
 // ============================================================
 // CREDENCIALES SUPABASE
 // ============================================================
 const SUPABASE_URL      = "https://hxmodeduckuhvvspnkxd.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_ESxhljLgqWkGvrnKhvbeEg_iBqaGciv";
-const RESTAURANT_SLUG   = "restaurante-la-26";
 
-const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-// ============================================================
-// CATEGORÍAS DE MENÚ
-// ============================================================
-const CATEGORIAS = {
-    protein:        { label: 'Proteína con Salsa', icono: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M18 6c0-2.2-2.7-4-6-4S6 3.8 6 6c0 1.7 1 3.1 2.4 3.8L6 22h12l-2.4-12.2C16.9 9.1 18 7.7 18 6z"/></svg>', orden: 1 },
-    side:           { label: 'Principio',          icono: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M12 2a10 10 0 0 1 10 10H2A10 10 0 0 1 12 2z"/><path d="M6 22h12"/><path d="M12 12v10"/></svg>', orden: 2 },
-    drink:          { label: 'Bebida',             icono: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M8 2h8l1 10H7L8 2z"/><path d="M7 12c0 5 2 8 5 8s5-3 5-8"/></svg>', orden: 3 },
-    a_la_carte:     { label: 'A la Carta',         icono: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>', orden: 4 },
-    executive_lunch:{ label: 'Menú Ejecutivo',     icono: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>', orden: 5 },
-    dessert:        { label: 'Postre',             icono: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M6 2h12l2 6H4L6 2z"/><path d="M4 8c0 8 2 12 8 12s8-4 8-12"/></svg>', orden: 6 },
-};
-
-const ITEM_TYPES_VALIDOS = ['executive_lunch','a_la_carte','drink','dessert','side'];
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ============================================================
-// [v7.6 · CAMBIO-11] RECARGO POR DESECHABLE (pedidos para llevar)
-// ------------------------------------------------------------
-// $1.000 por cada ALMUERZO/PROTEÍNA que se va para llevar
-// (es el costo del empaque desechable). NO aplica a bebidas,
-// principios incluidos, postres ni platos a la carta.
+// CONSTANTES TRIBUTARIAS — ESTATUTO TRIBUTARIO COLOMBIA
 // ============================================================
-const RECARGO_DESECHABLE = 1000;
-const TIPOS_ALMUERZO     = ['protein', 'executive_lunch'];
-
-function _esAlmuerzo(slot) {
-    return !!slot && TIPOS_ALMUERZO.includes(slot.itemType);
-}
-
-// Modalidad actualmente seleccionada en el formulario (default 'mesa')
-function _modalidadActual() {
-    const r = document.querySelector('input[name="form-modalidad"]:checked');
-    return r?.value || 'mesa';
-}
-
-// ¿Un ítem del carrito viaja para llevar?
-// - Si todo el pedido es 'llevar'/'domicilio' → sí.
-// - Si el ítem fue marcado individualmente (item.paraLlevar) → sí. (#12, siguiente paso)
-function _itemViajaParaLlevar(item, modalidad) {
-    if (modalidad === 'llevar' || modalidad === 'domicilio') return true;
-    return !!item.paraLlevar;
-}
-
-// Recargo total de empaque del carrito según la modalidad actual
-function calcularRecargoEmpaque(modalidad = _modalidadActual()) {
-    return State.cart.reduce((acc, item) => {
-        const slot = State.slots.find(s => s.id === item.slotId);
-        if (!slot || !_esAlmuerzo(slot)) return acc;
-        if (!_itemViajaParaLlevar(item, modalidad)) return acc;
-        return acc + RECARGO_DESECHABLE * item.cantidad;
-    }, 0);
-}
-
-// Estados que permiten edición
-const ESTADOS_EDITABLES = ['pending', 'preparing', 'confirmed'];
-// Estados de ítem que NO se pueden eliminar
-const ITEM_ESTADOS_NO_ELIMINABLES = ['preparing', 'delivered'];
+const TASA_RETE_ICA    = 0.0069;
+const TASA_IMPOCONSUMO = 0.08;
 
 // ============================================================
-// ESTADO GLOBAL
+// ESTADO GLOBAL CONTABLE
 // ============================================================
-const State = {
-    restaurantId:    null,
-    slots:           [],
-    cart:            [],
-    filtro:          'todos',
-    isSubmitting:    false,
-    realtimeChannel: null,
-};
+let globalIngresos = 0;
+let globalEgresos  = 0;
+let totalEfectivo      = 0;
+let totalTransferencia = 0;
+let totalFiado         = 0;
+let baseInicial        = 0;
 
 // ============================================================
-// ═══ SESIÓN DE MESERO ═══
-// ============================================================
-const Sesion = {
-    KEY: 'la26_mesero_nombre',
-
-    obtener() {
-        return sessionStorage.getItem(this.KEY) || null;
-    },
-
-    guardar(nombre) {
-        const n = (nombre || '').trim();
-        if (!n) return false;
-        sessionStorage.setItem(this.KEY, n);
-        return true;
-    },
-
-    cerrar() {
-        sessionStorage.removeItem(this.KEY);
-    },
-
-    label() {
-        const n = this.obtener();
-        return n ? n : '—';
-    },
-
-    async requerir() {
-        if (this.obtener()) {
-            _actualizarBannerMesero();
-            return;
-        }
-        await this._mostrarPrompt();
-        _actualizarBannerMesero();
-    },
-
-    _mostrarPrompt() {
-        return new Promise((resolve) => {
-            const overlay = document.getElementById('sesion-overlay');
-            const input   = document.getElementById('sesion-input');
-            const btn     = document.getElementById('sesion-btn');
-            const errEl   = document.getElementById('sesion-error');
-            if (!overlay) { resolve(); return; }
-
-            overlay.style.display = 'flex';
-            if (input) { input.value = ''; setTimeout(() => input.focus(), 120); }
-            if (errEl) errEl.style.display = 'none';
-
-            const confirmar = () => {
-                const val = (input?.value || '').trim();
-                if (!val) {
-                    if (errEl) { errEl.textContent = 'Ingresa tu nombre para continuar.'; errEl.style.display = 'block'; }
-                    input?.focus();
-                    return;
-                }
-                this.guardar(val);
-                overlay.style.display = 'none';
-                resolve();
-            };
-
-            if (btn) btn.onclick = confirmar;
-            if (input) {
-                input.onkeydown = (e) => { if (e.key === 'Enter') confirmar(); };
-            }
-        });
-    },
-
-    cambiar() {
-        const overlay = document.getElementById('sesion-overlay');
-        const input   = document.getElementById('sesion-input');
-        const errEl   = document.getElementById('sesion-error');
-        if (!overlay) return;
-        this.cerrar();
-        if (input) input.value = '';
-        if (errEl) errEl.style.display = 'none';
-        overlay.style.display = 'flex';
-        setTimeout(() => input?.focus(), 120);
-
-        const btn = document.getElementById('sesion-btn');
-        if (btn) {
-            btn.onclick = () => {
-                const val = (input?.value || '').trim();
-                if (!val) {
-                    if (errEl) { errEl.textContent = 'Ingresa tu nombre para continuar.'; errEl.style.display = 'block'; }
-                    input?.focus();
-                    return;
-                }
-                this.guardar(val);
-                overlay.style.display = 'none';
-                _actualizarBannerMesero();
-                HistState.cargado = false;
-                HistState.pedidos = [];
-                if (typeof Tabs !== 'undefined' && Tabs.actual === 'historial') {
-                    Hist.cargar();
-                }
-            };
-        }
-    },
-};
-
-function _actualizarBannerMesero() {
-    const el = document.getElementById('mesero-nombre-display');
-    if (el) el.textContent = Sesion.label();
-}
-
-// ============================================================
-// RESET AUTOMÁTICO A MEDIANOCHE
-// ============================================================
-function _programarResetMedianoche() {
-    const ahora  = new Date();
-    const manana = new Date(ahora);
-    manana.setDate(manana.getDate() + 1);
-    manana.setHours(0, 0, 5, 0);
-    const ms = manana - ahora;
-
-    setTimeout(() => {
-        HistState.cargado = false;
-        HistState.pedidos = [];
-        if (typeof Tabs !== 'undefined' && Tabs.actual === 'historial') {
-            Hist.cargar();
-        }
-        _programarResetMedianoche();
-    }, ms);
-}
-
-// ============================================================
-// TOAST
+// TOAST NOTIFICATIONS
 // ============================================================
 const Toast = (function() {
-    function show(msg, tipo = 'info', dur = 3800) {
-        const wrap = document.getElementById('toast-wrap');
-        if (!wrap) return;
-        const c = {
-            ok:    { bg:'#f5f7f0', border:'rgba(74,103,65,0.35)',  text:'#2e4028', dot:'#4a6741' },
-            error: { bg:'#fdf5f3', border:'rgba(192,80,60,0.30)',  text:'#6b2a1e', dot:'#c0503c' },
-            info:  { bg:'#f5f7f0', border:'rgba(74,103,65,0.25)',  text:'#3a4a38', dot:'#4a6741' },
-        }[tipo] || {};
-
+    let _c = null;
+    function _init() {
+        if (_c) return;
+        _c = document.createElement('div');
+        Object.assign(_c.style, {
+            position:'fixed', top:'20px', left:'50%', transform:'translateX(-50%)',
+            zIndex:'9999', display:'flex', flexDirection:'column', gap:'8px',
+            alignItems:'center', pointerEvents:'none',
+            width:'max-content', maxWidth:'calc(100vw - 32px)',
+        });
+        document.body.appendChild(_c);
+    }
+    function show(msg, tipo, ms = 3800) {
+        _init();
+        const pal = {
+            ok:    { bg:'#f5f7f0', bd:'rgba(74,103,65,.35)',  tx:'#2e4028', dot:'#4a6741' },
+            error: { bg:'#fdf5f3', bd:'rgba(192,80,60,.30)',  tx:'#6b2a1e', dot:'#c0503c' },
+            info:  { bg:'#f5f7f0', bd:'rgba(74,103,65,.25)',  tx:'#3a4a38', dot:'#4a6741' },
+        };
+        const c = pal[tipo] || pal.info;
         const t = document.createElement('div');
         Object.assign(t.style, {
             display:'flex', alignItems:'center', gap:'9px',
-            background:c.bg, border:`1.5px solid ${c.border}`,
-            borderRadius:'999px', padding:'10px 20px 10px 14px',
-            boxShadow:'0 4px 20px rgba(0,0,0,0.10)',
-            fontSize:'13.5px', fontFamily:"'DM Sans',sans-serif",
-            fontWeight:'500', color:c.text,
-            pointerEvents:'auto', opacity:'0',
-            transform:'translateY(-8px)',
+            background:c.bg, border:`1.5px solid ${c.bd}`, borderRadius:'999px',
+            padding:'10px 20px 10px 14px', boxShadow:'0 4px 20px rgba(0,0,0,.10)',
+            fontSize:'13.5px', fontFamily:"'DM Sans',sans-serif", fontWeight:'500',
+            color:c.tx, pointerEvents:'auto',
+            opacity:'0', transform:'translateY(-8px)',
             transition:'opacity .28s ease, transform .28s ease',
-            maxWidth:'calc(100vw - 32px)',
         });
         const dot = document.createElement('span');
-        Object.assign(dot.style,{ width:'7px',height:'7px',borderRadius:'50%',background:c.dot,flexShrink:'0',display:'block' });
+        Object.assign(dot.style, { width:'7px', height:'7px', borderRadius:'50%', background:c.dot, flexShrink:'0', display:'block' });
         const txt = document.createElement('span');
         txt.textContent = msg;
-        t.appendChild(dot); t.appendChild(txt);
-        wrap.appendChild(t);
-
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-            t.style.opacity = '1'; t.style.transform = 'translateY(0)';
-        }));
-        const timer = setTimeout(() => {
-            t.style.opacity = '0'; t.style.transform = 'translateY(-8px)';
-            setTimeout(() => t.remove(), 300);
-        }, dur);
+        t.appendChild(dot); t.appendChild(txt); _c.appendChild(t);
+        requestAnimationFrame(() => requestAnimationFrame(() => { t.style.opacity='1'; t.style.transform='translateY(0)'; }));
+        const timer = setTimeout(() => { t.style.opacity='0'; t.style.transform='translateY(-8px)'; setTimeout(() => t.remove(), 300); }, ms);
         t.onclick = () => { clearTimeout(timer); t.remove(); };
     }
-    return {
-        ok:    (m,ms) => show(m,'ok',ms),
-        error: (m,ms) => show(m,'error',ms),
-        info:  (m,ms) => show(m,'info',ms),
-    };
+    return { ok:(m,ms)=>show(m,'ok',ms), error:(m,ms)=>show(m,'error',ms), info:(m,ms)=>show(m,'info',ms) };
 })();
 
 // ============================================================
-// HELPERS
+// FORMATO MONEDA COP
 // ============================================================
-function formatCOP(v) {
-    return '$' + Math.round(v || 0).toLocaleString('es-CO');
-}
-function todayISO() {
-    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
-}
-function generarNumeroOrden() {
-    return `LA26-${Math.floor(10000000 + Math.random() * 89999999)}`;
-}
-
-// [v7.6 · CAMBIO-10] Código secuencial diario para pedidos PARA LLEVAR/DOMICILIO.
-// Formato LLV-001, LLV-002… Reinicia cada día (cuenta desde las 00:00 Bogotá).
-// Los pedidos en mesa conservan su número aleatorio normal.
-async function _generarNumeroOrden(modalidad) {
-    if (modalidad !== 'llevar' && modalidad !== 'domicilio') {
-        return generarNumeroOrden();
-    }
-    try {
-        const hoy    = todayISO();
-        const manana = new Date(new Date(`${hoy}T05:00:00Z`).getTime() + 86400000)
-                         .toISOString().slice(0, 10);
-        let q = db.from('orders')
-            .select('notes')
-            .gte('created_at', `${hoy}T05:00:00Z`)
-            .lt('created_at',  `${manana}T05:00:00Z`);
-        if (State.restaurantId) q = q.eq('restaurant_id', State.restaurantId);
-        const { data, error } = await q;
-        if (error) throw error;
-        const n = (data || []).filter(o =>
-            /\[PARA LLEVAR\]|\[DOMICILIO\]/.test(o.notes || '')
-        ).length + 1;
-        return `LLV-${String(n).padStart(3, '0')}`;
-    } catch (err) {
-        console.warn('[La 26] No se pudo generar código de llevar, uso aleatorio:', err.message);
-        return generarNumeroOrden();
-    }
-}
-
-function calcularTotal() {
-    const base = State.cart.reduce((acc, item) => {
-        const slot = State.slots.find(s => s.id === item.slotId);
-        return acc + (slot ? slot.precio * item.cantidad : 0);
-    }, 0);
-    // [v7.6 · CAMBIO-11] Suma el recargo por desechable de los almuerzos para llevar
-    return base + calcularRecargoEmpaque();
-}
-function calcularCantidadTotal() {
-    return State.cart.reduce((acc, item) => acc + item.cantidad, 0);
-}
-function slotsFiltrados() {
-    if (State.filtro === 'todos') return State.slots;
-    return State.slots.filter(s => s.itemType === State.filtro);
+function formatCOP(valor) {
+    return new Intl.NumberFormat('es-CO', {
+        style: 'currency',
+        currency: 'COP',
+        maximumFractionDigits: 0
+    }).format(valor);
 }
 
 // ============================================================
-// RESOLVER RESTAURANT_ID
+// MAPA DE TIPOS DE PLATO
 // ============================================================
-let _restaurantResolving = false;
-
-async function _resolverRestaurant() {
-    if (State.restaurantId || _restaurantResolving) return;
-    _restaurantResolving = true;
-    try {
-        const { data: r1, error: e1 } = await db
-            .from('restaurants').select('id')
-            .eq('slug', RESTAURANT_SLUG).maybeSingle();
-        if (e1) console.warn('[La 26] restaurants query error:', e1.message);
-        if (r1?.id) { State.restaurantId = r1.id; return; }
-
-        const { data: r2 } = await db.from('restaurants').select('id').limit(1).maybeSingle();
-        if (r2?.id) { State.restaurantId = r2.id; return; }
-
-        const { data: r3 } = await db
-            .from('restaurants')
-            .insert([{ name: 'Restaurante la 26', slug: RESTAURANT_SLUG }])
-            .select('id').single();
-        if (r3?.id) State.restaurantId = r3.id;
-    } catch (err) {
-        console.warn('[La 26] Error resolviendo restaurant_id:', err);
-    } finally {
-        _restaurantResolving = false;
-    }
-}
-
-// ============================================================
-// RESOLVER TABLE_ID  (v7.1 — sin fallback a Mesa 1)
-// ============================================================
-async function _resolverTableId(modalidad, mesa) {
-    if (!State.restaurantId) await _resolverRestaurant();
-    if (!State.restaurantId) return null;
-
-    if (modalidad === 'mesa') {
-        const mesaNum = parseInt(mesa);
-
-        if (!isNaN(mesaNum) && mesaNum > 0) {
-            const { data: porNum } = await db.from('tables').select('id')
-                .eq('restaurant_id', State.restaurantId).eq('number', mesaNum).maybeSingle();
-            if (porNum?.id) return porNum.id;
-        }
-
-        if (mesa) {
-            const { data: porLabel } = await db.from('tables').select('id')
-                .eq('restaurant_id', State.restaurantId)
-                .ilike('label', `%${mesa}%`)
-                .not('label','ilike','%llevar%')
-                .not('label','ilike','%domicilio%')
-                .not('label','ilike','%takeaway%')
-                .maybeSingle();
-            if (porLabel?.id) return porLabel.id;
-        }
-
-        const mesaNumFinal = (!isNaN(parseInt(mesa)) && parseInt(mesa) > 0) ? parseInt(mesa) : null;
-        if (mesaNumFinal) {
-            try {
-                const { data: nueva, error: errNueva } = await db.from('tables')
-                    .insert([{
-                        restaurant_id: State.restaurantId,
-                        number: mesaNumFinal,
-                        label: `Mesa ${mesaNumFinal}`,
-                        qr_code: `MESA-${State.restaurantId}-${mesaNumFinal}-${Date.now()}`,
-                        capacity: 4, status: 'available',
-                    }]).select('id').single();
-                if (nueva?.id) return nueva.id;
-                if (errNueva?.code === '23505') {
-                    const { data: reintento } = await db.from('tables').select('id')
-                        .eq('restaurant_id', State.restaurantId).eq('number', mesaNumFinal).maybeSingle();
-                    if (reintento?.id) return reintento.id;
-                }
-            } catch (e) {
-                console.warn(`[La 26] No se pudo crear Mesa ${mesaNumFinal}:`, e.message);
-            }
-        }
-        return null;
-    }
-
-    // Para llevar / domicilio
-    const { data: mv0 } = await db.from('tables').select('id')
-        .eq('restaurant_id', State.restaurantId).eq('number', 0).maybeSingle();
-    if (mv0?.id) return mv0.id;
-
-    const { data: mvL } = await db.from('tables').select('id')
-        .eq('restaurant_id', State.restaurantId).ilike('label','%para llevar%').maybeSingle();
-    if (mvL?.id) return mvL.id;
-
-    const { data: mn } = await db.from('tables').insert([{
-        restaurant_id: State.restaurantId, number: 0,
-        label: 'Para Llevar / Domicilio',
-        qr_code: `VIRTUAL-TAKEAWAY-${State.restaurantId}-${Date.now()}`,
-        capacity: 99, status: 'available',
-    }]).select('id').single();
-    return mn?.id || null;
-}
-
-// ============================================================
-// MENÚ
-// ============================================================
-const Menu = {
-    async cargar() {
-        _mostrarEstado('loader');
-        if (!State.restaurantId) await _resolverRestaurant();
-        if (!State.restaurantId) {
-            _mostrarEstado('error', 'No se pudo identificar el restaurante.');
-            return;
-        }
-        try {
-            const { data: dataRaw, error } = await db
-                .from('menu_items')
-                .select('id, name, price, item_type, is_active, description, portions_today')
-                .eq('restaurant_id', State.restaurantId)
-                .eq('is_active', true)
-                .order('item_type', { ascending: true })
-                .order('name',      { ascending: true });
-
-            const TIPOS_ACEPTADOS = [...ITEM_TYPES_VALIDOS, 'protein'];
-            const data = dataRaw ? dataRaw.filter(i => TIPOS_ACEPTADOS.includes(i.item_type)) : dataRaw;
-
-            if (error) throw error;
-            if (!data || data.length === 0) { _activarModoDemo(); return; }
-
-            State.slots = data.map(item => {
-                const tienePortions = item.portions_today !== null && item.portions_today !== undefined;
-                const porciones     = tienePortions ? Number(item.portions_today) : 999;
-                const disponible    = item.is_active === true && porciones > 0;
-                return {
-                    id: item.id, menuItemId: item.id,
-                    nombre: item.name, precio: Number(item.price) || 0,
-                    descripcion: item.description || '',
-                    itemType: CATEGORIAS[item.item_type] ? item.item_type : 'a_la_carte',
-                    porciones, disponible,
-                    // [FIX-PORCIONES] Guardar si tiene control real de porciones
-                    tieneControlPorciones: tienePortions,
-                };
-            });
-
-            _renderizarMenu();
-            _mostrarEstado('menu');
-            _suscribirRealtimeMenu();
-        } catch (err) {
-            _mostrarEstado('error', `No se pudo cargar la carta: ${err.message || 'error de red'}`);
-        }
-    },
+const MAPA_TIPO = {
+    executive_lunch: { label: 'Proteína con Salsa', icono: '🥩', porciones: 35, badgeClass: 'badge-protein' },
+    protein:         { label: 'Proteína con Salsa', icono: '🥩', porciones: 35, badgeClass: 'badge-protein' },
+    side:            { label: 'Principio',           icono: '🍲', porciones: 50, badgeClass: 'badge-side'    },
+    drink:           { label: 'Bebida',              icono: '🍹', porciones: 20, badgeClass: 'badge-drink'   },
+    a_la_carte:      { label: 'A la Carta',          icono: '✨', porciones: 15, badgeClass: 'badge-carte'   },
+    soup:            { label: 'Sopa',                icono: '🍜', porciones: 20, badgeClass: 'badge-dessert' },
 };
 
-function _mostrarEstado(estado, msg = '') {
-    const loader   = document.getElementById('app-loader');
-    const error    = document.getElementById('app-error');
-    const sections = document.getElementById('menu-sections');
-    if (loader)   loader.style.display   = estado === 'loader' ? 'flex'  : 'none';
-    if (error)    error.style.display    = estado === 'error'  ? 'flex'  : 'none';
-    if (sections) sections.style.display = estado === 'menu'   ? 'block' : 'none';
-    if (estado === 'error') {
-        if (loader) loader.style.display = 'none';
-        const el = document.getElementById('error-msg');
-        if (el) el.textContent = msg || 'Error desconocido. Recarga la página.';
-    }
-}
-
-function _activarModoDemo() {
-    State.slots = [
-        { id:'demo-p1', menuItemId:null, nombre:'Pechuga a la Plancha con Salsa Criolla', precio:16000, descripcion:'Pechuga jugosa bañada en salsa criolla.', itemType:'protein', porciones:12, disponible:true,  tieneControlPorciones:false },
-        { id:'demo-p2', menuItemId:null, nombre:'Tilapia Frita con Salsa de Ajo',         precio:18000, descripcion:'Tilapia frita con salsa de ajo y limón.',  itemType:'protein', porciones:8,  disponible:true,  tieneControlPorciones:false },
-        { id:'demo-p3', menuItemId:null, nombre:'Cerdo al Horno con Salsa BBQ',           precio:17000, descripcion:'Lomo de cerdo con salsa BBQ artesanal.',   itemType:'protein', porciones:0,  disponible:false, tieneControlPorciones:false },
-        { id:'demo-s1', menuItemId:null, nombre:'Arroz Blanco',                           precio:0,     descripcion:'Acompañamiento del almuerzo.',             itemType:'side',    porciones:30, disponible:true,  tieneControlPorciones:false },
-        { id:'demo-s2', menuItemId:null, nombre:'Fríjoles Rojos con Hogao',              precio:0,     descripcion:'Fríjoles cocinados a fuego lento.',         itemType:'side',    porciones:25, disponible:true,  tieneControlPorciones:false },
-        { id:'demo-d1', menuItemId:null, nombre:'Jugo Natural del Día',                  precio:3000,  descripcion:'Fruta fresca de temporada.',                itemType:'drink',   porciones:30, disponible:true,  tieneControlPorciones:false },
-        { id:'demo-d2', menuItemId:null, nombre:'Limonada de Panela',                    precio:3500,  descripcion:'Limón con panela orgánica.',                itemType:'drink',   porciones:25, disponible:true,  tieneControlPorciones:false },
-    ];
-    _renderizarMenu();
-    _mostrarEstado('menu');
-}
-
-function _renderizarCatsBar() {
-    const bar = document.getElementById('cats-bar');
-    if (!bar) return;
-    bar.innerHTML = '';
-
-    const btnTodos = document.createElement('button');
-    btnTodos.className   = `cat-btn${State.filtro === 'todos' ? ' active' : ''}`;
-    btnTodos.textContent = 'Todos';
-    btnTodos.onclick     = () => _cambiarFiltro('todos');
-    bar.appendChild(btnTodos);
-
-    const tipos = [...new Set(State.slots.map(s => s.itemType))].filter(t => CATEGORIAS[t]);
-    tipos.sort((a,b) => (CATEGORIAS[a]?.orden||99) - (CATEGORIAS[b]?.orden||99))
-        .forEach(tipo => {
-            const cfg = CATEGORIAS[tipo];
-            const btn = document.createElement('button');
-            btn.className   = `cat-btn${State.filtro === tipo ? ' active' : ''}`;
-            btn.innerHTML   = `${cfg.icono} ${cfg.label}`;
-            btn.onclick     = () => _cambiarFiltro(tipo);
-            bar.appendChild(btn);
-        });
-}
-
-function _cambiarFiltro(tipo) {
-    State.filtro = tipo;
-    _renderizarCatsBar();
-    _renderizarMenu();
-}
-
-function _renderizarMenu() {
-    _renderizarCatsBar();
-    const sections = document.getElementById('menu-sections');
-    if (!sections) return;
-    sections.innerHTML = '';
-    const lista = slotsFiltrados();
-    if (!lista || lista.length === 0) {
-        sections.innerHTML = `<div class="empty-state"><div class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#b4b4aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg></div><p>No hay platos disponibles<br>en esta categoría.</p></div>`;
-        return;
-    }
-    const grupos = {};
-    lista.forEach(slot => {
-        const tipo = CATEGORIAS[slot.itemType] ? slot.itemType : 'a_la_carte';
-        if (!grupos[tipo]) grupos[tipo] = [];
-        grupos[tipo].push(slot);
-    });
-    Object.keys(grupos)
-        .sort((a,b) => (CATEGORIAS[a]?.orden||99) - (CATEGORIAS[b]?.orden||99))
-        .forEach((tipo, secIdx) => {
-            const cfg = CATEGORIAS[tipo];
-            const platos = grupos[tipo];
-            if (!platos?.length) return;
-            const sec = document.createElement('div');
-            const header = document.createElement('div');
-            header.className = 'section-label';
-            header.innerHTML = `<h2>${cfg.icono} ${cfg.label}</h2>`;
-            sec.appendChild(header);
-            platos.forEach((slot, i) => {
-                const t = _crearTarjeta(slot);
-                t.style.animationDelay = `${secIdx * 0.06 + i * 0.05}s`;
-                sec.appendChild(t);
-            });
-            sections.appendChild(sec);
-        });
-}
-
-function _crearTarjeta(slot) {
-    const disponible = slot.disponible && slot.porciones > 0;
-    const pocas      = disponible && slot.porciones > 0 && slot.porciones < 999 && slot.porciones <= 5;
-    const enCarrito  = State.cart.find(c => c.slotId === slot.id);
-    const qty        = enCarrito ? enCarrito.cantidad : 0;
-
-    let badgeHTML = '';
-    if (!disponible) badgeHTML = `<span class="badge-agotado">Agotado</span>`;
-    else if (pocas)  badgeHTML = `<span class="badge-pocas">¡Solo quedan ${slot.porciones}!</span>`;
-
-    const precioHTML = slot.precio > 0
-        ? `<span class="plate-price">${formatCOP(slot.precio)}</span>`
-        : `<span class="plate-price incluido">Incluido</span>`;
-
-    let ctrlHTML = '';
-    if (disponible) {
-        ctrlHTML = qty === 0
-            ? `<button class="btn-add" onclick="Cart.agregar('${slot.id}')" aria-label="Agregar ${slot.nombre}">+</button>`
-            : `<div class="qty-chip">
-                   <button onclick="Cart.cambiar('${slot.id}',-1)" aria-label="Quitar">−</button>
-                   <span>${qty}</span>
-                   <button onclick="Cart.cambiar('${slot.id}',+1)" aria-label="Agregar">+</button>
-               </div>`;
-    }
-
-    const card = document.createElement('div');
-    card.id        = `tarjeta-${slot.id}`;
-    card.className = `plate-card${!disponible ? ' agotado' : ''} fade-up`;
-    card.innerHTML = `
-        <div class="plate-info">
-            <p class="plate-name">${slot.nombre}</p>
-            ${slot.descripcion ? `<p class="plate-desc">${slot.descripcion}</p>` : ''}
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px;">
-                ${precioHTML}${badgeHTML}
-            </div>
-        </div>
-        <div style="flex-shrink:0;">${ctrlHTML}</div>`;
-    return card;
-}
-
-function _refrescarTarjeta(slotId) {
-    const slot = State.slots.find(s => s.id === slotId);
-    if (!slot) return;
-    const vieja = document.getElementById(`tarjeta-${slotId}`);
-    if (vieja) vieja.replaceWith(_crearTarjeta(slot));
+function getRangoByCodigo(codigo) {
+    const n = parseInt(codigo) || 0;
+    if (n >= 1  && n <= 10)  return { label: 'Vegetal/Salsa/Base', color: 'var(--olive)' };
+    if (n >= 11 && n <= 30)  return { label: 'Carne/Proteína',     color: '#b43c3c'       };
+    if (n >= 31 && n <= 50)  return { label: 'Acompañamiento',     color: 'var(--amber)'  };
+    if (n >= 51 && n <= 70)  return { label: 'Bebida/Jugo',        color: 'var(--blue)'   };
+    if (n >= 71)             return { label: 'A la Carta',          color: 'var(--purple)' };
+    return { label: '—', color: 'var(--text-3)' };
 }
 
 // ============================================================
-// CARRITO
+// [FIX-10 v2] _buildTableMap — tolerante a nombres de columna
+// Consulta la tabla de mesas y construye { [id]: etiqueta }.
+// Intenta 'tables' primero, luego 'restaurant_tables'.
+// Para el label usa en orden: name → label → number →
+// table_number → los últimos 4 chars del id.
 // ============================================================
-const Cart = {
-    agregar(slotId) {
-        const slot = State.slots.find(s => s.id === slotId);
-        if (!slot || !slot.disponible) return;
-        const existente = State.cart.find(c => c.slotId === slotId);
-        if (existente) {
-            if (slot.porciones < 999 && existente.cantidad >= slot.porciones) {
-                Toast.error(`Solo quedan ${slot.porciones} porciones de "${slot.nombre}".`);
-                return;
-            }
-            existente.cantidad++;
-        } else {
-            State.cart.push({ slotId, cantidad: 1 });
-        }
-        _refrescarTarjeta(slotId);
-        _actualizarCartBar();
-    },
+async function _buildTableMap() {
+    const map = {};
 
-    cambiar(slotId, delta) {
-        const slot = State.slots.find(s => s.id === slotId);
-        if (!slot) return;
-        const idx = State.cart.findIndex(c => c.slotId === slotId);
-        if (idx === -1) return;
-        if (delta > 0 && slot.porciones < 999 && State.cart[idx].cantidad + delta > slot.porciones) {
-            Toast.error(`Solo quedan ${slot.porciones} porciones.`);
-            return;
-        }
-        const nueva = State.cart[idx].cantidad + delta;
-        if (nueva <= 0) State.cart.splice(idx, 1);
-        else            State.cart[idx].cantidad = nueva;
-        _refrescarTarjeta(slotId);
-        _actualizarCartBar();
-        const modal = document.getElementById('order-modal');
-        if (modal?.classList.contains('open')) Cart._renderSummary();
-    },
-
-    abrir() {
-        if (State.cart.length === 0) return;
-        this._renderSummary();
-        document.getElementById('order-modal').classList.add('open');
-        document.body.style.overflow = 'hidden';
-    },
-
-    cerrar() {
-        document.getElementById('order-modal').classList.remove('open');
-        document.body.style.overflow = '';
-    },
-
-    _renderSummary() {
-        const listEl  = document.getElementById('summary-items');
-        const totalEl = document.getElementById('summary-total');
-        if (!listEl) return;
-        listEl.innerHTML = '';
-        if (State.cart.length === 0) {
-            listEl.innerHTML = `<div style="text-align:center;padding:36px 0;"><p style="font-size:13px;color:var(--ink-ghost);">Tu pedido está vacío.</p></div>`;
-            if (totalEl) totalEl.textContent = '$0';
-            return;
-        }
-        State.cart.forEach(item => {
-            const slot = State.slots.find(s => s.id === item.slotId);
-            if (!slot) return;
-            const row = document.createElement('div');
-            row.className = 'summary-row';
-            row.innerHTML = `
-                <div style="flex:1;min-width:0;">
-                    <p class="summary-name">${slot.nombre}</p>
-                    <p class="summary-qty">${item.cantidad} × ${slot.precio > 0 ? formatCOP(slot.precio) : 'Incluido'}</p>
-                </div>
-                <span class="summary-price">${slot.precio > 0 ? formatCOP(slot.precio * item.cantidad) : '—'}</span>`;
-            listEl.appendChild(row);
+    async function _procesarFilas(filas) {
+        if (!filas || filas.length === 0) return false;
+        filas.forEach(t => {
+            // Acepta cualquiera de los nombres de columna posibles
+            const label =
+                t.label ||
+                (t.number != null && t.number > 0 ? `Mesa ${t.number}` : null) ||
+                String(t.id).slice(-4).toUpperCase();
+            map[t.id] = label;
         });
-
-        // [v7.6 · CAMBIO-11] Línea del recargo por desechable (solo si aplica)
-        const recargo = calcularRecargoEmpaque();
-        if (recargo > 0) {
-            const cantAlmuerzos = recargo / RECARGO_DESECHABLE;
-            const rowR = document.createElement('div');
-            rowR.className = 'summary-row';
-            rowR.innerHTML = `
-                <div style="flex:1;min-width:0;">
-                    <p class="summary-name">Empaque desechable</p>
-                    <p class="summary-qty">${cantAlmuerzos} × ${formatCOP(RECARGO_DESECHABLE)} · pedido para llevar</p>
-                </div>
-                <span class="summary-price">${formatCOP(recargo)}</span>`;
-            listEl.appendChild(rowR);
-        }
-
-        if (totalEl) totalEl.textContent = formatCOP(calcularTotal());
-    },
-};
-
-function _actualizarCartBar() {
-    const qty = calcularCantidadTotal();
-    const bar     = document.getElementById('cart-bar');
-    const countEl = document.getElementById('cart-count');
-    const totalEl = document.getElementById('cart-total');
-    if (countEl) countEl.textContent = qty;
-    if (totalEl) totalEl.textContent = formatCOP(calcularTotal());
-    if (bar) {
-        if (qty > 0) bar.classList.add('visible');
-        else         bar.classList.remove('visible');
+        return true;
     }
+
+    // Intento 1 — tabla 'tables' con todas las columnas candidatas
+    try {
+        const { data, error } = await supabaseClient
+            .from('tables')
+            .select('id, label, number');
+        if (!error && await _procesarFilas(data)) return map;
+    } catch (_) { /* intenta siguiente */ }
+
+    // Intento 2 — tabla 'restaurant_tables'
+    try {
+        const { data, error } = await supabaseClient
+            .from('restaurant_tables')
+            .select('id, label, number');
+        if (!error && await _procesarFilas(data)) return map;
+    } catch (_) { /* sin tabla de mesas */ }
+
+    return map;   // mapa vacío → fallback al UUID truncado
 }
 
 // ============================================================
-// [v7.5 · CAMBIO-1] REINICIO DEL FORMULARIO TRAS UN PEDIDO
+// [v3.4 · FIX-CIERRE] CORTE DEL ÚLTIMO CIERRE — PERSISTENTE
 // ------------------------------------------------------------
-// Deja mesa, nombre, notas y dirección en blanco, y vuelve la
-// modalidad a "mesa". Se llama SIEMPRE que se confirma un pedido
-// para que la siguiente comanda arranque limpia (antes el número
-// de mesa y el nombre del cliente quedaban pegados del pedido
-// anterior). NO toca la sesión del mesero.
+// Antes el corte (cierre_desde) se guardaba en sessionStorage,
+// que se borra al cerrar la pestaña / salir de la app. Por eso,
+// tras cerrar caja y volver a entrar, reaparecían las ventas del
+// día (el dashboard volvía a contar desde las 00:00).
+//
+// Ahora se lee desde localStorage (persiste entre sesiones del
+// mismo dispositivo) con respaldo a sessionStorage para la
+// transición. Solo se aplica si el corte es de HOY; si es de un
+// día anterior se usa el inicio del día, para que cada jornada
+// arranque limpia sin arrastrar el corte viejo.
 // ============================================================
-function _resetFormularioPedido() {
-    const mesaEl      = document.getElementById('form-mesa');
-    const nombreEl    = document.getElementById('form-nombre');
-    const notasEl     = document.getElementById('form-notas');
-    const direccionEl = document.getElementById('form-direccion');
+function _resolverInicioDiaEfectivo(inicioDiaISO) {
+    const cierreDesde = localStorage.getItem('cierre_desde')
+                     || sessionStorage.getItem('cierre_desde');
+    if (!cierreDesde) return inicioDiaISO;
+    const tsCierre = new Date(cierreDesde).getTime();
+    const tsInicio = new Date(inicioDiaISO).getTime();
+    return (isFinite(tsCierre) && tsCierre > tsInicio) ? cierreDesde : inicioDiaISO;
+}
+// ============================================================
+// 1. DASHBOARD — CONTABILIDAD Y COMANDAS
+// [FIX-10] Se agrega consulta de mesas para resolver table_id
+// ============================================================
+async function cargarDashboardReal() {
+    try {
+        const _ahora     = new Date();
+        const _offsetMs  = 5 * 60 * 60 * 1000;
+        const _hoyLocal  = new Date(_ahora.getTime() - _offsetMs);
+        const _yyyy      = _hoyLocal.getUTCFullYear();
+        const _mm        = String(_hoyLocal.getUTCMonth() + 1).padStart(2, '0');
+        const _dd        = String(_hoyLocal.getUTCDate()).padStart(2, '0');
+        const _inicioDia = `${_yyyy}-${_mm}-${_dd}T00:00:00-05:00`;
+        const _finDia    = `${_yyyy}-${_mm}-${_dd}T23:59:59-05:00`;
 
-    if (mesaEl)      { mesaEl.value      = ''; mesaEl.classList.remove('error'); }
-    if (nombreEl)    nombreEl.value    = '';
-    if (notasEl)     notasEl.value     = '';
-    if (direccionEl) { direccionEl.value = ''; direccionEl.classList.remove('error'); }
+        // [v3.4 · FIX-CIERRE] Corte persistente (localStorage), con piso por día
+        const _inicioDiaEfectivo = _resolverInicioDiaEfectivo(_inicioDia);
 
-    // Volver a la modalidad por defecto ("mesa")
-    document.querySelectorAll('.modalidad-tab').forEach(tab => {
-        const radio  = tab.querySelector('input[type="radio"]');
-        const esMesa = radio && radio.value === 'mesa';
-        tab.classList.toggle('active', !!esMesa);
-        if (radio) radio.checked = !!esMesa;
-    });
-    const mesaWrap = document.getElementById('campo-mesa-wrapper');
-    const dirWrap  = document.getElementById('campo-direccion-wrapper');
-    if (mesaWrap) mesaWrap.style.display = 'block';
-    if (dirWrap)  dirWrap.style.display  = 'none';
+        // [FIX-10] Cargar mapa de mesas en paralelo con las órdenes
+        const [{ data: orders, error }, tableMap] = await Promise.all([
+            supabaseClient
+                .from('orders')
+                .select(`id, order_number, customer_name, total_amount, status, notes, payment_method,
+                         table_id, order_items ( quantity, notes, unit_price )`)
+                .gte('created_at', _inicioDiaEfectivo)
+                .lte('created_at', _finDia),
+            _buildTableMap()
+        ]);
+
+        if (error) throw error;
+
+        const ordenesValidas = (orders || []).filter(o =>
+            o.status !== 'canceled' && o.status !== 'cancelled'
+        );
+
+        globalIngresos = ordenesValidas.reduce(
+            (acc, o) => acc + (parseFloat(o.total_amount) || 0), 0
+        );
+
+        const elPedidos2 = document.getElementById('total-pedidos');
+        if (elPedidos2) elPedidos2.textContent = `${ordenesValidas.length} pedidos`;
+
+        const tbodyFacturas = document.getElementById('tabla-facturas');
+        if (tbodyFacturas) {
+            tbodyFacturas.innerHTML = '';
+            if (ordenesValidas.length === 0) {
+                tbodyFacturas.innerHTML = `
+                    <tr>
+                        <td colspan="6" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                            Sin comandas registradas hoy.
+                        </td>
+                    </tr>`;
+            } else {
+                let _ef = 0, _tr = 0, _fi = 0;
+                ordenesValidas.forEach(ord => {
+                    const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
+                    const monto  = parseFloat(ord.total_amount) || 0;
+                    if (metodo === 'efectivo')      _ef += monto;
+                    if (metodo === 'transferencia') _tr += monto;
+                    if (metodo === 'fiado')         _fi += monto;
+                });
+                sessionStorage.setItem('pm_efectivo',      String(_ef));
+                sessionStorage.setItem('pm_transferencia', String(_tr));
+                sessionStorage.setItem('pm_fiado',         String(_fi));
+                totalEfectivo      = _ef;
+                totalTransferencia = _tr;
+                totalFiado         = _fi;
+                renderizarTotales();
+
+                ordenesValidas.forEach(ord => {
+                    const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
+                    const badgeMetodo = metodo
+                        ? _badgeMetodo(metodo)
+                        : `<span style="font-size:10px;font-weight:600;padding:3px 11px;border-radius:999px;
+                            background:var(--amber-lt);color:var(--amber);border:1.5px solid rgba(154,108,26,.28);
+                            display:inline-block;cursor:pointer;" onclick="cambiarTab('pedidos')"
+                            title="Ir a Historial de Pedidos para registrar el pago">⏳ Pendiente</span>`;
+
+                    // [FIX-10] Resolución de mesa:
+                    // 1. Busca [MESA ...] o [PARA LLEVAR] / [DOMICILIO] en notes
+                    // 2. Si tiene table_id, busca en tableMap
+                    // 3. Fallback: 'P.L.'
+                    const mesaMatch = (ord.notes || '').match(/\[MESA\]\s*Mesa:\s*([^|]+)/i);
+                    const esPL = (ord.notes || '').includes('[PARA LLEVAR]');
+                    const esDom = (ord.notes || '').includes('[DOMICILIO]');
+                    let mesaLabel;
+                    if (mesaMatch) {
+                        mesaLabel = mesaMatch[1].trim();
+                    } else if (esPL) {
+                        mesaLabel = 'Para Llevar';
+                    } else if (esDom) {
+                        mesaLabel = 'Domicilio';
+                    } else if (ord.table_id && tableMap[ord.table_id]) {
+                        mesaLabel = tableMap[ord.table_id];
+                    } else if (ord.table_id) {
+                        mesaLabel = String(ord.table_id).slice(-4).toUpperCase();
+                    } else {
+                        mesaLabel = 'P.L.';
+                    }
+
+                    tbodyFacturas.insertAdjacentHTML('afterbegin', `
+                        <tr class="tbody-row">
+                            <td>
+                                <span class="mono" style="font-size:11.5px;font-weight:700;color:var(--olive);">${ord.order_number}</span>
+                            </td>
+                            <td style="font-size:12px;color:var(--text-2);font-weight:600;white-space:nowrap;">${mesaLabel}</td>
+                            <td style="font-size:13px;color:var(--text-1);font-weight:500;">${ord.customer_name || 'Consumidor Final'}</td>
+                            <td>
+                                <span class="mono" style="font-size:13px;font-weight:700;color:var(--olive);">${formatCOP(ord.total_amount)}</span>
+                            </td>
+                            <td style="text-align:center;">${badgeMetodo}</td>
+                            <td style="text-align:center;">
+                                <div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;">
+                                    <button onclick="exportarReciboPDF('${ord.id}')"
+                                        style="background:var(--surface-2);border:1.5px solid var(--border);color:var(--text-2);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
+                                        onmouseover="this.style.background='var(--surface-3)'"
+                                        onmouseout="this.style.background='var(--surface-2)'">
+                                        📄 PDF
+                                    </button>
+                                    <button onclick="abrirModalFacturaElectronica('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
+                                        style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
+                                        onmouseover="this.style.background='rgba(74,103,65,.16)'"
+                                        onmouseout="this.style.background='var(--olive-lt)'">
+                                        🧾 DIAN
+                                    </button>
+                                    <button onclick="editarComandaAdmin('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
+                                        style="background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.28);color:var(--blue);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
+                                        onmouseover="this.style.background='rgba(37,99,168,.16)'"
+                                        onmouseout="this.style.background='var(--blue-lt)'">
+                                        ✏️ Editar
+                                    </button>
+                                    <button onclick="eliminarComandaReal('${ord.id}', '${ord.order_number}')" class="btn-danger">
+                                        🗑️
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>`);
+                });
+            }
+        }
+
+        // Top platos
+        const ranking = {};
+        (orders || []).forEach(ord => {
+            if (!ord.order_items) return;
+            ord.order_items.forEach(item => {
+                let nombre = 'Plato Especial';
+                if (item.notes && item.notes.includes('[nombre]')) {
+                    nombre = item.notes.split('[nombre]')[1].split('|')[0].trim();
+                }
+                ranking[nombre] = (ranking[nombre] || 0) + (item.quantity || 1);
+            });
+        });
+
+        const tbodyTop = document.getElementById('tabla-top-platos');
+        if (tbodyTop) {
+            tbodyTop.innerHTML = '';
+            const listaPlatos = Object.keys(ranking);
+            if (listaPlatos.length === 0) {
+                tbodyTop.innerHTML = `
+                    <tr>
+                        <td colspan="2" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                            Sin datos de platos aún.
+                        </td>
+                    </tr>`;
+            } else {
+                listaPlatos
+                    .sort((a, b) => ranking[b] - ranking[a])
+                    .forEach(plato => {
+                        tbodyTop.insertAdjacentHTML('beforeend', `
+                            <tr class="tbody-row">
+                                <td style="color:var(--text-1);font-size:13px;">${plato}</td>
+                                <td style="text-align:center;">
+                                    <span class="mono" style="font-size:13px;font-weight:600;color:var(--olive);">${ranking[plato]}</span>
+                                </td>
+                            </tr>`);
+                    });
+            }
+        }
+
+        const { data: gastos } = await supabaseClient
+            .from('operating_expenses')
+            .select('amount')
+            .gte('created_at', _inicioDiaEfectivo)
+            .lte('created_at', _finDia);
+        globalEgresos = (gastos || []).reduce(
+            (acc, g) => acc + (parseFloat(g.amount) || 0), 0
+        );
+        const elTotalGastos = document.getElementById('total-gastos');
+        if (elTotalGastos) elTotalGastos.textContent = formatCOP(globalEgresos);
+
+    } catch (err) {
+        console.error('Error cargando dashboard:', err);
+    }
 }
 
 // ============================================================
-// [FIX-PORCIONES-CRITICO] DESCUENTO DIRECTO DE PORCIONES
+// ELIMINAR COMANDA
 // ============================================================
-// Esta función se ejecuta SIEMPRE después de confirmar una orden,
-// independientemente de si La26Core está disponible o no.
-// Solo descuenta ítems que tienen control real de porciones
-// (tieneControlPorciones === true, es decir portions_today != null en BD).
-//
-// Usa una actualización atómica segura:
-//   portions_today = GREATEST(portions_today - cantidad, 0)
-// para nunca ir a negativo.
+async function eliminarComandaReal(idComanda, nroOrden) {
+    if (!confirm(`⚠️ ¿Eliminar la orden ${nroOrden}?\nEsto restará el monto de los reportes.`)) return;
+    try {
+        await supabaseClient.from('order_items').delete().eq('order_id', idComanda);
+        const { error } = await supabaseClient.from('orders').delete().eq('id', idComanda);
+        if (error) throw error;
+        Toast.ok(`Orden ${nroOrden} eliminada correctamente.`);
+        cargarDashboardReal();
+    } catch (err) {
+        console.error('Error eliminando comanda:', err);
+        Toast.error('Error al eliminar el registro.');
+    }
+}
+
 // ============================================================
-async function _descontarPorciones(cartSnapshot) {
-    // cartSnapshot = copia del carrito en el momento de confirmar
-    // [{slotId, cantidad}]
+// REGISTRAR MÉTODO DE PAGO EN UNA ORDEN
+// ============================================================
+async function registrarMetodoPago(orderId, metodo) {
+    if (!metodo) return;
+    try {
+        const { data: ordData, error: errRead } = await supabaseClient
+            .from('orders')
+            .select('total_amount, notes, payment_method')
+            .eq('id', orderId)
+            .single();
+        if (errRead) throw errRead;
 
-    const itemsConControl = cartSnapshot
-        .map(item => {
-            const slot = State.slots.find(s => s.id === item.slotId);
-            if (!slot) return null;
-            // Solo descuenta si tiene menuItemId real (no demo) y control de porciones
-            if (!slot.menuItemId || !slot.tieneControlPorciones) return null;
-            return { menuItemId: slot.menuItemId, cantidad: item.cantidad, slot };
-        })
-        .filter(Boolean);
+        const monto = parseFloat(ordData.total_amount) || 0;
 
-    if (itemsConControl.length === 0) {
-        // No hay ítems con control de porciones — no hay nada que descontar
+        const notesBase  = (ordData.notes || '').replace(/\|\[pago\][^|]*/g, '').trimEnd();
+        const notesNuevo = `${notesBase}|[pago]${metodo}`;
+
+        // [v3.4 · CAMBIO-3] NO se cambia el status a 'paid'. El pago se
+        // registra SOLO en payment_method (+ nota [pago]). Así el pedido
+        // sigue visible en la pantalla de cocina hasta que se despache.
+        // "Pagado" (payment_method) y "despachado" (status=delivered)
+        // quedan desacoplados.
+        const { error } = await supabaseClient
+            .from('orders')
+            .update({ notes: notesNuevo, payment_method: metodo })
+            .eq('id', orderId);
+        if (error) throw error;
+
+        const metodoAnterior = ordData.payment_method || _extraerMetodoDeNotes(ordData.notes || '');
+        if (metodoAnterior && metodoAnterior !== metodo) {
+            const keyViejo  = `pm_${metodoAnterior}`;
+            const acumViejo = parseFloat(sessionStorage.getItem(keyViejo) || '0');
+            sessionStorage.setItem(keyViejo, String(Math.max(0, acumViejo - monto)));
+        }
+        const keyPm = `pm_${metodo}`;
+        if (metodoAnterior !== metodo) {
+            const acum = parseFloat(sessionStorage.getItem(keyPm) || '0');
+            sessionStorage.setItem(keyPm, String(acum + monto));
+        }
+
+        totalEfectivo      = parseFloat(sessionStorage.getItem('pm_efectivo')      || '0');
+        totalTransferencia = parseFloat(sessionStorage.getItem('pm_transferencia') || '0');
+        totalFiado         = parseFloat(sessionStorage.getItem('pm_fiado')         || '0');
+        renderizarTotales();
+
+        const label = { efectivo: 'Efectivo 💵', transferencia: 'Transferencia 📲', fiado: 'Fiado 🤝' };
+        Toast.ok(`Pago registrado: ${label[metodo] || metodo}`);
+
+        // Recargar historial de pedidos si el tab está abierto
+        const tabPedidos = document.getElementById('tab-pedidos');
+        if (tabPedidos && tabPedidos.style.display !== 'none') {
+            cargarHistorialPedidos();
+        } else {
+            _actualizarBadgePago(orderId, metodo, monto);
+        }
+
+        descontarInsumosPorOrden(orderId).catch(err =>
+            console.warn('[La 26] Auto-descuento inventario falló silenciosamente:', err.message)
+        );
+
+    } catch (err) {
+        console.error('Error registrando método de pago:', err);
+        Toast.error('No se pudo registrar el método de pago.');
+    }
+}
+
+function _extraerMetodoDeNotes(notes) {
+    const match = (notes || '').match(/\|\[pago\](efectivo|transferencia|fiado)/);
+    return match ? match[1] : null;
+}
+
+function _actualizarBadgePago(orderId, metodo) {
+    const selects = document.querySelectorAll('#tabla-facturas select');
+    selects.forEach(sel => {
+        if (sel.getAttribute('onchange')?.includes(orderId)) {
+            sel.outerHTML = _badgeMetodo(metodo);
+        }
+    });
+}
+
+function _badgeMetodo(metodo) {
+    const cfg = {
+        efectivo:      { bg: 'var(--olive-lt)',  color: 'var(--olive)', bd: 'var(--olive-bd)',     label: '💵 Efectivo'      },
+        transferencia: { bg: 'var(--blue-lt)',   color: 'var(--blue)',  bd: 'rgba(37,99,168,.28)', label: '📲 Transferencia' },
+        fiado:         { bg: 'var(--amber-lt)',  color: 'var(--amber)', bd: 'rgba(154,108,26,.28)',label: '🤝 Fiado'         },
+    };
+    const c = cfg[metodo] || cfg.efectivo;
+    return `<span style="font-size:10px;font-weight:600;padding:3px 11px;border-radius:999px;
+        background:${c.bg};color:${c.color};border:1.5px solid ${c.bd};display:inline-block;">
+        ${c.label}</span>`;
+}
+
+// ============================================================
+// APERTURA DE CAJA
+// ============================================================
+function registrarAperturaCaja() {
+    const inp = document.getElementById('input-base-caja');
+    const val = parseFloat(inp?.value?.replace(/[^0-9.]/g,'')) || 0;
+    if (val <= 0) { Toast.error('Ingresa un monto válido para la base de caja.'); return; }
+    baseInicial = val;
+    sessionStorage.setItem('base_caja_hoy', String(val));
+    Toast.ok(`Base de caja registrada: ${formatCOP(val)}`);
+    const panel = document.getElementById('panel-apertura-caja');
+    if (panel) panel.style.display = 'none';
+}
+
+// ============================================================
+// EXPORTAR PDF
+// ============================================================
+async function exportarReciboPDF(orderId) {
+    try {
+        const { data: ord, error } = await supabaseClient
+            .from('orders')
+            .select(`order_number, customer_name, total_amount, created_at,
+                     order_items ( quantity, notes, unit_price )`)
+            .eq('id', orderId)
+            .single();
+
+        if (error || !ord) throw error || new Error('Orden no encontrada');
+
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ unit: 'mm', format: [80, 160] });
+
+        pdf.setFont('monospace', 'bold');
+        pdf.setFontSize(11);
+        pdf.text('RESTAURANTE LA 26', 40, 10, { align: 'center' });
+        pdf.setFontSize(8);
+        pdf.setFont('monospace', 'normal');
+        pdf.text('Bucaramanga, Santander', 40, 15, { align: 'center' });
+        pdf.text('Nit: 900.123.456-7', 40, 19, { align: 'center' });
+        pdf.text('----------------------------------------', 40, 23, { align: 'center' });
+        pdf.text(`Ref: ${ord.order_number}`, 5, 29);
+        pdf.text(`Cliente: ${ord.customer_name || 'Consumidor Final'}`, 5, 34);
+        pdf.text(`Fecha: ${new Date(ord.created_at).toLocaleString('es-CO')}`, 5, 39);
+        pdf.text('----------------------------------------', 40, 44, { align: 'center' });
+        pdf.setFont('monospace', 'bold');
+        pdf.text('Cant  Detalle                  Subtotal', 5, 49);
+        pdf.setFont('monospace', 'normal');
+
+        let y = 55;
+        if (ord.order_items && ord.order_items.length > 0) {
+            ord.order_items.forEach(item => {
+                let nombre = 'Plato Especial';
+                if (item.notes && item.notes.includes('[nombre]')) {
+                    nombre = item.notes.split('[nombre]')[1].split('|')[0].trim();
+                }
+                if (nombre.length > 20) nombre = nombre.substring(0, 18) + '..';
+                const sub = (item.quantity || 1) * (item.unit_price || 0);
+                pdf.text(`${item.quantity}x    ${nombre.padEnd(22, ' ')} $${sub.toLocaleString()}`, 5, y);
+                y += 6;
+            });
+        }
+
+        pdf.text('----------------------------------------', 40, y, { align: 'center' });
+        y += 6;
+        pdf.setFont('monospace', 'bold');
+        pdf.setFontSize(9);
+        pdf.text(`TOTAL: $${parseInt(ord.total_amount).toLocaleString()} COP`, 5, y);
+        y += 8;
+        const base = ord.total_amount / (1 + TASA_IMPOCONSUMO);
+        const impo = ord.total_amount - base;
+        pdf.setFontSize(7.5);
+        pdf.setFont('monospace', 'normal');
+        pdf.text(`Base gravable: $${Math.round(base).toLocaleString()}`, 5, y);
+        y += 5;
+        pdf.text(`Impoconsumo 8%: $${Math.round(impo).toLocaleString()}`, 5, y);
+        y += 8;
+        pdf.setFont('monospace', 'italic');
+        pdf.text('¡Gracias por visitarnos!', 40, y, { align: 'center' });
+        pdf.save(`Recibo_La26_${ord.order_number}.pdf`);
+
+    } catch (err) {
+        console.error('Error generando PDF:', err);
+        Toast.error('Error al generar la tirilla PDF.');
+    }
+}
+
+// ============================================================
+// RENDERIZAR TOTALES POR MÉTODO DE PAGO EN KPIs
+// ============================================================
+function renderizarTotales() {
+    const elEf = document.getElementById('kpi-efectivo');
+    const elTr = document.getElementById('kpi-transferencia');
+    const elFi = document.getElementById('kpi-fiado');
+    const elSd = document.getElementById('kpi-saldo-caja');
+    const elGv = document.getElementById('gros-ventas');
+
+    if (elEf) elEf.textContent = formatCOP(totalEfectivo);
+    if (elTr) elTr.textContent = formatCOP(totalTransferencia);
+    if (elFi) elFi.textContent = formatCOP(totalFiado);
+    if (elGv) elGv.textContent = formatCOP(globalIngresos);
+
+    const saldoCaja = baseInicial + totalEfectivo + totalTransferencia;
+    if (elSd) elSd.textContent = formatCOP(saldoCaja);
+
+    const baseICA      = Math.max(0, globalIngresos - globalEgresos);
+    const provisionICA = baseICA * TASA_RETE_ICA;
+    const elICA = document.getElementById('val-reteica');
+    if (elICA) elICA.textContent = formatCOP(provisionICA);
+}
+
+// ============================================================
+// DESCUENTO AUTOMÁTICO DE INSUMOS AL REGISTRAR PAGO
+// ============================================================
+async function descontarInsumosPorOrden(orderId) {
+    const { data: items, error: errItems } = await supabaseClient
+        .from('order_items')
+        .select('menu_item_id, quantity, notes')
+        .eq('order_id', orderId);
+
+    if (errItems || !items || items.length === 0) return;
+
+    const { data: recetas } = await supabaseClient
+        .from('production_recipes')
+        .select(`name, recipe_ingredients ( supply_id, supply_name, quantity_per_dish, quantity_required, unit )`);
+
+    if (!recetas || recetas.length === 0) return;
+
+    const menuItemIds = [...new Set(items.map(i => i.menu_item_id).filter(Boolean))];
+    const { data: menuItems } = await supabaseClient
+        .from('menu_items')
+        .select('id, name')
+        .in('id', menuItemIds);
+
+    const menuMap = {};
+    (menuItems || []).forEach(m => { menuMap[m.id] = m.name; });
+
+    const descuentos = {};
+
+    items.forEach(item => {
+        let nombrePlato = menuMap[item.menu_item_id] || '';
+        if (!nombrePlato && item.notes?.includes('[nombre]')) {
+            nombrePlato = item.notes.split('[nombre]')[1].split('|')[0].trim();
+        }
+        if (!nombrePlato) return;
+
+        const receta = recetas.find(r =>
+            r.name.toLowerCase().trim() === nombrePlato.toLowerCase().trim() ||
+            nombrePlato.toLowerCase().includes(r.name.toLowerCase().split(' ')[0])
+        );
+        if (!receta?.recipe_ingredients?.length) return;
+
+        const qty = item.quantity || 1;
+        receta.recipe_ingredients.forEach(ing => {
+            if (!ing.supply_id) return;
+            const _qpd = ing.quantity_per_dish ?? ing.quantity_required ?? 0;
+            descuentos[ing.supply_id] = (descuentos[ing.supply_id] || 0) + _qpd * qty;
+        });
+    });
+
+    if (Object.keys(descuentos).length === 0) return;
+
+    const supplyIds = Object.keys(descuentos);
+    const { data: stocks } = await supabaseClient
+        .from('inventory_supplies')
+        .select('id, current_stock')
+        .in('id', supplyIds);
+
+    for (const s of (stocks || [])) {
+        const nuevoStock = Math.max(0, (parseFloat(s.current_stock) || 0) - (descuentos[s.id] || 0));
+        await supabaseClient
+            .from('inventory_supplies')
+            .update({ current_stock: nuevoStock, updated_at: new Date().toISOString() })
+            .eq('id', s.id);
+    }
+
+    console.log(`[La 26] 📦 Inventario descontado automáticamente para orden ${orderId}`);
+}
+
+// ============================================================
+// MODAL FACTURA ELECTRÓNICA (DIAN)
+// ============================================================
+let _feOrdenId   = null;
+let _feOrdenNo   = null;
+let _feBaseTotal = 0;
+
+function abrirModalFacturaElectronica(orderId, ordenNo, totalBruto) {
+    _feOrdenId   = orderId;
+    _feOrdenNo   = ordenNo;
+    _feBaseTotal = parseFloat(totalBruto) || 0;
+
+    const baseGravable = _feBaseTotal / (1 + TASA_IMPOCONSUMO);
+    const impoconsumo  = _feBaseTotal - baseGravable;
+
+    const elOrdenNo  = document.getElementById('fe-orden-no');
+    const elSubtotal = document.getElementById('fe-subtotal');
+    const elIva      = document.getElementById('fe-iva');
+    const elTotal    = document.getElementById('fe-total');
+    if (elOrdenNo)  elOrdenNo.textContent  = ordenNo;
+    if (elSubtotal) elSubtotal.textContent = formatCOP(baseGravable);
+    if (elIva)      elIva.textContent      = formatCOP(impoconsumo);
+    if (elTotal)    elTotal.textContent    = formatCOP(_feBaseTotal);
+
+    const modal    = document.getElementById('modal-factura-dian');
+    const elNombre = document.getElementById('fe-nombre');
+    const elNit    = document.getElementById('fe-nit');
+    const elEmail  = document.getElementById('fe-email');
+    const elResult = document.getElementById('fe-resultado');
+    if (elNombre) elNombre.value = '';
+    if (elNit)    elNit.value    = '';
+    if (elEmail)  elEmail.value  = '';
+    if (elResult) elResult.style.display = 'none';
+    if (modal)    modal.style.display    = 'flex';
+}
+
+function cerrarModalFactura() {
+    const modal = document.getElementById('modal-factura-dian');
+    if (modal) modal.style.display = 'none';
+    _feOrdenId   = null;
+    _feOrdenNo   = null;
+    _feBaseTotal = 0;
+}
+
+function _generarHashCUFE(semilla) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const uuid  = crypto.randomUUID().replace(/-/g, '').toUpperCase();
+    const base  = btoa(semilla + uuid).replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    return base.substring(0, 96).padEnd(96, chars[Math.floor(Math.random() * chars.length)]);
+}
+
+async function generarFacturaElectronica() {
+    const nombre = document.getElementById('fe-nombre')?.value.trim() || '';
+    const nit    = document.getElementById('fe-nit')?.value.trim()    || '';
+    const email  = document.getElementById('fe-email')?.value.trim()  || '';
+
+    if (!nombre || !nit || !email) {
+        Toast.error('Completa todos los campos del receptor antes de continuar.');
         return;
     }
 
-    // Agrupar por menuItemId por si el mismo ítem aparece dos veces en el carrito
-    const agrupado = {};
-    for (const it of itemsConControl) {
-        if (!agrupado[it.menuItemId]) {
-            agrupado[it.menuItemId] = { menuItemId: it.menuItemId, cantidad: 0, slot: it.slot };
-        }
-        agrupado[it.menuItemId].cantidad += it.cantidad;
+    const baseGravable = _feBaseTotal / (1 + TASA_IMPOCONSUMO);
+    const impoconsumo  = _feBaseTotal - baseGravable;
+    const fechaStr     = new Date().toISOString();
+    const cufe         = _generarHashCUFE(`${_feOrdenNo}${nit}${fechaStr}`);
+
+    const payload = {
+        tipo_documento:  '01',
+        descripcion:     'Factura Electrónica de Venta',
+        numero_factura:  _feOrdenNo,
+        fecha_emision:   fechaStr,
+        cufe,
+        estado_dian:     'Enviado — CUFE Generado',
+        emisor: {
+            nit:            '900.123.456-7',
+            razon_social:   'Restaurante la 26 SAS',
+            municipio:      'Bucaramanga',
+            departamento:   'Santander',
+            actividad_ciiu: '5611',
+        },
+        receptor: {
+            tipo_doc:   nit.includes('-') ? 'NIT' : 'CC',
+            numero_doc: nit,
+            nombre,
+            email,
+        },
+        tributos: {
+            base_gravable_cop:    Math.round(baseGravable),
+            impoconsumo_8pct_cop: Math.round(impoconsumo),
+            rete_ica_bga_6_9_mil: Math.round(baseGravable * TASA_RETE_ICA),
+            total_factura_cop:    Math.round(_feBaseTotal),
+        },
+        referencia_interna:    { order_id: _feOrdenId, order_number: _feOrdenNo },
+        proveedor_tecnologico: 'SIIGO S.A. — Habilitado DIAN Res. 000042 / 2020',
+    };
+
+    try {
+        await supabaseClient.from('invoice_records').insert([{
+            order_id:        _feOrdenId,
+            order_number:    _feOrdenNo,
+            receptor_nombre: nombre,
+            receptor_nit:    nit,
+            receptor_email:  email,
+            subtotal:        Math.round(baseGravable),
+            iva:             Math.round(impoconsumo),
+            total:           Math.round(_feBaseTotal),
+            cufe,
+            payload:         JSON.stringify(payload),
+            created_at:      fechaStr,
+        }]);
+    } catch (_) { /* tabla opcional */ }
+
+    const elResult = document.getElementById('fe-resultado');
+    if (elResult) {
+        elResult.style.display = 'block';
+        elResult.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <span style="font-size:18px;">✅</span>
+                <span style="font-size:13px;font-weight:700;color:var(--olive);">CUFE Generado — Enviado a DIAN</span>
+            </div>
+            <p style="font-size:11.5px;color:var(--text-2);line-height:1.7;">
+                <strong>CUFE:</strong> <span class="mono" style="word-break:break-all;font-size:10px;">${cufe}</span><br>
+                <strong>Receptor:</strong> ${nombre} — ${nit}<br>
+                <strong>Correo:</strong> ${email}<br>
+                <strong>Base Gravable:</strong> ${formatCOP(baseGravable)}<br>
+                <strong>Impoconsumo (8%):</strong> ${formatCOP(impoconsumo)}<br>
+                <strong>Total Factura:</strong> ${formatCOP(_feBaseTotal)}
+            </p>`;
     }
+    console.log('✅ Payload DIAN generado:', payload);
+}
 
-    const promesas = Object.values(agrupado).map(async ({ menuItemId, cantidad, slot }) => {
-        try {
-            // Leer el valor actual de portions_today primero
-            const { data: actual, error: errLeer } = await db
-                .from('menu_items')
-                .select('portions_today')
-                .eq('id', menuItemId)
-                .single();
+// ============================================================
+// 3. MENÚ — EDITOR MODULAR CON CÓDIGO DE PRODUCTO
+// ============================================================
+let componenteFiltradoActual = 'todos';
 
-            if (errLeer || !actual) {
-                console.warn(`[La 26] No se pudo leer portions_today para ${slot.nombre}:`, errLeer?.message);
+// 'activos' | 'inactivos' — solo relevante en admin
+let _vistaMenuAdmin = 'activos';
+
+function verProductosActivos() {
+    _vistaMenuAdmin = 'activos';
+    const btnA = document.getElementById('btn-vista-activos');
+    const btnI = document.getElementById('btn-vista-inactivos');
+    if (btnA) { btnA.style.background='var(--olive)'; btnA.style.color='#fff'; btnA.style.borderColor='var(--olive-bd)'; }
+    if (btnI) { btnI.style.background='var(--surface-2)'; btnI.style.color='var(--text-3)'; btnI.style.borderColor='var(--border)'; }
+    cargarSlotsMenuReal();
+}
+
+function verProductosInactivos() {
+    _vistaMenuAdmin = 'inactivos';
+    const btnA = document.getElementById('btn-vista-activos');
+    const btnI = document.getElementById('btn-vista-inactivos');
+    if (btnI) { btnI.style.background='var(--red)'; btnI.style.color='#fff'; btnI.style.borderColor='var(--red)'; }
+    if (btnA) { btnA.style.background='var(--surface-2)'; btnA.style.color='var(--text-3)'; btnA.style.borderColor='var(--border)'; }
+    cargarSlotsMenuReal();
+}
+
+async function cargarSlotsMenuReal() {
+    const contenedor = document.getElementById('contenedor-slots-menu');
+    if (!contenedor) return;
+
+    contenedor.innerHTML = `
+        <p style="color:var(--text-3);font-size:12.5px;grid-column:span 3;text-align:center;padding:28px;">
+            Sincronizando catálogo...
+        </p>`;
+
+    try {
+        let query = supabaseClient
+            .from('menu_items')
+            .select('id, name, description, price, item_type, is_active, portions_today, restaurant_id, category_id, created_at')
+            .eq('is_active', _vistaMenuAdmin === 'activos')
+            .order('name', { ascending: true });
+
+        if (componenteFiltradoActual !== 'todos') {
+            query = query.eq('item_type', componenteFiltradoActual);
+        }
+
+        const { data: items, error } = await query;
+        if (error) throw error;
+
+        contenedor.innerHTML = '';
+
+        if (!items || items.length === 0) {
+            contenedor.innerHTML = `
+                <p style="color:var(--text-3);font-size:12.5px;grid-column:span 3;text-align:center;padding:28px;">
+                    Sin platos en esta categoría.
+                </p>`;
+            return;
+        }
+
+        const itemsOrdenados = [...items].sort((a, b) => {
+            const orden = { protein: 1, executive_lunch: 1, side: 2, drink: 3, a_la_carte: 4, soup: 5 };
+            const oA = orden[a.item_type] || 9;
+            const oB = orden[b.item_type] || 9;
+            if (oA !== oB) return oA - oB;
+            return (a.name || '').localeCompare(b.name || '', 'es');
+        });
+
+        itemsOrdenados.forEach((item, animIdx) => {
+            const cfg            = MAPA_TIPO[item.item_type] || { label: item.item_type, icono: '🍽️', porciones: 20, badgeClass: '' };
+            const nombreEscapado = (item.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const codigo         = '—';
+            const rango          = { color: 'var(--text-3)' };
+
+            contenedor.insertAdjacentHTML('beforeend', `
+                <div class="card menu-card" style="display:flex;flex-direction:column;gap:12px;animation-delay:${animIdx * 40}ms;">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                        <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                            <span style="font-size:11px;font-weight:700;color:${rango.color};background:rgba(0,0,0,.04);border:1.5px solid rgba(0,0,0,.07);border-radius:999px;padding:3px 9px;flex-shrink:0;" class="mono">#${codigo}</span>
+                            <span class="badge ${cfg.badgeClass}">${cfg.icono} ${cfg.label}</span>
+                        </div>
+                        <button onclick="eliminarComponenteCatalogo('${item.id}','${nombreEscapado}')"
+                            style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:15px;padding:0;flex-shrink:0;transition:color .2s;"
+                            onmouseover="this.style.color='var(--red)'"
+                            onmouseout="this.style.color='var(--text-3)'"
+                            title="Dar de baja">🗑️</button>
+                    </div>
+
+                    <h4 style="font-size:13.5px;font-weight:600;color:var(--text-1);line-height:1.4;margin:0;">
+                        ${item.name}
+                    </h4>
+
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:14px;padding:12px;">
+                        <div>
+                            <p style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Precio ($)</p>
+                            <input type="number" value="${item.price}"
+                                onchange="actualizarPrecioPlatoReal('${item.id}', this.value)"
+                                class="card-input" style="color:var(--olive);">
+                        </div>
+                        <div>
+                            <p style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Porciones hoy</p>
+                            <input type="number" value="${item.portions_today ?? cfg.porciones}"
+                                onchange="actualizarPorcionesHoy('${item.id}', this.value)"
+                                class="card-input" style="color:var(--amber);">
+                        </div>
+                    </div>
+
+                    <div style="display:flex;align-items:center;justify-content:space-between;border-top:1.5px solid var(--border);padding-top:10px;">
+                        ${_vistaMenuAdmin === 'inactivos'
+                            ? `<span style="font-size:11.5px;color:var(--text-3);">Producto inactivo</span>
+                               <button onclick="reactivarProducto('${item.id}','${nombreEscapado}')"
+                                   style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:5px 13px;border-radius:999px;border:1.5px solid var(--olive-bd);background:var(--olive-lt);color:var(--olive);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                                   <i data-lucide="rotate-ccw" style="width:12px;height:12px;"></i> Reactivar
+                               </button>`
+                            : `<span style="font-size:11.5px;color:var(--text-3);">¿Disponible hoy?</span>
+                               <button data-switch-id="${item.id}"
+                                   onclick="alternarVisibilidadPlatoReal('${item.id}', ${item.is_active})"
+                                   class="${item.is_active ? 'sw-on' : 'sw-off'}">
+                                   ${item.is_active ? '<i data-lucide=\"check\" style=\"width:12px;height:12px;\"></i> Activo' : '<i data-lucide=\"x\" style=\"width:12px;height:12px;\"></i> Agotado'}
+                               </button>`
+                        }
+                    </div>
+                </div>`);
+        });
+
+        // Re-inicializar iconos Lucide en las tarjetas generadas dinámicamente
+        if (window.lucide) lucide.createIcons();
+
+    } catch (err) {
+        console.error('Error cargando menú:', err);
+        contenedor.innerHTML = `
+            <p style="color:var(--red);font-size:12.5px;grid-column:span 3;text-align:center;padding:28px;">
+                Error de conexión con Supabase. Revisa la consola.
+            </p>`;
+    }
+}
+
+// ============================================================
+// FILTRADO POR COMPONENTE
+// ============================================================
+function filtrarMenuComponente(cat) {
+    componenteFiltradoActual = cat;
+    document.querySelectorAll('.btn-comp').forEach(btn => {
+        btn.classList.remove('filter-active');
+    });
+    const btnActivo = document.getElementById(`btn-comp-${cat}`);
+    if (btnActivo) btnActivo.classList.add('filter-active');
+    cargarSlotsMenuReal();
+}
+
+// ============================================================
+// REGISTRAR NUEVO PLATO
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+    const formNuevoPlato = document.getElementById('form-nuevo-plato');
+    if (formNuevoPlato) {
+        formNuevoPlato.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const product_code   = parseInt(document.getElementById('menu-codigo').value) || null;
+            const name           = document.getElementById('menu-nombre').value.trim();
+            const price          = parseFloat(document.getElementById('menu-precio').value);
+            const item_type      = document.getElementById('menu-tipo').value;
+            const portions_today = parseInt(document.getElementById('menu-porciones').value) || null;
+
+            if (item_type === 'sauce') {
+                Toast.error('El tipo "sauce" no está disponible como tipo independiente.');
                 return;
             }
 
-            const porcionesActuales = Number(actual.portions_today) ?? 0;
-            const nuevasPorciones   = Math.max(0, porcionesActuales - cantidad);
+            try {
+                let restaurantId;
+                const { data: res, error: errRes } = await supabaseClient
+                    .from('restaurants')
+                    .select('id')
+                    .limit(1)
+                    .maybeSingle();
 
-            const { error: errUpdate } = await db
+                if (errRes) throw errRes;
+
+                if (res && res.id) {
+                    restaurantId = res.id;
+                } else {
+                    const { data: nuevoRest, error: errNuevo } = await supabaseClient
+                        .from('restaurants')
+                        .insert([{ name: 'Restaurante la 26', slug: 'restaurante-la-26' }])
+                        .select('id')
+                        .single();
+                    if (errNuevo) throw errNuevo;
+                    restaurantId = nuevoRest.id;
+                }
+
+                const mapaCategoria = {
+                    executive_lunch: 'Proteína con Salsa',
+                    protein:         'Proteína con Salsa',
+                    side:            'Principio',
+                    drink:           'Bebida',
+                    a_la_carte:      'A la Carta',
+                    soup:            'Sopa',
+                };
+                const nombreCategoria = mapaCategoria[item_type] || 'General';
+
+                await supabaseClient
+                    .from('menu_categories')
+                    .upsert(
+                        [{ restaurant_id: restaurantId, name: nombreCategoria, slot_type: 'single', display_order: 0 }],
+                        { onConflict: 'restaurant_id,name', ignoreDuplicates: true }
+                    );
+
+                const { data: cat, error: errCat } = await supabaseClient
+                    .from('menu_categories')
+                    .select('id')
+                    .eq('restaurant_id', restaurantId)
+                    .eq('name', nombreCategoria)
+                    .maybeSingle();
+
+                if (errCat) throw errCat;
+                if (!cat || !cat.id) throw new Error(`No se pudo obtener la categoría "${nombreCategoria}".`);
+
+                const payload = {
+                    restaurant_id: restaurantId,
+                    category_id:   cat.id,
+                    name,
+                    price,
+                    item_type,
+                    is_active: true,
+                };
+                if (portions_today !== null) payload.portions_today = portions_today;
+                if (product_code) payload.product_code = product_code;
+
+                const { error: errItem } = await supabaseClient
+                    .from('menu_items')
+                    .insert([payload]);
+
+                if (errItem) {
+                    if (errItem.code === '42703' && payload.product_code) {
+                        delete payload.product_code;
+                        const { error: errRetry } = await supabaseClient
+                            .from('menu_items').insert([payload]);
+                        if (errRetry) {
+                            if (errRetry.code === '23505') {
+                                Toast.error(`Ya existe un plato llamado "${name}" en el catálogo.`);
+                                return;
+                            }
+                            throw errRetry;
+                        }
+                    } else if (errItem.code === '23505') {
+                        Toast.error(`Ya existe un plato llamado "${name}" en el catálogo.`);
+                        return;
+                    } else {
+                        throw errItem;
+                    }
+                }
+
+                document.getElementById('menu-codigo').value    = '';
+                document.getElementById('menu-nombre').value    = '';
+                document.getElementById('menu-precio').value    = '';
+                document.getElementById('menu-porciones').value = '';
+                Toast.ok(`"${name}" registrado en el catálogo correctamente.`);
+                cargarSlotsMenuReal();
+
+            } catch (err) {
+                console.error('Error al guardar plato:', err);
+                Toast.error(`Error al guardar: ${err.message}`);
+            }
+        });
+    }
+});
+
+// ============================================================
+// ELIMINAR / DAR DE BAJA PLATO DEL CATÁLOGO [FIX-6]
+// ============================================================
+async function eliminarComponenteCatalogo(idItem, nombreItem) {
+    if (!confirm(
+        `⚠️ ¿Dar de baja "${nombreItem}" del catálogo?\n\n` +
+        `Si el plato tiene ventas históricas se ocultará del menú pero ` +
+        `su historial se conservará intacto.`
+    )) return;
+
+    try {
+        try {
+            await supabaseClient
+                .from('menu_item_ingredients')
+                .delete()
+                .eq('menu_item_id', idItem);
+        } catch (_) { }
+
+        try {
+            await supabaseClient
+                .from('recipe_ingredients')
+                .delete()
+                .eq('supply_id', idItem);
+        } catch (_) { }
+
+        const { error: errDelete } = await supabaseClient
+            .from('menu_items')
+            .delete()
+            .eq('id', idItem);
+
+        if (!errDelete) {
+            Toast.ok(`"${nombreItem}" eliminado del catálogo.`);
+            cargarSlotsMenuReal();
+            return;
+        }
+
+        if (errDelete.code === '23503') {
+            const { error: errSoft } = await supabaseClient
                 .from('menu_items')
                 .update({
-                    portions_today: nuevasPorciones,
-                    // Si llega a 0, desactivar automáticamente
-                    is_active: nuevasPorciones > 0,
+                    is_active:  false,
+                    deleted_at: new Date().toISOString(),
                 })
-                .eq('id', menuItemId);
+                .eq('id', idItem);
 
-            if (errUpdate) {
-                console.warn(`[La 26] Error descontando porciones de "${slot.nombre}":`, errUpdate.message);
+            if (!errSoft) {
+                Toast.ok(`"${nombreItem}" dado de baja. Su historial de ventas se conserva.`);
+                cargarSlotsMenuReal();
                 return;
             }
 
-            // [FIX-PORCIONES-OPTIMISTIC] Actualizar State.slots en memoria inmediatamente
-            // para que la UI refleje el stock correcto sin esperar el ciclo de realtime
-            const idxSlot = State.slots.findIndex(s => s.id === slot.id);
-            if (idxSlot !== -1) {
-                State.slots[idxSlot].porciones   = nuevasPorciones;
-                State.slots[idxSlot].disponible  = nuevasPorciones > 0;
-                // Si se agotó, refrescar la tarjeta en la UI
-                if (nuevasPorciones === 0) {
-                    _refrescarTarjeta(slot.id);
-                } else if (nuevasPorciones <= 5) {
-                    // Actualizar badge de "pocas" si corresponde
-                    _refrescarTarjeta(slot.id);
-                }
-            }
-
-            console.info(`[La 26] ✓ Porciones descontadas: "${slot.nombre}" ${porcionesActuales} → ${nuevasPorciones}`);
-
-        } catch (err) {
-            // No cortar el flujo principal, solo loguear
-            console.warn(`[La 26] Excepción al descontar porciones de "${slot.nombre}":`, err.message);
-        }
-    });
-
-    // Ejecutar todos los descuentos en paralelo
-    await Promise.allSettled(promesas);
-}
-
-// ============================================================
-// ENVÍO DEL PEDIDO
-// [FIX-PORCIONES-CRITICO] Se llama _descontarPorciones() SIEMPRE
-// después de insertar los order_items, con la copia del carrito.
-// La26Core sigue usándose como canal adicional si está disponible.
-// ============================================================
-const Order = {
-    async enviar() {
-        if (State.isSubmitting) return;
-        if (State.cart.length === 0) { Toast.error('Agrega al menos un plato al pedido.'); return; }
-
-        const btnEl       = document.getElementById('btn-enviar');
-        const mesaEl      = document.getElementById('form-mesa');
-        const nombreEl    = document.getElementById('form-nombre');
-        const notasEl     = document.getElementById('form-notas');
-        const direccionEl = document.getElementById('form-direccion');
-        const modalidadEl = document.querySelector('input[name="form-modalidad"]:checked');
-
-        const mesa      = (mesaEl?.value      || '').trim();
-        const nombre    = (nombreEl?.value    || '').trim();
-        const notas     = (notasEl?.value     || '').trim();
-        const direccion = (direccionEl?.value || '').trim();
-        const modalidad = modalidadEl?.value || 'mesa';
-
-        if (modalidad === 'mesa' && !mesa) {
-            mesaEl?.classList.add('error'); mesaEl?.focus();
-            Toast.error('Indica el número de mesa.'); return;
-        }
-        mesaEl?.classList.remove('error');
-
-        if (modalidad === 'domicilio' && !direccion) {
-            direccionEl?.classList.add('error'); direccionEl?.focus();
-            Toast.error('Indica la dirección de entrega.'); return;
-        }
-        direccionEl?.classList.remove('error');
-
-        State.isSubmitting = true;
-        if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Enviando…'; }
-
-        // [FIX-PORCIONES-CRITICO] Capturar snapshot del carrito ANTES de limpiarlo
-        // para usarlo en _descontarPorciones() después de confirmar la orden.
-        const cartSnapshot = State.cart.map(item => ({ ...item }));
-
-        try {
-            if (!State.restaurantId) await _resolverRestaurant();
-            if (!State.restaurantId) throw new Error('No se pudo identificar el restaurante.');
-
-            const tableId = await _resolverTableId(modalidad, mesa);
-            let tableIdFinal = tableId;
-            if (!tableIdFinal) {
-                const { data: anyTable } = await db.from('tables').select('id')
-                    .eq('restaurant_id', State.restaurantId).limit(1).maybeSingle();
-                tableIdFinal = anyTable?.id || null;
-            }
-            if (!tableIdFinal) throw new Error('No hay mesas configuradas. Crea al menos una en el panel admin.');
-
-            // Inyectar mesero en las notas
-            const mesero = Sesion.obtener();
-            let notaCocina = '';
-            if (modalidad === 'mesa')           notaCocina = `[MESA] Mesa: ${mesa}`;
-            else if (modalidad === 'llevar')    notaCocina = `[PARA LLEVAR] Cliente: ${nombre || 'Sin nombre'}`;
-            else if (modalidad === 'domicilio') notaCocina = `[DOMICILIO] Cliente: ${nombre || 'Sin nombre'} | Dir: ${direccion}`;
-            if (mesero) notaCocina += ` | Mesero: ${mesero}`;
-            if (notas)  notaCocina += ` | Nota: ${notas}`;
-
-            // [v7.6 · CAMBIO-10] Código diario LLV-### para llevar/domicilio; aleatorio para mesa
-            const numeroOrden = await _generarNumeroOrden(modalidad);
-            const total       = calcularTotal();
-
-            const { data: orden, error: errOrd } = await db.from('orders').insert([{
-                restaurant_id: State.restaurantId,
-                table_id:      tableIdFinal,
-                order_number:  numeroOrden,
-                status:        'pending',
-                customer_name: nombre || null,
-                total_amount:  total,
-                notes:         notaCocina || null,
-            }]).select('id').single();
-            if (errOrd) throw errOrd;
-
-            const { data: todosItems } = await db.from('menu_items').select('id,name,item_type')
-                .eq('restaurant_id', State.restaurantId).eq('is_active', true);
-            const listaItems = todosItems || [];
-            const fallbackId = listaItems[0]?.id || null;
-
-            const payload = State.cart.map(item => {
-                const slot = State.slots.find(s => s.id === item.slotId);
-                if (!slot) return null;
-                let menuItemId = slot.menuItemId;
-                if (!menuItemId && listaItems.length > 0) {
-                    const nb  = (slot.nombre || '').toLowerCase().trim();
-                    const ex  = listaItems.find(m => m.name.toLowerCase().trim() === nb);
-                    const par = !ex && listaItems.find(m => m.name.toLowerCase().includes(nb.split(' ')[0]));
-                    menuItemId = ex?.id || par?.id || fallbackId;
-                }
-                // [v7.6 · CAMBIO-11] Cargar el desechable en el precio del almuerzo
-                // si va para llevar. Va dentro del unit_price para que el total
-                // cuadre con la suma de ítems y se mantenga al editar el pedido.
-                const llevaEmpaque = _esAlmuerzo(slot) && _itemViajaParaLlevar(item, modalidad);
-                const precioFinal  = slot.precio + (llevaEmpaque ? RECARGO_DESECHABLE : 0);
-                return {
-                    order_id: orden.id, menu_item_id: menuItemId,
-                    quantity: item.cantidad, unit_price: precioFinal,
-                    item_status: 'pending',
-                    product_name: slot.nombre,
-                    notes: `[nombre]${slot.nombre}${llevaEmpaque ? ' | Empaque desechable incluido' : ''}`,
-                };
-            }).filter(Boolean);
-
-            if (payload.length > 0) {
-                const { error: errItems } = await db.from('order_items').insert(payload);
-                if (errItems) {
-                    if (errItems.code === '42703' || errItems.message?.includes('product_name')) {
-                        const p2 = payload.map(({ product_name, ...rest }) => rest);
-                        const { error: err2 } = await db.from('order_items').insert(p2);
-                        if (err2) Toast.error('Pedido registrado pero ítems fallaron. Avisa al admin.', 6000);
-                    } else {
-                        Toast.error('Pedido registrado pero ítems fallaron. Avisa al admin.', 6000);
-                    }
-                }
-
-                // ─────────────────────────────────────────────────────────
-                // [FIX-PORCIONES-CRITICO] DESCUENTO DIRECTO — SIEMPRE corre
-                // No depende de La26Core. Usa `db` que ya está inicializado.
-                // Ejecuta en background (no bloquea la pantalla de éxito).
-                // ─────────────────────────────────────────────────────────
-                _descontarPorciones(cartSnapshot).catch(err =>
-                    console.warn('[La 26] Error en descuento de porciones (background):', err.message)
-                );
-
-                // La26Core solo para inventario de insumos — NO porciones
-                // (porciones ya las maneja _descontarPorciones arriba)
-                if (window.La26Core) {
-                    La26Core.ajustarInventarioPorItems(
-                        payload.map(p => ({ menu_item_id: p.menu_item_id, quantity: p.quantity, notes: p.notes })),
-                        1
-                    ).catch(e => console.warn('[menu.js] La26Core.ajustarInventarioPorItems silencioso:', e.message));
-                }
-            }
-
-            this._mostrarExito(numeroOrden);
-
-        } catch (err) {
-            console.error('[La 26] Error enviando pedido:', err);
-            Toast.error('No se pudo enviar el pedido. Verifica tu conexión.', 5000);
-        } finally {
-            State.isSubmitting = false;
-            if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Enviar a cocina'; }
-        }
-    },
-
-    _mostrarExito(numeroOrden) {
-        Cart.cerrar();
-        const el = document.getElementById('success-order-no');
-        if (el) el.textContent = numeroOrden;
-        document.getElementById('success-modal').classList.add('open');
-        State.cart = [];
-        _actualizarCartBar();
-        // [v7.5 · CAMBIO-1] Dejar el formulario en blanco para el próximo pedido
-        _resetFormularioPedido();
-        if (HistState.cargado) Hist.cargar();
-    },
-
-    nuevoPedido() {
-        document.getElementById('success-modal').classList.remove('open');
-        // [v7.5 · CAMBIO-1] Reinicio completo del formulario (mesa, nombre, notas, dirección)
-        _resetFormularioPedido();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-        _renderizarMenu();
-    },
-
-    cerrarExito() {
-        document.getElementById('success-modal').classList.remove('open');
-    },
-};
-
-// ============================================================
-// REALTIME — menu_items
-// ============================================================
-function _suscribirRealtimeMenu() {
-    if (!State.restaurantId) return;
-    if (State.realtimeChannel) { db.removeChannel(State.realtimeChannel); State.realtimeChannel = null; }
-
-    State.realtimeChannel = db
-        .channel(`la26-menu-v742-${State.restaurantId}`)
-        .on('postgres_changes',{ event:'UPDATE', schema:'public', table:'menu_items',
-            filter:`restaurant_id=eq.${State.restaurantId}` },
-            (payload) => _actualizarSlotDesdeRealtime(payload.new))
-        .on('postgres_changes',{ event:'INSERT', schema:'public', table:'menu_items',
-            filter:`restaurant_id=eq.${State.restaurantId}` },
-            () => Menu.cargar())
-        .on('postgres_changes',{ event:'DELETE', schema:'public', table:'menu_items' },
-            () => Menu.cargar())
-        .subscribe();
-}
-
-function _actualizarSlotDesdeRealtime(item) {
-    if (!item?.id) return;
-    const idx = State.slots.findIndex(s => s.id === item.id);
-    if (idx === -1) { Menu.cargar(); return; }
-
-    const tienePortions = item.portions_today !== null && item.portions_today !== undefined;
-    const porciones     = tienePortions ? Number(item.portions_today) : 999;
-    const disponible    = item.is_active === true && porciones > 0;
-
-    State.slots[idx] = {
-        ...State.slots[idx],
-        nombre:    item.name,
-        precio:    Number(item.price) || 0,
-        porciones,
-        disponible,
-        tieneControlPorciones: tienePortions,
-    };
-    _refrescarTarjeta(item.id);
-
-    if (!disponible) {
-        const idx2 = State.cart.findIndex(c => c.slotId === item.id);
-        if (idx2 !== -1) {
-            const nombre = State.slots[idx].nombre;
-            State.cart.splice(idx2, 1);
-            _actualizarCartBar();
-            Toast.error(`"${nombre}" se agotó y fue removido de tu pedido.`, 5000);
-        }
-    }
-}
-
-// ============================================================
-// ═══ MÓDULO HISTORIAL (v7.4) ═══
-// ============================================================
-
-const HistState = {
-    pedidos:         [],
-    filtro:          'todos',
-    cargado:         false,
-    cargando:        false,   // <-- agregar esta línea
-    realtimeChannel: null,
-};
-
-function _parsearNota(notes) {
-    const n = notes || '';
-    let tipo = 'mesa', destino = '', cliente = '', direccion = '', nota = '', mesero = '';
-
-    if (n.startsWith('[MESA]')) {
-        tipo = 'mesa';
-        const m = n.match(/Mesa:\s*([^|]+)/);
-        destino = m ? `Mesa ${m[1].trim()}` : 'Mesa';
-    } else if (n.startsWith('[PARA LLEVAR]')) {
-        tipo = 'llevar'; destino = 'Para Llevar';
-        const m = n.match(/Cliente:\s*([^|]+)/);
-        cliente = m ? m[1].trim() : '';
-    } else if (n.startsWith('[DOMICILIO]')) {
-        tipo = 'domicilio'; destino = 'Domicilio';
-        const mc = n.match(/Cliente:\s*([^|]+)/);
-        const md = n.match(/Dir:\s*([^|]+)/);
-        cliente   = mc ? mc[1].trim() : '';
-        direccion = md ? md[1].trim() : '';
-    } else {
-        tipo = 'mesa'; destino = n || 'Sin datos';
-    }
-
-    const mm = n.match(/Mesero:\s*([^|]+)/);
-    mesero = mm ? mm[1].trim() : '';
-
-    const mn = n.match(/Nota:\s*(.+)$/);
-    nota = mn ? mn[1].trim() : '';
-    return { tipo, destino, cliente, direccion, nota, mesero };
-}
-
-function _horaCorta(isoStr) {
-    if (!isoStr) return '';
-    try {
-        return new Date(isoStr).toLocaleTimeString('es-CO',
-            { hour:'2-digit', minute:'2-digit', timeZone:'America/Bogota' });
-    } catch { return ''; }
-}
-
-const Hist = {
-
-    async cargar() {
-        if (HistState.cargando) return;   // semáforo — evita concurrencia
-        HistState.cargando = true;
-        _histSetLoader(true);
-        if (!State.restaurantId) await _resolverRestaurant();
-        if (!State.restaurantId) {
-            _histSetError('No se pudo identificar el restaurante.');
-            HistState.cargando = false;
-            return;
-        }
-        try {
-            const hoy = todayISO();
-            const manana = new Date(new Date(`${hoy}T05:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10);
-            const { data: ordenes, error } = await db
-                .from('orders')
-                .select(`
-                    id, order_number, status, customer_name,
-                    total_amount, notes, created_at,
-                    order_items (
-                        id, quantity, unit_price, notes, item_status,
-                        menu_items ( name )
-                    )
-                `)
-                .eq('restaurant_id', State.restaurantId)
-                .gte('created_at', `${hoy}T05:00:00Z`)
-                .lt('created_at', `${manana}T05:00:00Z`)
-                .order('created_at', { ascending: false });
-
-            if (error) throw error;
-
-            HistState.pedidos = ordenes || [];
-
-            HistState.cargado = true;
-            this._render();
-            this._suscribirRealtime();
-        } catch (err) {
-            console.error('[Hist] Error:', err);
-            _histSetError(`No se pudo cargar el historial: ${err.message}`);
-        } finally {
-            HistState.cargando = false;   // liberar semáforo siempre
-        }
-    },
-
-    cargarSiNecesario() {
-        if (HistState.cargado) {
-            this._render();
-        } else {
-            this.cargar();
-        }
-    },
-
-    async recargar() {
-        const btn = document.getElementById('btn-refresh-hist');
-        btn?.classList.add('spinning');
-        await this.cargar();
-        btn?.classList.remove('spinning');
-        Toast.ok('Historial actualizado');
-    },
-
-    filtrar(valor, btnEl) {
-        HistState.filtro = valor;
-        document.querySelectorAll('.hfilt-btn').forEach(b => b.classList.remove('active'));
-        btnEl.classList.add('active');
-        this._render();
-    },
-
-    _pedidosFiltrados() {
-        if (HistState.filtro === 'todos') return HistState.pedidos;
-        return HistState.pedidos.filter(p => _parsearNota(p.notes).tipo === HistState.filtro);
-    },
-
-    _render() {
-        const total      = HistState.pedidos.length;
-        const pendientes = HistState.pedidos.filter(p => p.status === 'pending' || p.status === 'preparing').length;
-        const entregados = HistState.pedidos.filter(p => p.status === 'delivered').length;
-
-        const set = (id,v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
-        set('st-total',      total);
-        set('st-pendientes', pendientes);
-        set('st-entregados', entregados);
-
-        const badge = document.getElementById('badge-pendientes');
-        if (badge) {
-            badge.textContent = pendientes;
-            badge.classList.toggle('visible', pendientes > 0);
-        }
-
-        const fechaEl = document.getElementById('hist-fecha');
-        if (fechaEl) fechaEl.textContent = new Date().toLocaleDateString('es-CO',
-            { weekday:'long', year:'numeric', month:'long', day:'numeric', timeZone:'America/Bogota' });
-
-        const lista = document.getElementById('hist-lista');
-        if (!lista) return;
-        lista.innerHTML = '';
-
-        const items = this._pedidosFiltrados();
-
-        if (items.length === 0) {
-            lista.innerHTML = `
-                <div class="empty-state" style="padding:56px 28px;">
-                    <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#b4b4aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg></div>
-                    <p>${HistState.pedidos.length === 0
-                        ? 'Aún no hay pedidos hoy.'
-                        : 'No hay pedidos en esta categoría.'}</p>
-                </div>`;
-            return;
-        }
-
-        items.forEach((pedido, i) => {
-            const card = _crearTarjetaPedido(pedido, i);
-            lista.appendChild(card);
-        });
-    },
-
-    _suscribirRealtime() {
-        if (!State.restaurantId) return;
-
-        // No recrear el canal si ya está activo — evita duplicados
-        if (HistState.realtimeChannel) return;
-
-        HistState.realtimeChannel = db
-            .channel(`la26-hist-v742-${State.restaurantId}`)
-            .on('postgres_changes', {
-                event: '*', schema: 'public', table: 'orders',
-                filter: `restaurant_id=eq.${State.restaurantId}`,
-            }, (payload) => {
-                // Ignorar si ya hay una carga en curso
-                if (HistState.cargando) return;
-
-                const esNueva = payload.eventType === 'INSERT';
-                Hist.cargar().then(() => {
-                    if (esNueva) Toast.ok('Nuevo pedido registrado');
-                });
-            })
-            .subscribe();
-    },
-};
-
-function _histSetLoader(activo) {
-    const lista = document.getElementById('hist-lista');
-    if (activo && lista) {
-        lista.innerHTML = `<div class="hist-loader"><div class="spinner-sm"></div><p>Cargando pedidos…</p></div>`;
-    }
-}
-
-function _histSetError(msg) {
-    const lista = document.getElementById('hist-lista');
-    if (lista) lista.innerHTML = `
-        <div class="empty-state" style="padding:56px 28px;">
-            <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
-            <p>${msg}</p>
-            <button onclick="Hist.recargar()"
-                style="margin-top:12px;padding:11px 24px;border-radius:9999px;
-                       background:var(--oliva);color:#fff;border:none;
-                       font-family:'DM Sans',sans-serif;font-size:13px;
-                       font-weight:500;cursor:pointer;">
-                Reintentar
-            </button>
-        </div>`;
-}
-
-function _crearTarjetaPedido(pedido, idx) {
-    const { tipo, destino, cliente, direccion, nota } = _parsearNota(pedido.notes);
-
-    const tipoIcons  = { mesa:'<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;vertical-align:-1px;"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg>', llevar:'<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;vertical-align:-1px;"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>', domicilio:'<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#1d5fa8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;vertical-align:-1px;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>' };
-    const tipoLabels = { mesa:'Mesa', llevar:'Para Llevar', domicilio:'Domicilio' };
-    const statusLabels = {
-        pending:'Pendiente', preparing:'En cocina',
-        ready:'Listo', delivered:'Entregado', cancelled:'Cancelado',
-    };
-
-    const statusClass = pedido.status || 'pending';
-    const nombreMostrar = pedido.customer_name || cliente || '';
-    const editable = ESTADOS_EDITABLES.includes(pedido.status);
-
-    const items = pedido.order_items || [];
-    const itemsHTML = items.length > 0
-        ? items.map(it => {
-            let nombre = it.menu_items?.name || '';
-            if (!nombre && it.notes) {
-                const m = it.notes.match(/\[nombre\](.+)/);
-                nombre = m ? m[1] : 'Ítem';
-            }
-            if (!nombre) nombre = 'Ítem';
-            const precio = Number(it.unit_price) || 0;
-            return `<div class="item-row">
-                <div class="item-qty">${it.quantity}</div>
-                <span class="item-name">${nombre}</span>
-                <span class="item-price">${precio > 0 ? formatCOP(precio * it.quantity) : '—'}</span>
-            </div>`;
-        }).join('')
-        : `<p style="font-size:12.5px;color:var(--ink-ghost);padding:4px 0;">Sin detalle de ítems.</p>`;
-
-    const direccionHTML = (tipo === 'domicilio' && direccion)
-        ? `<div class="card-direccion">
-               <span style="display:inline-flex;flex-shrink:0;margin-top:1px;"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#1d5fa8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
-               <span class="card-direccion-text">${direccion}</span>
-           </div>` : '';
-
-    const notaHTML = nota
-        ? `<div class="card-nota">
-               <span style="display:inline-flex;flex-shrink:0;margin-top:1px;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
-               <span class="card-nota-text">${nota}</span>
-           </div>` : '';
-
-    const editarBtnHTML = editable
-        ? `<button class="btn-editar-pedido" onclick="EditarPedido.abrir('${pedido.id}')" title="Editar este pedido">
-               <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Editar pedido
-           </button>`
-        : '';
-
-    const bodyId = `hbody-${pedido.id}`;
-    const chevId = `hchev-${pedido.id}`;
-
-    const card = document.createElement('div');
-    card.className = 'order-card';
-    card.style.animationDelay = `${idx * 0.04}s`;
-
-    card.innerHTML = `
-        <div class="card-head" onclick="toggleHistCard('${bodyId}','${chevId}')">
-            <div class="card-head-left">
-                <div class="card-tipo">
-                    <span style="font-size:13px;">${tipoIcons[tipo]||'<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3a7d2c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;vertical-align:-1px;"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg>'}</span>
-                    <span class="tipo-text ${tipo}">${tipoLabels[tipo]||tipo}</span>
-                </div>
-                <p class="card-destino">${destino}</p>
-                ${nombreMostrar ? `<p class="card-cliente"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#78786e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;vertical-align:-1px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ${nombreMostrar}</p>` : ''}
-                <p class="card-hora"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#b4b4aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;vertical-align:-1px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ${_horaCorta(pedido.created_at)}</p>
-            </div>
-            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-                <span class="status-badge ${statusClass}">${statusLabels[statusClass]||statusClass}</span>
-                <span class="card-chevron" id="${chevId}">▼</span>
-            </div>
-        </div>
-        <div class="card-body" id="${bodyId}">
-            ${direccionHTML}
-            ${notaHTML}
-            <div>${itemsHTML}</div>
-            <div class="card-total-row">
-                <span class="card-total-label">Total</span>
-                <span class="card-total-monto">${formatCOP(pedido.total_amount)}</span>
-            </div>
-            <p class="card-order-no"># ${pedido.order_number || '—'}</p>
-            ${editarBtnHTML}
-        </div>`;
-
-    return card;
-}
-
-function toggleHistCard(bodyId, chevId) {
-    const body = document.getElementById(bodyId);
-    const chev = document.getElementById(chevId);
-    if (!body) return;
-    const abierto = body.classList.toggle('open');
-    if (chev) chev.classList.toggle('open', abierto);
-}
-
-// ============================================================
-// ═══ MÓDULO EDITAR PEDIDO (v7.4) ═══
-// ============================================================
-
-const EditarPedido = {
-    _pedidoId:    null,
-    _pedido:      null,
-    _itemsEdit:   [],
-    _notaEdit:    '',
-    _guardando:   false,
-
-    async abrir(pedidoId) {
-        this._pedidoId  = pedidoId;
-        this._guardando = false;
-
-        const modal = document.getElementById('edit-modal');
-        if (!modal) return;
-        modal.classList.add('open');
-        document.body.style.overflow = 'hidden';
-        _editSetLoader(true);
-
-        try {
-            const { data: pedido, error } = await db
-                .from('orders')
-                .select(`
-                    id, order_number, status, notes, total_amount,
-                    order_items (
-                        id, quantity, unit_price, notes, item_status,
-                        menu_item_id,
-                        menu_items ( name )
-                    )
-                `)
-                .eq('id', pedidoId)
-                .single();
-
-            if (error) throw error;
-            if (!pedido) throw new Error('Pedido no encontrado.');
-
-            if (!ESTADOS_EDITABLES.includes(pedido.status)) {
-                _editSetError(`Este pedido no se puede editar (estado: ${pedido.status}).`);
-                return;
-            }
-
-            this._pedido = pedido;
-
-            const parsed = _parsearNota(pedido.notes);
-            this._notaEdit = parsed.nota;
-
-            this._itemsEdit = (pedido.order_items || []).map(it => {
-                let nombre = it.menu_items?.name || '';
-                if (!nombre && it.notes) {
-                    const m = it.notes.match(/\[nombre\](.+)/);
-                    nombre = m ? m[1] : 'Ítem';
-                }
-                return {
-                    id:          it.id,
-                    menuItemId:  it.menu_item_id,
-                    nombre:      nombre || 'Ítem',
-                    precio:      Number(it.unit_price) || 0,
-                    cantidad:    it.quantity,
-                    item_status: it.item_status || 'pending',
-                    esNuevo:     false,
-                    eliminado:   false,
-                };
-            });
-
-            this._renderEditor();
-
-        } catch (err) {
-            console.error('[EditarPedido] Error al abrir:', err);
-            _editSetError(`No se pudo cargar el pedido: ${err.message}`);
-        }
-    },
-
-    cerrar() {
-        const modal = document.getElementById('edit-modal');
-        if (modal) modal.classList.remove('open');
-        document.body.style.overflow = '';
-        this._pedidoId  = null;
-        this._pedido    = null;
-        this._itemsEdit = [];
-        this._notaEdit  = '';
-        this._guardando = false;
-    },
-
-    _renderEditor() {
-        const contenedor = document.getElementById('edit-modal-body');
-        if (!contenedor) return;
-
-        const parsed  = _parsearNota(this._pedido.notes);
-        const statusLabels = {
-            pending:'Pendiente', preparing:'En cocina',
-            ready:'Listo', delivered:'Entregado', cancelled:'Cancelado', confirmed:'Confirmado',
-        };
-
-        const tituloHTML = `
-            <div class="edit-pedido-titulo">
-                <span class="edit-order-no"># ${this._pedido.order_number || '—'}</span>
-                <span class="status-badge ${this._pedido.status}">${statusLabels[this._pedido.status] || this._pedido.status}</span>
-            </div>
-            <p class="edit-destino-label">${parsed.destino}${parsed.cliente ? ` · ${parsed.cliente}` : ''}</p>`;
-
-        const itemsHTML = this._itemsEdit
-            .filter(it => !it.eliminado)
-            .map((it, i) => this._renderItemRow(it, i))
-            .join('');
-
-        const slotsDisponibles = State.slots.filter(s => s.disponible);
-        const opcionesSlots = slotsDisponibles.map(s =>
-            `<option value="${s.id}">${s.nombre}${s.precio > 0 ? ' — ' + formatCOP(s.precio) : ' (Incluido)'}</option>`
-        ).join('');
-
-        contenedor.innerHTML = `
-            ${tituloHTML}
-
-            <div class="edit-section">
-                <p class="edit-section-title">Ítems del pedido</p>
-                <div id="edit-items-list">
-                    ${itemsHTML || '<p class="edit-empty-items">Sin ítems.</p>'}
-                </div>
-            </div>
-
-            <div class="edit-section">
-                <p class="edit-section-title">Agregar ítem</p>
-                <div class="edit-agregar-row">
-                    <select id="edit-slot-select" class="form-input edit-select">
-                        <option value="">— Selecciona un plato o bebida —</option>
-                        ${opcionesSlots}
-                    </select>
-                    <div class="edit-qty-row">
-                        <button class="edit-qty-btn" onclick="EditarPedido._decrementarNuevo()">−</button>
-                        <span id="edit-nueva-qty" class="edit-qty-num">1</span>
-                        <button class="edit-qty-btn" onclick="EditarPedido._incrementarNuevo()">+</button>
-                        <button class="btn-agregar-item" onclick="EditarPedido._agregarItem()">Agregar</button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="edit-section">
-                <p class="edit-section-title">Nota del pedido</p>
-                <textarea id="edit-nota-input" class="form-input" rows="2"
-                    placeholder="Sin picante, sin cebolla, alergia a…">${this._notaEdit}</textarea>
-            </div>
-
-            <div class="edit-total-preview">
-                <span class="edit-total-label">Total estimado</span>
-                <span id="edit-total-monto" class="edit-total-monto">${formatCOP(this._calcularTotalEdit())}</span>
-            </div>`;
-
-        this._nuevaQty = 1;
-        _editSetLoader(false);
-    },
-
-    _renderItemRow(it, i) {
-        const noEliminable = ITEM_ESTADOS_NO_ELIMINABLES.includes(it.item_status) && !it.esNuevo;
-        const precioStr    = it.precio > 0 ? formatCOP(it.precio) : 'Incl.';
-        const subtotalStr  = it.precio > 0 ? formatCOP(it.precio * it.cantidad) : '—';
-
-        return `
-            <div class="edit-item-row" id="edit-item-row-${it.id || 'new-'+i}">
-                <div class="edit-item-info">
-                    <span class="edit-item-nombre">${it.nombre}</span>
-                    <span class="edit-item-precio">${precioStr} c/u</span>
-                </div>
-                <div class="edit-item-ctrl">
-                    <button class="edit-qty-btn" onclick="EditarPedido._cambiarCantidad('${it.id || 'new-'+i}', -1)"
-                        ${it.cantidad <= 1 && noEliminable ? 'disabled title="No se puede reducir: ítem en cocina"' : ''}>−</button>
-                    <span class="edit-qty-num">${it.cantidad}</span>
-                    <button class="edit-qty-btn" onclick="EditarPedido._cambiarCantidad('${it.id || 'new-'+i}', +1)">+</button>
-                    <span class="edit-item-subtotal">${subtotalStr}</span>
-                    ${noEliminable
-                        ? `<span class="edit-item-lock" title="En cocina, no se puede eliminar"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>`
-                        : `<button class="edit-item-del" onclick="EditarPedido._eliminarItem('${it.id || 'new-'+i}')" title="Eliminar">✕</button>`
-                    }
-                </div>
-            </div>`;
-    },
-
-    _nuevaQty: 1,
-
-    _decrementarNuevo() {
-        if (this._nuevaQty > 1) {
-            this._nuevaQty--;
-            const el = document.getElementById('edit-nueva-qty');
-            if (el) el.textContent = this._nuevaQty;
-        }
-    },
-
-    _incrementarNuevo() {
-        this._nuevaQty++;
-        const el = document.getElementById('edit-nueva-qty');
-        if (el) el.textContent = this._nuevaQty;
-    },
-
-    _agregarItem() {
-        const select = document.getElementById('edit-slot-select');
-        const slotId = select?.value;
-        if (!slotId) { Toast.error('Selecciona un plato o bebida.'); return; }
-
-        const slot = State.slots.find(s => s.id === slotId);
-        if (!slot) return;
-
-        const existente = this._itemsEdit.find(it => !it.eliminado && it.menuItemId === slot.menuItemId && it.esNuevo);
-        if (existente) {
-            existente.cantidad += this._nuevaQty;
-        } else {
-            this._itemsEdit.push({
-                id:          `new-${Date.now()}`,
-                menuItemId:  slot.menuItemId,
-                nombre:      slot.nombre,
-                precio:      slot.precio,
-                cantidad:    this._nuevaQty,
-                item_status: 'pending',
-                esNuevo:     true,
-                eliminado:   false,
-            });
-        }
-
-        if (select) select.value = '';
-        this._nuevaQty = 1;
-        const qtyEl = document.getElementById('edit-nueva-qty');
-        if (qtyEl) qtyEl.textContent = '1';
-
-        this._refrescarListaItems();
-        this._actualizarTotalPreview();
-        Toast.ok(`"${slot.nombre}" agregado al pedido.`);
-    },
-
-    _cambiarCantidad(itemId, delta) {
-        const it = this._itemsEdit.find(i => i.id === itemId);
-        if (!it || it.eliminado) return;
-
-        const noEliminable = ITEM_ESTADOS_NO_ELIMINABLES.includes(it.item_status) && !it.esNuevo;
-        const nueva = it.cantidad + delta;
-
-        if (nueva <= 0) {
-            if (noEliminable) {
-                Toast.error(`No se puede eliminar "${it.nombre}": ya está en cocina.`);
-                return;
-            }
-            it.eliminado = true;
-        } else {
-            it.cantidad = nueva;
-        }
-
-        this._refrescarListaItems();
-        this._actualizarTotalPreview();
-    },
-
-    _eliminarItem(itemId) {
-        const it = this._itemsEdit.find(i => i.id === itemId);
-        if (!it) return;
-
-        const noEliminable = ITEM_ESTADOS_NO_ELIMINABLES.includes(it.item_status) && !it.esNuevo;
-        if (noEliminable) {
-            Toast.error(`No se puede eliminar "${it.nombre}": ya está en cocina.`);
-            return;
-        }
-
-        it.eliminado = true;
-        this._refrescarListaItems();
-        this._actualizarTotalPreview();
-    },
-
-    _refrescarListaItems() {
-        const lista = document.getElementById('edit-items-list');
-        if (!lista) return;
-        const activos = this._itemsEdit.filter(it => !it.eliminado);
-        if (activos.length === 0) {
-            lista.innerHTML = '<p class="edit-empty-items">Sin ítems.</p>';
-            return;
-        }
-        lista.innerHTML = activos.map((it, i) => this._renderItemRow(it, i)).join('');
-    },
-
-    _calcularTotalEdit() {
-        return this._itemsEdit
-            .filter(it => !it.eliminado)
-            .reduce((acc, it) => acc + it.precio * it.cantidad, 0);
-    },
-
-    _actualizarTotalPreview() {
-        const el = document.getElementById('edit-total-monto');
-        if (el) el.textContent = formatCOP(this._calcularTotalEdit());
-    },
-
-    async guardar() {
-        if (this._guardando) return;
-        if (!this._pedidoId || !this._pedido) return;
-
-        const btnGuardar = document.getElementById('edit-btn-guardar');
-        this._guardando = true;
-        if (btnGuardar) { btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando…'; }
-
-        try {
-            const notaInput = document.getElementById('edit-nota-input');
-            const nuevaNota = (notaInput?.value || '').trim();
-
-            const parsed = _parsearNota(this._pedido.notes);
-            let notaBase = this._pedido.notes || '';
-            notaBase = notaBase.replace(/\s*\|\s*Nota:\s*.+$/, '');
-            if (nuevaNota) notaBase += ` | Nota: ${nuevaNota}`;
-            const notaFinal = notaBase.trim();
-
-            if (window.La26Core) {
-                const resultado = await La26Core.guardarEdicionAdmin(
-                    this._pedidoId,
-                    this._itemsEdit,
-                    notaFinal,
-                    State.restaurantId
-                );
-                if (!resultado.ok) {
-                    Toast.error(resultado.error || 'No se pudo guardar.');
+            if (errSoft.code === '42703') {
+                const { error: errFallback } = await supabaseClient
+                    .from('menu_items')
+                    .update({ is_active: false })
+                    .eq('id', idItem);
+
+                if (!errFallback) {
+                    Toast.ok(`"${nombreItem}" desactivado del catálogo. Historial conservado.`);
+                    Toast.info('Ejecuta el SQL de migración para agregar la columna deleted_at.', 5000);
+                    cargarSlotsMenuReal();
                     return;
                 }
-            } else {
-                await this._guardarLegacy(notaFinal);
+                throw errFallback;
             }
 
-            Toast.ok('Pedido actualizado correctamente.');
-            this.cerrar();
-            await Hist.cargar();
-
-        } catch (err) {
-            console.error('[EditarPedido] Error al guardar:', err);
-            Toast.error('No se pudo guardar. Verifica tu conexión.', 5000);
-        } finally {
-            this._guardando = false;
-            const btn = document.getElementById('edit-btn-guardar');
-            if (btn) { btn.disabled = false; btn.textContent = 'Guardar cambios'; }
-        }
-    },
-
-    async _guardarLegacy(notaFinal) {
-        const pedidoId        = this._pedidoId;
-        const pedido          = this._pedido;
-        const itemsOriginales = pedido.order_items || [];
-        const idsOriginales   = new Set(itemsOriginales.map(i => i.id));
-
-        const aEliminar  = this._itemsEdit.filter(it => it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
-        const aActualizar = this._itemsEdit.filter(it => !it.eliminado && !it.esNuevo && idsOriginales.has(it.id));
-        const aNuevos    = this._itemsEdit.filter(it => it.esNuevo && !it.eliminado);
-
-        for (const it of aEliminar) {
-            const { error } = await db.from('order_items').delete().eq('id', it.id);
-            if (error) console.warn('[EditarPedido] Error eliminando ítem:', error.message);
+            throw errSoft;
         }
 
-        for (const it of aActualizar) {
-            const original = itemsOriginales.find(o => o.id === it.id);
-            if (original && original.quantity !== it.cantidad) {
-                const { error } = await db.from('order_items')
-                    .update({ quantity: it.cantidad })
-                    .eq('id', it.id);
-                if (error) console.warn('[EditarPedido] Error actualizando cantidad:', error.message);
-            }
-        }
+        throw errDelete;
 
-        if (aNuevos.length > 0) {
-            const { data: todosMenuItems } = await db.from('menu_items')
-                .select('id,name').eq('restaurant_id', State.restaurantId).eq('is_active', true);
-            const listaMenu = todosMenuItems || [];
-
-            const payloadNuevos = aNuevos.map(it => {
-                let menuItemId = it.menuItemId;
-                if (!menuItemId && listaMenu.length > 0) {
-                    const nb = (it.nombre || '').toLowerCase().trim();
-                    const ex = listaMenu.find(m => m.name.toLowerCase().trim() === nb);
-                    menuItemId = ex?.id || listaMenu[0]?.id || null;
-                }
-                return {
-                    order_id:     pedidoId,
-                    menu_item_id: menuItemId,
-                    quantity:     it.cantidad,
-                    unit_price:   it.precio,
-                    item_status:  'pending',
-                    product_name: it.nombre,
-                    notes:        `[nombre]${it.nombre}`,
-                };
-            });
-
-            const { error: errNuevos } = await db.from('order_items').insert(payloadNuevos);
-            if (errNuevos) {
-                if (errNuevos.code === '42703' || errNuevos.message?.includes('product_name')) {
-                    const p2 = payloadNuevos.map(({ product_name, ...rest }) => rest);
-                    const { error: err2 } = await db.from('order_items').insert(p2);
-                    if (err2) console.warn('[EditarPedido] Error insertando nuevos ítems:', err2.message);
-                } else {
-                    console.warn('[EditarPedido] Error insertando nuevos ítems:', errNuevos.message);
-                }
-            }
-        }
-
-        const nuevoTotal = this._calcularTotalEdit();
-        const { error: errUpdate } = await db.from('orders')
-            .update({
-                total_amount: nuevoTotal,
-                notes:        notaFinal,
-                updated_at:   new Date().toISOString(),
-            })
-            .eq('id', pedidoId);
-        if (errUpdate) console.warn('[EditarPedido] Error actualizando orden:', errUpdate.message);
-    },
-};
-
-function _editSetLoader(activo) {
-    const body   = document.getElementById('edit-modal-body');
-    const footer = document.getElementById('edit-modal-footer');
-    if (activo) {
-        if (body) body.innerHTML = `
-            <div class="hist-loader" style="padding:60px 0;">
-                <div class="spinner-sm"></div>
-                <p>Cargando pedido…</p>
-            </div>`;
-        if (footer) footer.style.display = 'none';
-    } else {
-        if (footer) footer.style.display = 'flex';
+    } catch (err) {
+        console.error('[La 26] Error en eliminarComponenteCatalogo:', err);
+        Toast.error(`No se pudo dar de baja "${nombreItem}". Revisa la consola.`);
     }
 }
 
-function _editSetError(msg) {
-    const body   = document.getElementById('edit-modal-body');
-    const footer = document.getElementById('edit-modal-footer');
-    if (body) body.innerHTML = `
-        <div class="empty-state" style="padding:56px 28px;">
-            <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
-            <p>${msg}</p>
-        </div>`;
-    if (footer) footer.style.display = 'none';
+// ============================================================
+// ACTUALIZAR PRECIO DEL PLATO
+// ============================================================
+async function actualizarPrecioPlatoReal(idPlato, nuevoPrecio) {
+    try {
+        const { error } = await supabaseClient
+            .from('menu_items')
+            .update({ price: parseFloat(nuevoPrecio) })
+            .eq('id', idPlato);
+        if (error) throw error;
+    } catch (err) {
+        console.error('Error actualizando precio:', err);
+    }
 }
 
 // ============================================================
-// VERIFICAR SI EL SISTEMA ESTÁ HABILITADO
+// HELPER: actualizar switch de disponibilidad en DOM
 // ============================================================
-async function _verificarSistemaHabilitado() {
+function _actualizarSwitchDOM(idPlato, activo) {
+    const btn = document.querySelector(`[data-switch-id="${idPlato}"]`);
+    if (!btn) return;
+    btn.className   = activo ? 'sw-on' : 'sw-off';
+    btn.textContent = activo ? '🟢 Activo' : '🔴 Agotado';
+    btn.setAttribute('onclick', `alternarVisibilidadPlatoReal('${idPlato}', ${activo})`);
+}
+
+// ============================================================
+// ACTUALIZAR PORCIONES
+// ============================================================
+async function actualizarPorcionesHoy(idPlato, valor) {
+    const porciones = parseInt(valor) || 0;
+    const payload   = { portions_today: porciones };
+    if (porciones === 0) {
+        payload.is_active = false;
+        _actualizarSwitchDOM(idPlato, false);
+    }
     try {
-        const { data, error } = await db
+        const { error } = await supabaseClient
+            .from('menu_items')
+            .update(payload)
+            .eq('id', idPlato);
+
+        if (error) {
+            if (error.code === '42703' || (error.message && error.message.includes('portions_today'))) {
+                console.warn('Columna portions_today no existe.');
+                if (porciones === 0) {
+                    await supabaseClient.from('menu_items').update({ is_active: false }).eq('id', idPlato);
+                }
+                return;
+            }
+            throw error;
+        }
+    } catch (err) {
+        console.error('Error actualizando porciones:', err.message || err);
+        if (porciones === 0) _actualizarSwitchDOM(idPlato, true);
+        Toast.error(`Error al guardar porciones: ${err.message || 'revisa la consola'}`);
+    }
+}
+
+// ============================================================
+// ALTERNAR DISPONIBILIDAD
+// ============================================================
+async function alternarVisibilidadPlatoReal(idPlato, estadoActual) {
+    const nuevoEstado = !estadoActual;
+    _actualizarSwitchDOM(idPlato, nuevoEstado);
+    try {
+        const { error } = await supabaseClient
+            .from('menu_items')
+            .update({ is_active: nuevoEstado })
+            .eq('id', idPlato);
+        if (error) throw error;
+    } catch (err) {
+        console.error('Error cambiando disponibilidad:', err);
+        _actualizarSwitchDOM(idPlato, estadoActual);
+        Toast.error('No se pudo guardar el cambio de disponibilidad.');
+    }
+}
+
+// ============================================================
+// 4. NÓMINA Y GASTOS OPERACIONALES
+// ============================================================
+async function cargarGastosReal() {
+    const tbody = document.getElementById('tabla-gastos');
+    if (!tbody) return;
+
+    tbody.innerHTML = `
+        <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+            Consultando movimientos...
+        </td></tr>`;
+
+    try {
+        const _ahora2    = new Date();
+        const _offsetMs2 = 5 * 60 * 60 * 1000;
+        const _hoyL2     = new Date(_ahora2.getTime() - _offsetMs2);
+        const _yyyy2     = _hoyL2.getUTCFullYear();
+        const _mm2       = String(_hoyL2.getUTCMonth() + 1).padStart(2, '0');
+        const _dd2       = String(_hoyL2.getUTCDate()).padStart(2, '0');
+        const _ini2      = `${_yyyy2}-${_mm2}-${_dd2}T00:00:00-05:00`;
+        const _fin2      = `${_yyyy2}-${_mm2}-${_dd2}T23:59:59-05:00`;
+
+        const { data: egresos, error } = await supabaseClient
+            .from('operating_expenses')
+            .select('*')
+            .gte('created_at', _ini2)
+            .lte('created_at', _fin2)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        globalEgresos = (egresos || []).reduce(
+            (acc, g) => acc + (parseFloat(g.amount) || 0), 0
+        );
+
+        const elTotalGastos = document.getElementById('total-gastos');
+        if (elTotalGastos) elTotalGastos.textContent = formatCOP(globalEgresos);
+
+        tbody.innerHTML = '';
+
+        if (!egresos || egresos.length === 0) {
+            tbody.innerHTML = `
+                <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                    Sin salidas registradas.
+                </td></tr>`;
+            return;
+        }
+
+        egresos.forEach(g => {
+            const hora = new Date(g.created_at).toLocaleTimeString('es-CO', {
+                hour: '2-digit', minute: '2-digit'
+            });
+            tbody.insertAdjacentHTML('beforeend', `
+                <tr class="tbody-row">
+                    <td>
+                        <span style="background:var(--red-lt);color:var(--red);border:1.5px solid var(--red-bd);border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;">${g.expense_type}</span>
+                    </td>
+                    <td style="color:var(--text-1);font-size:13px;">${g.description}</td>
+                    <td>
+                        <span class="mono" style="font-size:13px;font-weight:600;color:var(--red);">- ${formatCOP(g.amount)}</span>
+                    </td>
+                    <td style="text-align:right;font-size:11.5px;color:var(--text-3);" class="mono">${hora}</td>
+                </tr>`);
+        });
+
+    } catch (err) {
+        console.error('Error cargando egresos:', err);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const formGasto = document.getElementById('form-gasto');
+    if (formGasto) {
+        formGasto.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const expense_type = document.getElementById('gasto-tipo').value;
+            const description  = document.getElementById('gasto-descripcion').value;
+            const amount       = parseFloat(document.getElementById('gasto-monto').value);
+            try {
+                const { error } = await supabaseClient
+                    .from('operating_expenses')
+                    .insert([{ expense_type, description, amount }]);
+                if (error) throw error;
+                formGasto.reset();
+                cargarGastosReal();
+            } catch (err) {
+                console.error('Error insertando gasto:', err);
+                Toast.error('Error al registrar el movimiento contable.');
+            }
+        });
+    }
+});
+
+// ============================================================
+// 5. INVENTARIO / KÁRDEX
+// ============================================================
+async function cargarInventarioReal() {
+    const tbody = document.getElementById('tabla-inventario');
+    if (!tbody) return;
+
+    tbody.innerHTML = `
+        <tr><td colspan="6" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+            Mapeando bodegas...
+        </td></tr>`;
+
+    try {
+        const { data: stock, error } = await supabaseClient
+            .from('inventory_supplies')
+            .select('*')
+            .order('item_name', { ascending: true });
+
+        if (error) throw error;
+
+        tbody.innerHTML = '';
+
+        if (!stock || stock.length === 0) {
+            tbody.innerHTML = `
+                <tr><td colspan="6" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                    No hay insumos registrados.
+                </td></tr>`;
+            return;
+        }
+
+        stock.forEach(inv => {
+            const cant = parseFloat(inv.current_stock);
+            const alertaCell = cant <= 5
+                ? `<span style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;">${cant} ⚠️ Stock bajo</span>`
+                : `<span class="mono" style="font-size:13px;color:var(--text-1);font-weight:600;">${cant}</span>`;
+            const nombreEscapado = (inv.item_name || '').replace(/'/g, "\\'");
+
+            tbody.insertAdjacentHTML('beforeend', `
+                <tr class="tbody-row">
+                    <td style="font-size:13px;font-weight:600;color:var(--text-1);">${inv.item_name}</td>
+                    <td style="font-size:12px;color:var(--text-3);">${inv.category}</td>
+                    <td style="text-align:center;">${alertaCell}</td>
+                    <td style="text-align:center;font-size:12px;color:var(--text-3);">${inv.unit_of_measure}</td>
+                    <td style="text-align:center;">
+                        <div style="display:flex;justify-content:center;gap:4px;">
+                            <button onclick="ajustarExistenciasFisicas('${inv.id}',${cant},-1)"
+                                style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);border-radius:999px;width:28px;height:28px;cursor:pointer;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;font-family:'DM Sans',sans-serif;transition:all .2s;"
+                                onmouseover="this.style.background='rgba(192,57,43,.16)'"
+                                onmouseout="this.style.background='var(--red-lt)'">−</button>
+                            <button onclick="ajustarExistenciasFisicas('${inv.id}',${cant},1)"
+                                style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:999px;width:28px;height:28px;cursor:pointer;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;font-family:'DM Sans',sans-serif;transition:all .2s;"
+                                onmouseover="this.style.background='rgba(74,103,65,.18)'"
+                                onmouseout="this.style.background='var(--olive-lt)'">+</button>
+                        </div>
+                    </td>
+                    <td style="text-align:right;">
+                        <button onclick="eliminarInsumoReal('${inv.id}','${nombreEscapado}')" class="btn-danger">
+                            🗑️ Dar de baja
+                        </button>
+                    </td>
+                </tr>`);
+        });
+
+    } catch (err) {
+        console.error('Error cargando kárdex:', err);
+    }
+}
+
+async function ajustarExistenciasFisicas(idInsumo, stockActual, delta) {
+    const nuevoStock = Math.max(0, stockActual + delta);
+    try {
+        const { error } = await supabaseClient
+            .from('inventory_supplies')
+            .update({ current_stock: nuevoStock, updated_at: new Date().toISOString() })
+            .eq('id', idInsumo);
+        if (error) throw error;
+        cargarInventarioReal();
+    } catch (err) {
+        console.error('Error ajustando stock:', err);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const basePersistida = parseFloat(sessionStorage.getItem('base_caja_hoy') || '0');
+    if (basePersistida > 0) {
+        baseInicial = basePersistida;
+        const panel = document.getElementById('panel-apertura-caja');
+        if (panel) panel.style.display = 'none';
+    }
+
+    const formNuevoInsumo = document.getElementById('form-nuevo-insumo');
+    if (formNuevoInsumo) {
+        formNuevoInsumo.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const item_name       = document.getElementById('inv-nombre').value.trim();
+            const category        = document.getElementById('inv-categoria').value;
+            const current_stock   = parseFloat(document.getElementById('inv-stock').value);
+            const unit_of_measure = document.getElementById('inv-unidad').value;
+            try {
+                const { error } = await supabaseClient
+                    .from('inventory_supplies')
+                    .insert([{ item_name, category, current_stock, unit_of_measure, updated_at: new Date().toISOString() }]);
+                if (error) {
+                    if (error.code === '23505') {
+                        Toast.error('Ya existe un insumo con ese nombre.');
+                        return;
+                    }
+                    throw error;
+                }
+                formNuevoInsumo.reset();
+                Toast.ok(`Insumo "${item_name}" registrado correctamente.`);
+                cargarInventarioReal();
+            } catch (err) {
+                console.error('Error insertando insumo:', err);
+                Toast.error('No se pudo agregar el insumo.');
+            }
+        });
+    }
+});
+
+async function eliminarInsumoReal(idInsumo, nombreInsumo) {
+    if (!confirm(`⚠️ ¿Dar de baja "${nombreInsumo}"?`)) return;
+    try {
+        const { error } = await supabaseClient
+            .from('inventory_supplies')
+            .delete()
+            .eq('id', idInsumo);
+        if (error) throw error;
+        Toast.ok(`"${nombreInsumo}" eliminado del kárdex.`);
+        cargarInventarioReal();
+    } catch (err) {
+        console.error('Error eliminando insumo:', err);
+        Toast.error('Error al eliminar el insumo.');
+    }
+}
+
+// ============================================================
+// 6. CIERRE DE CAJA INTELIGENTE — INFORME Z
+// ============================================================
+async function ejecutarCierreCaja() {
+    const baseReteICA  = Math.max(0, globalIngresos - globalEgresos);
+    const totalICA     = baseReteICA * TASA_RETE_ICA;
+    const ivaConsumo   = globalIngresos * TASA_IMPOCONSUMO;
+    const utilidadNeta = globalIngresos - globalEgresos - totalICA;
+    const saldoCaja    = baseInicial + totalEfectivo + totalTransferencia;
+
+    const setEl = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = formatCOP(val);
+    };
+    setEl('cierre-ing',   globalIngresos);
+    setEl('cierre-eg',    globalEgresos);
+    setEl('cierre-ica',   totalICA);
+    setEl('cierre-impo',  ivaConsumo);
+    setEl('cierre-ut',    utilidadNeta);
+    setEl('cierre-ef',    totalEfectivo);
+    setEl('cierre-tr',    totalTransferencia);
+    setEl('cierre-fi',    totalFiado);
+    setEl('cierre-saldo', saldoCaja);
+
+    const elUt = document.getElementById('cierre-ut');
+    if (elUt) elUt.style.color = utilidadNeta >= 0 ? 'var(--olive)' : 'var(--red)';
+
+    const modal = document.getElementById('modal-cierre-caja');
+    if (modal) modal.style.display = 'flex';
+}
+
+function cerrarModalCierre() {
+    const modal = document.getElementById('modal-cierre-caja');
+    if (modal) modal.style.display = 'none';
+}
+
+async function realizarCierre() {
+    const baseReteICA  = Math.max(0, globalIngresos - globalEgresos);
+    const totalICA     = baseReteICA * TASA_RETE_ICA;
+    const ivaConsumo   = globalIngresos * TASA_IMPOCONSUMO;
+    const utilidadNeta = globalIngresos - globalEgresos - totalICA;
+    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    const cierrePayload = {
+        fecha:         hoy,
+        ingresos:      Math.round(globalIngresos),
+        egresos:       Math.round(globalEgresos),
+        utilidad_neta: Math.round(utilidadNeta),
+        provision_ica: Math.round(totalICA),
+        impoconsumo:   Math.round(ivaConsumo),
+        efectivo:      Math.round(totalEfectivo),
+        transferencia: Math.round(totalTransferencia),
+        fiado:         Math.round(totalFiado),
+        base_caja:     Math.round(baseInicial),
+        created_at:    new Date().toISOString(),
+    };
+
+    try {
+        const { error } = await supabaseClient
+            .from('historial_cierres')
+            .insert([cierrePayload]);
+        if (error) throw error;
+        Toast.ok(`✅ Cierre del ${hoy} archivado en el calendario.`, 6000);
+    } catch (err) {
+        console.warn('historial_cierres no disponible — guardando localmente:', err.message);
+        const histLocal = JSON.parse(localStorage.getItem('cierres_local') || '[]');
+        histLocal.unshift({ ...cierrePayload, local: true });
+        localStorage.setItem('cierres_local', JSON.stringify(histLocal.slice(0, 90)));
+        Toast.ok('Cierre archivado localmente.');
+    }
+
+    const ahoraCierre = new Date().toISOString();
+    // [v3.4 · FIX-CIERRE] Persistir el corte en localStorage para que
+    // sobreviva al cerrar/reabrir la app. Se borra el de sessionStorage
+    // (versión vieja) para que no haya dos fuentes en conflicto.
+    localStorage.setItem('cierre_desde', ahoraCierre);
+    sessionStorage.removeItem('cierre_desde');
+
+    ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(k));
+    totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
+    globalIngresos = 0; globalEgresos = 0;
+
+    const panelApertura = document.getElementById('panel-apertura-caja');
+    const inputBase     = document.getElementById('input-base-caja');
+    if (panelApertura) {
+        panelApertura.style.display = '';
+        if (inputBase) inputBase.value = '';
+    }
+
+    if (document.getElementById('tab-calendario')?.style.display !== 'none') {
+        cargarCalendarioCierres();
+    }
+
+    Toast.ok('Ciclo contable cerrado. Contadores reseteados a $0.');
+    cerrarModalCierre();
+    setTimeout(() => cargarDashboardReal(), 500);
+}
+
+// ── Calendario de cierres ──────────────────────────────────────
+const _cierresState = { pagina: 0, limite: 20, total: 0, datos: [], filtroFecha: '' };
+
+async function cargarCalendarioCierres(resetPagina = true) {
+    const tbody   = document.getElementById('tabla-calendario-cierres');
+    const resumen = document.getElementById('resumen-calendario');
+    if (!tbody) return;
+
+    if (resetPagina) {
+        _cierresState.pagina = 0;
+        _cierresState.datos  = [];
+    }
+
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-3);">Cargando historial…</td></tr>`;
+
+    try {
+        let query = supabaseClient
+            .from('historial_cierres')
+            .select('*', { count: 'exact' })
+            .order('fecha', { ascending: false })
+            .range(
+                _cierresState.pagina * _cierresState.limite,
+                (_cierresState.pagina + 1) * _cierresState.limite - 1
+            );
+
+        if (_cierresState.filtroFecha) {
+            query = query.eq('fecha', _cierresState.filtroFecha);
+        }
+
+        const { data, error, count } = await query;
+        if (error) throw error;
+
+        _cierresState.total = count || 0;
+        _cierresState.datos = data || [];
+    } catch (_) {
+        const todos = JSON.parse(localStorage.getItem('cierres_local') || '[]');
+        _cierresState.datos  = todos.slice(
+            _cierresState.pagina * _cierresState.limite,
+            (_cierresState.pagina + 1) * _cierresState.limite
+        );
+        _cierresState.total = todos.length;
+    }
+
+    const cierres = _cierresState.datos;
+
+    if (cierres.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--text-3);">Sin cierres registrados aún.</td></tr>`;
+        if (resumen) resumen.innerHTML = '';
+        return;
+    }
+
+    const totAcc = cierres.reduce((a, c) => ({
+        ing: a.ing + (c.ingresos || 0),
+        eg:  a.eg  + (c.egresos  || 0),
+        ut:  a.ut  + (c.utilidad_neta || 0),
+    }), { ing: 0, eg: 0, ut: 0 });
+
+    if (resumen) {
+        const hayPaginas = _cierresState.total > _cierresState.limite;
+        const labelPag   = hayPaginas
+            ? `<p style="font-size:11px;color:var(--text-3);margin-top:6px;text-align:center;">
+                Mostrando ${cierres.length} de ${_cierresState.total} cierres · Página ${_cierresState.pagina + 1}
+               </p>` : '';
+
+        resumen.innerHTML = `
+            <div style="margin-bottom:18px;">
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+                    <label style="font-size:12px;font-weight:600;color:var(--text-2);">📆 Filtrar por fecha:</label>
+                    <input type="date" id="inp-filtro-fecha-cierres"
+                        value="${_cierresState.filtroFecha}"
+                        onchange="_aplicarFiltroCierres(this.value)"
+                        style="width:180px;border-radius:999px;padding:5px 14px;font-size:12.5px;height:36px;">
+                    ${_cierresState.filtroFecha
+                        ? `<button onclick="_aplicarFiltroCierres('')" class="btn-ghost" style="font-size:12px;padding:5px 14px;height:36px;">✕ Quitar filtro</button>`
+                        : ''}
+                    <div style="flex:1;"></div>
+                    ${_cierresState.pagina > 0
+                        ? `<button onclick="_paginaCierres(-1)" class="btn-ghost" style="font-size:12px;padding:5px 14px;height:36px;">← Anterior</button>` : ''}
+                    ${(_cierresState.pagina + 1) * _cierresState.limite < _cierresState.total
+                        ? `<button onclick="_paginaCierres(1)" class="btn-ghost" style="font-size:12px;padding:5px 14px;height:36px;">Siguiente →</button>` : ''}
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;" class="tables-grid">
+                    <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px;text-align:center;">
+                        <p style="font-size:10px;font-weight:700;color:var(--olive);text-transform:uppercase;margin-bottom:4px;">Ingresos Acumulados</p>
+                        <p style="font-size:18px;font-weight:800;color:var(--olive);" class="mono">${formatCOP(totAcc.ing)}</p>
+                    </div>
+                    <div style="background:var(--red-lt);border:1.5px solid var(--red-bd);border-radius:14px;padding:14px;text-align:center;">
+                        <p style="font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;margin-bottom:4px;">Egresos Acumulados</p>
+                        <p style="font-size:18px;font-weight:800;color:var(--red);" class="mono">${formatCOP(totAcc.eg)}</p>
+                    </div>
+                    <div style="background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.25);border-radius:14px;padding:14px;text-align:center;">
+                        <p style="font-size:10px;font-weight:700;color:var(--blue);text-transform:uppercase;margin-bottom:4px;">Utilidad Acumulada</p>
+                        <p style="font-size:18px;font-weight:800;color:var(--blue);" class="mono">${formatCOP(totAcc.ut)}</p>
+                    </div>
+                </div>
+                ${labelPag}
+            </div>`;
+    }
+
+    const fragment = document.createDocumentFragment();
+    cierres.forEach(c => {
+        const utClass    = (c.utilidad_neta || 0) >= 0 ? 'color:var(--olive)' : 'color:var(--red)';
+        const localBadge = c.local ? `<span style="font-size:9px;color:var(--amber);font-weight:700;"> (local)</span>` : '';
+        const tr = document.createElement('tr');
+        tr.className = 'tbody-row';
+        tr.innerHTML = `
+            <td class="mono" style="font-size:12.5px;font-weight:600;">${c.fecha}${localBadge}</td>
+            <td class="mono" style="text-align:right;color:var(--olive);font-weight:600;">${formatCOP(c.ingresos || 0)}</td>
+            <td class="mono" style="text-align:right;color:var(--red);">${formatCOP(c.egresos || 0)}</td>
+            <td class="mono" style="text-align:right;${utClass};font-weight:700;">${formatCOP(c.utilidad_neta || 0)}</td>
+            <td class="mono" style="text-align:right;font-size:11.5px;">${formatCOP(c.efectivo || 0)}</td>
+            <td class="mono" style="text-align:right;font-size:11.5px;">${formatCOP(c.transferencia || 0)}</td>
+            <td class="mono" style="text-align:right;font-size:11.5px;color:var(--amber);">${formatCOP(c.fiado || 0)}</td>`;
+        fragment.appendChild(tr);
+    });
+    tbody.innerHTML = '';
+    tbody.appendChild(fragment);
+}
+
+function _aplicarFiltroCierres(fecha) {
+    _cierresState.filtroFecha = fecha;
+    cargarCalendarioCierres(true);
+}
+
+function _paginaCierres(delta) {
+    const maxPag = Math.ceil(_cierresState.total / _cierresState.limite) - 1;
+    _cierresState.pagina = Math.max(0, Math.min(_cierresState.pagina + delta, maxPag));
+    cargarCalendarioCierres(false);
+}
+
+// ============================================================
+// INICIALIZACIÓN PRINCIPAL
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+    const elFecha = document.getElementById('fecha-actual');
+    if (elFecha) {
+        elFecha.textContent = new Date().toLocaleDateString('es-CO', {
+            weekday: 'short', year: 'numeric', month: 'short', day: 'numeric'
+        });
+    }
+
+    setTimeout(() => cargarDashboardReal(), 50);
+
+    (async () => {
+        if (!window.La26Core) return;
+        const { data: rest } = await supabaseClient
+            .from('restaurants').select('id').limit(1).maybeSingle();
+        const rId = rest?.id;
+        if (!rId) return;
+        La26Core.suscribirRealtime(rId);
+        La26Core.on('onOrderChange', () => {
+            const tabDash = document.getElementById('tab-dashboard');
+            if (tabDash && tabDash.style.display !== 'none') setTimeout(() => cargarDashboardReal(), 400);
+        });
+        La26Core.on('onMenuItemChange', () => {
+            const tabMenu = document.getElementById('tab-menu');
+            if (tabMenu && tabMenu.style.display !== 'none') setTimeout(() => cargarSlotsMenuReal(), 300);
+        });
+        La26Core.on('onInventoryChange', () => {
+            const tabInv = document.getElementById('tab-inventario');
+            if (tabInv && tabInv.style.display !== 'none') setTimeout(() => cargarInventarioReal(), 300);
+        });
+    })();
+});
+
+// ============================================================
+// MÓDULO A: CONTROL DE ACCESO
+// ============================================================
+const SETTING_KEY = 'orders_enabled';
+
+async function cargarEstadoSistema() {
+    try {
+        const { data, error } = await supabaseClient
             .from('system_settings')
             .select('value')
-            .eq('key', 'orders_enabled')
+            .eq('key', SETTING_KEY)
             .maybeSingle();
 
-        if (error || !data) return true;
+        if (error) throw error;
 
-        const habilitado = data.value === 'true';
-        if (!habilitado) _mostrarPantallaFueraDeServicio();
+        const habilitado = data ? data.value === 'true' : true;
+        _renderToggleSistema(habilitado);
         return habilitado;
     } catch (_) {
+        // Si Supabase no responde, el sistema siempre arranca habilitado.
+        // No leer localStorage aquí evita que un valor corrupto bloquee el sistema.
+        _renderToggleSistema(true);
         return true;
     }
 }
 
-function _mostrarPantallaFueraDeServicio() {
-    const carta     = document.getElementById('vista-carta');
-    const historial = document.getElementById('vista-historial');
-    const cartBar   = document.getElementById('cart-bar');
-    const catsBar   = document.getElementById('cats-bar');
-    if (carta)     carta.style.display     = 'none';
-    if (historial) historial.style.display = 'none';
-    if (cartBar)   cartBar.style.display   = 'none';
-    if (catsBar)   catsBar.style.display   = 'none';
+async function toggleEstadoSistema() {
+    const btnToggle = document.getElementById('btn-toggle-sistema');
+    if (!btnToggle) return;
 
-    const loader = document.getElementById('app-loader');
-    if (loader) {
-        loader.style.display = 'flex';
-        loader.innerHTML = `
-            <div style="text-align:center;padding:40px 20px;max-width:300px;">
-                <div style="margin-bottom:20px;display:flex;justify-content:center;"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
-                <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.8rem;
-                           font-weight:400;color:var(--ink);margin-bottom:12px;line-height:1.2;">
-                    Sistema fuera<br>de servicio
-                </h2>
-                <p style="font-size:13px;color:var(--ink-muted);line-height:1.65;">
-                    El restaurante no está recibiendo pedidos en este momento.<br>
-                    Consulta con el administrador.
-                </p>
-            </div>`;
+    const estadoActual = btnToggle.dataset.estado === 'true';
+    const nuevoEstado  = !estadoActual;
+
+    _renderToggleSistema(nuevoEstado);
+    // Solo persiste en localStorage si el estado es false (bloqueo intencional).
+    // Si se habilita, limpia cualquier valor corrupto anterior.
+    if (nuevoEstado) {
+        localStorage.removeItem(SETTING_KEY);
+    } else {
+        localStorage.setItem(SETTING_KEY, 'false');
+    }
+
+    try {
+        const { error } = await supabaseClient
+            .from('system_settings')
+            .upsert([{ key: SETTING_KEY, value: String(nuevoEstado) }], { onConflict: 'key' });
+
+        if (error) throw error;
+
+        const msg = nuevoEstado
+            ? '✅ Sistema habilitado: los meseros pueden tomar pedidos.'
+            : '🔒 Sistema bloqueado: los meseros verán aviso de "Fuera de servicio".';
+        Toast.ok(msg, 5000);
+    } catch (err) {
+        console.error('Error al persistir estado del sistema:', err);
+        Toast.info('Estado guardado localmente. Sincronizar cuando haya conexión.');
+    }
+}
+
+function _renderToggleSistema(habilitado) {
+    const btn         = document.getElementById('btn-toggle-sistema');
+    const estadoBadge = document.getElementById('badge-estado-sistema');
+    const desc        = document.getElementById('desc-estado-sistema');
+    if (!btn) return;
+
+    btn.dataset.estado = String(habilitado);
+
+    if (habilitado) {
+        btn.className = 'sw-on';
+        btn.innerHTML = '🟢 Pedidos Habilitados';
+        if (estadoBadge) {
+            estadoBadge.textContent = 'Operativo';
+            estadoBadge.style.cssText = 'background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;';
+        }
+        if (desc) desc.textContent = 'Los meseros pueden crear y registrar pedidos con normalidad.';
+    } else {
+        btn.className = 'sw-off';
+        btn.innerHTML = '🔴 Pedidos Bloqueados';
+        if (estadoBadge) {
+            estadoBadge.textContent = 'Fuera de Servicio';
+            estadoBadge.style.cssText = 'background:var(--red-lt);color:var(--red);border:1.5px solid var(--red-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;';
+        }
+        if (desc) desc.textContent = 'Sistema cerrado. Los meseros recibirán aviso de "Sistema fuera de servicio" al intentar acceder.';
     }
 }
 
 // ============================================================
-// INIT
+// MÓDULO B: INTELIGENCIA DE PRODUCCIÓN — RECETARIO
 // ============================================================
-(async function init() {
+let _recetasCache = [];
+let _supplyCache  = [];
+let _calcResult   = null;
+
+async function cargarRecetas() {
+    const tbody = document.getElementById('tabla-recetas');
+    const badge = document.getElementById('badge-recetas-count');
+    if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-3);">Cargando recetas…</td></tr>`;
+
     try {
-        _programarResetMedianoche();
-        await Sesion.requerir();
+        const { data: recetas, error } = await supabaseClient
+            .from('production_recipes')
+            .select(`id, name, description,
+                     recipe_ingredients ( id, supply_id, supply_name, quantity_per_dish, quantity_required, unit )`)
+            .order('name', { ascending: true });
 
-        // ── Verificar si el sistema está habilitado ──
-        const _sistemaHabilitado = await _verificarSistemaHabilitado();
-        if (!_sistemaHabilitado) return;
+        if (error) throw error;
+        _recetasCache = recetas || [];
 
-        await _resolverRestaurant();
-        await Menu.cargar();
+        if (badge) badge.textContent = `${_recetasCache.length} receta${_recetasCache.length !== 1 ? 's' : ''}`;
 
-        // La26Core como canal adicional de realtime si está disponible
-        if (window.La26Core && State.restaurantId) {
-            La26Core.suscribirRealtime(State.restaurantId);
-
-            La26Core.on('onMenuItemChange', ({ payload }) => {
-                const item = payload?.new;
-                if (!item?.id) return;
-                _actualizarSlotDesdeRealtime(item);
-            });
-
-            La26Core.on('onOrderChange', () => {
-                if (HistState.cargado) {
-                    setTimeout(() => Hist.cargar(), 600);
-                }
+        const sel = document.getElementById('sel-receta-calculo');
+        if (sel) {
+            sel.innerHTML = '<option value="">— Seleccionar receta —</option>';
+            _recetasCache.forEach(r => {
+                sel.insertAdjacentHTML('beforeend',
+                    `<option value="${r.id}">${r.name}</option>`);
             });
         }
 
-        // ── Notificaciones de despacho desde cocina ──────────
-        _suscribirNotificacionesCocina();
-        // ─────────────────────────────────────────────────────
+        _renderTablaRecetas();
+    } catch (err) {
+        console.error('Error cargando recetas:', err);
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--red);font-size:12.5px;">Error al cargar. Revisa la consola.</td></tr>`;
+    }
+}
+
+function _renderTablaRecetas() {
+    const tbody = document.getElementById('tabla-recetas');
+    if (!tbody) return;
+
+    if (_recetasCache.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Sin recetas. Crea la primera arriba.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = _recetasCache.map(r => {
+        const ings = (r.recipe_ingredients || []).map(i =>
+            `<span style="background:var(--olive-lt);border:1px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:2px 9px;font-size:10.5px;font-weight:600;white-space:nowrap;">
+                ${i.quantity_per_dish ?? i.quantity_required ?? '?'} ${i.unit} ${i.supply_name}
+            </span>`
+        ).join('');
+
+        return `<tr class="tbody-row">
+            <td style="font-size:13px;font-weight:600;color:var(--text-1);white-space:nowrap;">${r.name}</td>
+            <td style="font-size:12px;color:var(--text-3);">${r.description || '—'}</td>
+            <td><div style="display:flex;flex-wrap:wrap;gap:4px;padding:4px 0;">${ings || '<span style="color:var(--text-3);font-size:11.5px;">Sin ingredientes</span>'}</div></td>
+            <td style="text-align:center;">
+                <button onclick="eliminarReceta('${r.id}','${(r.name||'').replace(/'/g,"\\'")}') " class="btn-danger">🗑️ Eliminar</button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+async function guardarReceta() {
+    const nombre = document.getElementById('rec-nombre')?.value.trim();
+    const desc   = document.getElementById('rec-descripcion')?.value.trim();
+
+    if (!nombre) { Toast.error('El nombre de la receta es obligatorio.'); return; }
+
+    const filas       = document.querySelectorAll('#tabla-form-ingredientes .ing-row');
+    const ingredientes = [];
+
+    filas.forEach(fila => {
+        const supplyId   = fila.querySelector('.ing-supply-id')?.value || null;
+        const supplyName = fila.querySelector('.ing-supply-name')?.value?.trim();
+        const qty        = parseFloat(fila.querySelector('.ing-qty')?.value);
+        const unit       = fila.querySelector('.ing-unit')?.value?.trim();
+        if (supplyName && !isNaN(qty) && qty > 0 && unit) {
+            ingredientes.push({ supply_id: supplyId, supply_name: supplyName, quantity_per_dish: qty, quantity_required: qty, unit });
+        }
+    });
+
+    if (ingredientes.length === 0) {
+        Toast.error('Agrega al menos un ingrediente válido (nombre, cantidad y unidad).');
+        return;
+    }
+
+    try {
+        const { data: receta, error: errR } = await supabaseClient
+            .from('production_recipes')
+            .insert([{ name: nombre, description: desc || null }])
+            .select('id').single();
+        if (errR) throw errR;
+
+        const { error: errI } = await supabaseClient
+            .from('recipe_ingredients')
+            .insert(ingredientes.map(i => ({ ...i, recipe_id: receta.id })));
+        if (errI) throw errI;
+
+        Toast.ok(`Receta "${nombre}" guardada.`);
+        document.getElementById('rec-nombre').value      = '';
+        document.getElementById('rec-descripcion').value = '';
+        document.getElementById('tabla-form-ingredientes').innerHTML = '';
+        agregarFilaIngrediente();
+        cargarRecetas();
+    } catch (err) {
+        console.error('Error guardando receta:', err);
+        Toast.error(`Error: ${err.message}`);
+    }
+}
+
+async function agregarFilaIngrediente() {
+    const tbody = document.getElementById('tabla-form-ingredientes');
+    if (!tbody) return;
+
+    if (_supplyCache.length === 0) {
+        const { data } = await supabaseClient
+            .from('inventory_supplies')
+            .select('id, item_name, unit_of_measure, current_stock')
+            .order('item_name');
+        _supplyCache = data || [];
+    }
+
+    const opts   = _supplyCache.map(s =>
+        `<option value="${s.id}" data-unit="${s.unit_of_measure}" data-name="${s.item_name}">
+            ${s.item_name} (${s.current_stock} ${s.unit_of_measure} en stock)
+        </option>`
+    ).join('');
+
+    const filaId = `ing_${Date.now()}`;
+    tbody.insertAdjacentHTML('beforeend', `
+        <tr id="${filaId}" class="ing-row">
+            <td style="padding:6px 8px;">
+                <select class="ing-supply-select" onchange="_autoFillUnit(this,'${filaId}')"
+                    style="font-size:12px;border-radius:999px;padding:5px 10px;height:34px;width:100%;min-width:160px;">
+                    <option value="">— Del inventario o escribe abajo —</option>
+                    ${opts}
+                </select>
+                <input type="hidden" class="ing-supply-id">
+                <input type="text" class="ing-supply-name" placeholder="Nombre (si no está en inventario)"
+                    style="font-size:12px;border-radius:999px;padding:5px 10px;height:34px;margin-top:4px;width:100%;">
+            </td>
+            <td style="padding:6px 8px;width:130px;">
+                <input type="number" class="ing-qty" placeholder="Ej: 0.2" min="0.001" step="0.001"
+                    style="font-size:12px;border-radius:999px;padding:5px 10px;height:34px;width:100%;text-align:center;">
+            </td>
+            <td style="padding:6px 8px;width:110px;">
+                <input type="text" class="ing-unit" placeholder="Kg, Libras…"
+                    style="font-size:12px;border-radius:999px;padding:5px 10px;height:34px;width:100%;">
+            </td>
+            <td style="padding:6px 8px;width:36px;text-align:center;">
+                <button onclick="document.getElementById('${filaId}').remove()"
+                    style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);border-radius:999px;width:28px;height:28px;cursor:pointer;font-size:15px;font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;">×</button>
+            </td>
+        </tr>`);
+}
+
+function _autoFillUnit(selectEl, filaId) {
+    const fila = document.getElementById(filaId);
+    if (!fila) return;
+    const opt  = selectEl.options[selectEl.selectedIndex];
+    if (!opt?.value) return;
+    fila.querySelector('.ing-supply-id').value   = opt.value;
+    fila.querySelector('.ing-supply-name').value = opt.dataset.name || '';
+    fila.querySelector('.ing-unit').value        = opt.dataset.unit || '';
+}
+
+async function eliminarReceta(id, nombre) {
+    if (!confirm(`¿Eliminar la receta "${nombre}"?`)) return;
+    try {
+        await supabaseClient.from('recipe_ingredients').delete().eq('recipe_id', id);
+        await supabaseClient.from('production_recipes').delete().eq('id', id);
+        Toast.ok(`Receta "${nombre}" eliminada.`);
+        cargarRecetas();
+    } catch (err) {
+        Toast.error('Error al eliminar la receta.');
+    }
+}
+
+async function calcularProduccion() {
+    const sel      = document.getElementById('sel-receta-calculo');
+    const recetaId = sel?.value;
+    if (!recetaId) { Toast.error('Selecciona una receta primero.'); return; }
+
+    const receta = _recetasCache.find(r => r.id === recetaId);
+    if (!receta?.recipe_ingredients?.length) {
+        Toast.error('La receta no tiene ingredientes. Edítala primero.');
+        return;
+    }
+
+    const supplyIds = receta.recipe_ingredients.filter(i => i.supply_id).map(i => i.supply_id);
+    let stockMap = {};
+
+    if (supplyIds.length > 0) {
+        const { data: stocks } = await supabaseClient
+            .from('inventory_supplies')
+            .select('id, item_name, current_stock, unit_of_measure')
+            .in('id', supplyIds);
+        (stocks || []).forEach(s => { stockMap[s.id] = s; });
+    }
+
+    let platosEstimados = Infinity;
+    const detalleIng = receta.recipe_ingredients.map(ing => {
+        const stockActual  = stockMap[ing.supply_id]?.current_stock ?? null;
+        const _qpd2        = ing.quantity_per_dish ?? ing.quantity_required ?? 0;
+        const coberturaEst = (stockActual !== null && _qpd2 > 0)
+            ? Math.floor(stockActual / _qpd2)
+            : null;
+
+        if (coberturaEst !== null && coberturaEst < platosEstimados) {
+            platosEstimados = coberturaEst;
+        }
+        return { ...ing, stockActual, coberturaEst };
+    });
+
+    if (!isFinite(platosEstimados)) platosEstimados = 0;
+
+    _calcResult = { recetaId, receta, platosEstimados, detalleIng };
+    _renderResultadoCalculo();
+}
+
+function _renderResultadoCalculo() {
+    const panel = document.getElementById('panel-resultado-calculo');
+    if (!panel || !_calcResult) return;
+    const { receta, platosEstimados, detalleIng } = _calcResult;
+
+    const isCuello = (ing) => ing.coberturaEst !== null && ing.coberturaEst === platosEstimados;
+
+    const filasIng = detalleIng.map(i => {
+        const cuello       = isCuello(i);
+        const _qpd3        = i.quantity_per_dish ?? i.quantity_required ?? 0;
+        const consumoTotal = i.stockActual !== null ? (_qpd3 * platosEstimados).toFixed(3) : '—';
+        const restante     = i.stockActual !== null ? Math.max(0, i.stockActual - _qpd3 * platosEstimados).toFixed(3) : '—';
+        const stockLabel   = i.stockActual !== null
+            ? `<span class="mono" style="font-size:12.5px;font-weight:600;">${i.stockActual} ${i.unit}</span>`
+            : `<span style="color:var(--amber);font-size:11.5px;font-weight:600;">⚠️ Sin link inventario</span>`;
+        const cuelloLabel  = cuello
+            ? `<span style="font-size:9.5px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.4px;">🔴 Cuello</span>` : '';
+
+        return `<tr style="border-bottom:1px solid var(--border);${cuello ? 'background:rgba(192,57,43,.04);' : ''}">
+            <td style="padding:9px 12px;font-size:12.5px;font-weight:600;color:var(--text-1);">${i.supply_name} ${cuelloLabel}</td>
+            <td style="padding:9px 12px;text-align:center;">${stockLabel}</td>
+            <td style="padding:9px 12px;text-align:center;" class="mono">${i.quantity_per_dish} ${i.unit}</td>
+            <td style="padding:9px 12px;text-align:center;color:${cuello?'var(--red)':'var(--text-2)'};" class="mono">${i.coberturaEst ?? '—'}</td>
+            <td style="padding:9px 12px;text-align:center;color:var(--red);" class="mono">-${consumoTotal}</td>
+            <td style="padding:9px 12px;text-align:center;color:var(--olive);" class="mono">${restante}</td>
+        </tr>`;
+    }).join('');
+
+    panel.className = 'card';
+    panel.style.display = 'block';
+    panel.innerHTML = `
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px;">
+            <div>
+                <p style="font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">${receta.name} — Resultado</p>
+                <div style="display:flex;align-items:baseline;gap:10px;">
+                    <span style="font-size:42px;font-weight:800;color:var(--olive);font-family:'DM Mono',monospace;line-height:1;">${platosEstimados}</span>
+                    <div>
+                        <p style="font-size:14px;font-weight:600;color:var(--text-1);">platos estimados</p>
+                        <p style="font-size:11px;color:var(--text-3);">con el stock actual del inventario</p>
+                    </div>
+                </div>
+            </div>
+            ${platosEstimados > 0 ? `
+            <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px 18px;">
+                <p style="font-size:11px;font-weight:700;color:var(--olive);margin-bottom:8px;">📋 Siguiente paso</p>
+                <p style="font-size:12px;color:var(--text-2);line-height:1.6;">Ve a <strong>Control de Menú</strong> y pon<br><strong>${platosEstimados}</strong> en "Porciones del día".</p>
+            </div>` : ''}
+        </div>
+        <div style="overflow-x:auto;border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px;">
+            <table style="width:100%;border-collapse:collapse;min-width:500px;">
+                <thead>
+                    <tr style="background:var(--surface-2);">
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:left;">Insumo</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Stock Actual</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Por 1 plato</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Alcanza para</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Consume total</th>
+                        <th style="padding:9px 12px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;text-align:center;">Queda</th>
+                    </tr>
+                </thead>
+                <tbody>${filasIng}</tbody>
+            </table>
+        </div>
+        ${platosEstimados > 0 ? `
+        <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:12px;padding:14px 16px;">
+            <p style="font-size:12px;font-weight:700;color:var(--olive);margin-bottom:10px;">📦 Descontar insumos al cerrar el día</p>
+            <p style="font-size:11.5px;color:var(--text-2);margin-bottom:10px;">Ingresa cuántos platos se vendieron realmente.</p>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <label style="font-size:12.5px;font-weight:600;color:var(--text-2);margin:0;white-space:nowrap;">Platos vendidos:</label>
+                <input type="number" id="inp-platos-vendidos" value="${platosEstimados}" min="1" max="${platosEstimados}"
+                    style="width:90px;font-size:14px;font-weight:700;text-align:center;border-radius:999px;padding:6px 12px;border:1.5px solid var(--olive-bd);">
+                <button onclick="descontarInsumos()" class="btn-olive">📦 Descontar del Inventario</button>
+                <span style="font-size:11px;color:var(--text-3);">(máx. ${platosEstimados})</span>
+            </div>
+        </div>` : `
+        <div style="background:var(--red-lt);border:1.5px solid var(--red-bd);border-radius:12px;padding:14px 16px;">
+            <p style="font-size:13px;font-weight:700;color:var(--red);">⚠️ Stock insuficiente para producir al menos un plato.</p>
+            <p style="font-size:12px;color:var(--text-2);margin-top:4px;">Revisa el insumo cuello de botella y repón stock.</p>
+        </div>`}`;
+}
+
+async function descontarInsumos() {
+    if (!_calcResult) return;
+    const platosVendidos = parseInt(document.getElementById('inp-platos-vendidos')?.value) || 0;
+
+    if (platosVendidos <= 0 || platosVendidos > _calcResult.platosEstimados) {
+        Toast.error(`Ingresa un número entre 1 y ${_calcResult.platosEstimados}.`);
+        return;
+    }
+    if (!confirm(`¿Descontar del inventario el consumo de ${platosVendidos} plato(s)?`)) return;
+
+    const ingsConLink = _calcResult.detalleIng.filter(i => i.supply_id && i.stockActual !== null);
+    let errores = 0;
+
+    for (const ing of ingsConLink) {
+        const nuevoStock = Math.max(0, ing.stockActual - ing.quantity_per_dish * platosVendidos);
+        const { error } = await supabaseClient
+            .from('inventory_supplies')
+            .update({ current_stock: nuevoStock, updated_at: new Date().toISOString() })
+            .eq('id', ing.supply_id);
+        if (error) { console.error('Error descontando', ing.supply_name, error); errores++; }
+    }
+
+    if (errores === 0) {
+        Toast.ok(`✅ ${platosVendidos} plato(s) descontados del inventario correctamente.`);
+    } else {
+        Toast.error(`${errores} insumo(s) no se actualizaron. Revisa la consola.`);
+    }
+
+    _calcResult = null;
+    const panel = document.getElementById('panel-resultado-calculo');
+    if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+    document.getElementById('sel-receta-calculo').value = '';
+    _supplyCache = [];
+    cargarInventarioReal();
+    cargarRecetas();
+}
+
+// ============================================================
+// [PATCH-A] BOTÓN ACTUALIZAR DASHBOARD
+// ============================================================
+async function actualizarDashboard() {
+    const btn = document.getElementById('btn-actualizar-dashboard');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Actualizando…'; }
+    try {
+        await cargarDashboardReal();
+        renderizarTotales();
+        Toast.ok('Dashboard actualizado correctamente.');
+    } catch (err) {
+        console.error('[Admin] Error actualizando dashboard:', err);
+        Toast.error('Error al actualizar. Revisa la consola.');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualizar'; }
+    }
+}
+
+// ============================================================
+// [PATCH-C] EDICIÓN ADMIN DE COMANDAS
+// ============================================================
+const _adminEditor = {
+    orderId: null, pedido: null, itemsEdit: [], notaEdit: '', guardando: false,
+};
+
+const ADMIN_ESTADOS_EDITABLES = ['pending', 'confirmed', 'in_kitchen', 'delivered', 'paid'];
+
+async function editarComandaAdmin(orderId, orderNo, totalBruto) {
+    _adminEditor.orderId   = orderId;
+    _adminEditor.guardando = false;
+
+    const modal = document.getElementById('modal-editar-comanda-admin');
+    if (!modal) {
+        Toast.error('Modal de edición no encontrado. Pega el HTML del modal antes de </body> en admin.html.');
+        console.error('[FIX-8] Falta el modal #modal-editar-comanda-admin en admin.html.');
+        return;
+    }
+    modal.style.display = 'flex';
+
+    document.getElementById('eca-body').innerHTML = `
+        <div style="text-align:center;padding:40px 0;color:var(--text-3);">
+            <div style="width:32px;height:32px;border:2.5px solid var(--olive-bd);border-top-color:var(--olive);
+                border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px;"></div>
+            <p style="font-size:13px;">Cargando comanda…</p>
+        </div>`;
+
+    try {
+        const { data: pedido, error } = await supabaseClient
+            .from('orders')
+            .select(`id, order_number, status, notes, total_amount,
+                     order_items ( id, quantity, unit_price, notes, item_status, menu_item_id, menu_items ( name ) )`)
+            .eq('id', orderId).single();
+        if (error || !pedido) throw new Error(error?.message || 'Pedido no encontrado.');
+
+        if (!ADMIN_ESTADOS_EDITABLES.includes(pedido.status)) {
+            document.getElementById('eca-body').innerHTML = `
+                <p style="color:var(--text-3);padding:24px;font-size:13px;">
+                    Esta orden no se puede editar (estado: <strong>${pedido.status}</strong>).
+                </p>`;
+            document.getElementById('eca-footer').style.display = 'none';
+            return;
+        }
+
+        _adminEditor.pedido    = pedido;
+        _adminEditor.itemsEdit = (pedido.order_items || []).map(it => {
+            let nombre = it.menu_items?.name || '';
+            if (!nombre && (it.notes || '').includes('[nombre]'))
+                nombre = it.notes.split('[nombre]')[1].split('|')[0].trim();
+            return {
+                id:          it.id,
+                menuItemId:  it.menu_item_id,
+                nombre:      nombre || 'Ítem',
+                precio:      Number(it.unit_price) || 0,
+                cantidad:    it.quantity,
+                item_status: it.item_status || 'pending',
+                esNuevo:     false,
+                eliminado:   false,
+            };
+        });
+
+        _renderEditorAdmin();
+        document.getElementById('eca-footer').style.display = 'flex';
 
     } catch (err) {
-        console.error('[La 26] Error crítico en init:', err);
-        _mostrarEstado('error', `Error al iniciar la carta: ${err.message}`);
+        console.error('[Admin] Error abriendo editor:', err);
+        document.getElementById('eca-body').innerHTML =
+            `<p style="color:var(--red);padding:24px;font-size:13px;">Error: ${err.message}</p>`;
     }
-})();
+}
 
-// ============================================================
-// NOTIFICACIONES DE DESPACHO PARA EL MESERO
-// ============================================================
-let _ultimaNotifId = null;
+async function _renderEditorAdmin() {
+    const pedido = _adminEditor.pedido;
+    if (!pedido) return;
 
-function _suscribirNotificacionesCocina() {
-    // ── 1. Realtime (principal) ──────────────────────────
-    db.channel('waiter-notif-v1')
-        .on('postgres_changes', {
-            event:  'INSERT',
-            schema: 'public',
-            table:  'waiter_notifications',
-        }, (payload) => {
-            const n = payload.new;
-            if (!n) return;
-            _ultimaNotifId = n.id;
-            _mostrarNotificacionDespacho(n);
-        })
-        .subscribe((status) => {
-            console.info('[La 26] Canal notif mesero:', status);
+    const { data: menuItems } = await supabaseClient
+        .from('menu_items')
+        .select('id, name, price, is_active, portions_today')
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+
+    const opcionesMenu = (menuItems || []).map(m => {
+        const p = m.portions_today != null ? ` (${m.portions_today} disp.)` : '';
+        return `<option value="${m.id}" data-precio="${m.price}" data-nombre="${m.name.replace(/"/g,'&quot;')}">${m.name} — ${formatCOP(m.price)}${p}</option>`;
+    }).join('');
+
+    const filasItems = _adminEditor.itemsEdit.filter(it => !it.eliminado).map(it => _renderFilaItemAdmin(it)).join('');
+
+    document.getElementById('eca-body').innerHTML = `
+        <div style="margin-bottom:16px;">
+            <p style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:3px;">
+                Orden <span class="mono">${pedido.order_number}</span></p>
+            <span style="background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:2px 10px;font-size:10.5px;font-weight:700;">${pedido.status}</span>
+        </div>
+        <div style="border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px;">
+            <div style="background:var(--surface-2);padding:10px 14px;border-bottom:1.5px solid var(--border);">
+                <p style="font-size:11px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.6px;">Ítems de la comanda</p>
+            </div>
+            <div id="eca-items-lista" style="padding:0;">${filasItems || '<p style="padding:16px;font-size:12.5px;color:var(--text-3);">Sin ítems.</p>'}</div>
+        </div>
+        <div style="border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px;">
+            <div style="background:var(--surface-2);padding:10px 14px;border-bottom:1.5px solid var(--border);">
+                <p style="font-size:11px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.6px;">Agregar producto</p>
+            </div>
+            <div style="padding:14px;display:flex;flex-direction:column;gap:10px;">
+                <select id="eca-sel-producto" style="border-radius:999px;font-size:13px;">
+                    <option value="">— Selecciona un producto —</option>${opcionesMenu}
+                </select>
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <button onclick="_ecaDecQty()" style="width:30px;height:30px;border-radius:50%;border:1.5px solid var(--olive-bd);background:var(--olive-lt);color:var(--olive);font-size:16px;cursor:pointer;font-family:'DM Sans',sans-serif;">−</button>
+                    <span id="eca-nueva-qty" style="font-size:14px;font-weight:600;color:var(--text-1);min-width:24px;text-align:center;">1</span>
+                    <button onclick="_ecaIncQty()" style="width:30px;height:30px;border-radius:50%;border:1.5px solid var(--olive-bd);background:var(--olive-lt);color:var(--olive);font-size:16px;cursor:pointer;font-family:'DM Sans',sans-serif;">+</button>
+                    <button onclick="_ecaAgregarItem()" class="btn-olive" style="flex:1;min-width:120px;height:36px;">+ Agregar al pedido</button>
+                </div>
+            </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:12px;padding:14px 16px;">
+            <span style="font-size:13px;font-weight:600;color:var(--olive);">Total estimado</span>
+            <span class="mono" id="eca-total-monto" style="font-size:15px;font-weight:700;color:var(--olive);">${formatCOP(_calcularTotalAdmin())}</span>
+        </div>`;
+
+    window._ecaNuevaQty = 1;
+}
+
+function _renderFilaItemAdmin(it) {
+    const precioStr   = it.precio > 0 ? formatCOP(it.precio) : 'Incl.';
+    const subtotalStr = it.precio > 0 ? formatCOP(it.precio * it.cantidad) : '—';
+    const k           = it.id;
+    return `<div id="eca-row-${k}" style="display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);gap:8px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:120px;">
+            <p style="font-size:13px;font-weight:600;color:var(--text-1);">${it.nombre}</p>
+            <p style="font-size:11px;color:var(--text-3);">${precioStr} c/u</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+            <button onclick="_ecaCambiarCantidad('${k}',-1)" style="width:26px;height:26px;border-radius:50%;border:1.5px solid var(--olive-bd);background:var(--olive-lt);color:var(--olive);font-size:14px;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;">−</button>
+            <span id="eca-qty-${k}" style="font-size:13px;font-weight:600;color:var(--text-1);min-width:22px;text-align:center;">${it.cantidad}</span>
+            <button onclick="_ecaCambiarCantidad('${k}',+1)" style="width:26px;height:26px;border-radius:50%;border:1.5px solid var(--olive-bd);background:var(--olive-lt);color:var(--olive);font-size:14px;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;">+</button>
+        </div>
+        <span class="mono" id="eca-sub-${k}" style="font-size:12.5px;font-weight:600;color:var(--olive);min-width:70px;text-align:right;">${subtotalStr}</span>
+        <button onclick="_ecaEliminarItem('${k}')" style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap;">Quitar</button>
+    </div>`;
+}
+
+window._ecaIncQty = function() {
+    window._ecaNuevaQty = (window._ecaNuevaQty || 1) + 1;
+    const el = document.getElementById('eca-nueva-qty');
+    if (el) el.textContent = window._ecaNuevaQty;
+};
+window._ecaDecQty = function() {
+    window._ecaNuevaQty = Math.max(1, (window._ecaNuevaQty || 1) - 1);
+    const el = document.getElementById('eca-nueva-qty');
+    if (el) el.textContent = window._ecaNuevaQty;
+};
+window._ecaAgregarItem = function() {
+    const sel = document.getElementById('eca-sel-producto');
+    if (!sel || !sel.value) { Toast.error('Selecciona un producto.'); return; }
+    const opt    = sel.options[sel.selectedIndex];
+    const nombre = opt.dataset.nombre || opt.text.split(' — ')[0].trim();
+    const precio = parseFloat(opt.dataset.precio) || 0;
+    const qty    = window._ecaNuevaQty || 1;
+    const existente = _adminEditor.itemsEdit.find(it => !it.eliminado && it.menuItemId === sel.value && it.esNuevo);
+    if (existente) {
+        existente.cantidad += qty;
+    } else {
+        _adminEditor.itemsEdit.push({
+            id: `new-${Date.now()}`, menuItemId: sel.value, nombre, precio,
+            cantidad: qty, item_status: 'pending', esNuevo: true, eliminado: false,
         });
-
-    // ── 2. Polling fallback (cada 5 s) ──────────────────
-    setInterval(async () => {
-        try {
-            const { data, error } = await db
-                .from('waiter_notifications')
-                .select('*')
-                .order('created_at', { ascending: false })
-                .limit(3);
-
-            if (error) { console.warn('[Notif mesero] polling error:', error.message); return; }
-            if (!data || data.length === 0) return;
-
-            // Mostrar solo notifs no leídas y no mostradas aún
-            for (const n of data) {
-                if (n.leida) continue;
-                if (n.id === _ultimaNotifId) continue;
-                _ultimaNotifId = n.id;
-                // Marcar como leída PRIMERO para que no se repita aunque falle el display
-                await db.from('waiter_notifications').update({ leida: true }).eq('id', n.id);
-                _mostrarNotificacionDespacho(n);
-                break; // una a la vez
-            }
-        } catch(e) { console.warn('[Notif mesero] polling excepción:', e); }
-    }, 5000);
-}
-
-function _mostrarNotificacionDespacho(n) {
-    // Vibración en móvil
-    if (navigator.vibrate) {
-        navigator.vibrate([200, 100, 200, 100, 400]);
     }
+    sel.value = '';
+    window._ecaNuevaQty = 1;
+    const qtyEl = document.getElementById('eca-nueva-qty');
+    if (qtyEl) qtyEl.textContent = '1';
+    _ecaRefrescarLista();
+    Toast.ok(`"${nombre}" agregado.`);
+};
+window._ecaCambiarCantidad = function(itemId, delta) {
+    const it = _adminEditor.itemsEdit.find(i => i.id === itemId);
+    if (!it || it.eliminado) return;
+    const nueva = it.cantidad + delta;
+    if (nueva <= 0) { it.eliminado = true; } else { it.cantidad = nueva; }
+    _ecaRefrescarLista();
+};
+window._ecaEliminarItem = function(itemId) {
+    const it = _adminEditor.itemsEdit.find(i => i.id === itemId);
+    if (!it) return;
+    if (!confirm(`¿Quitar "${it.nombre}" del pedido?`)) return;
+    it.eliminado = true;
+    _ecaRefrescarLista();
+};
 
-    // Sonido de notificación
-    _sonarNotificacionMesero();
-
-    // Toast visual con los platos
-    const platosTexto = Array.isArray(n.platos) && n.platos.length > 0
-        ? n.platos.join(', ')
-        : 'Pedido listo';
-
-    const mesa = n.mesa || 'Mesa';
-
-    // Banner grande visible
-    _mostrarBannerDespacho(mesa, platosTexto, n.order_number);
+function _calcularTotalAdmin() {
+    return _adminEditor.itemsEdit.filter(i => !i.eliminado).reduce((acc, i) => acc + i.precio * i.cantidad, 0);
 }
 
-function _sonarNotificacionMesero() {
+function _ecaRefrescarLista() {
+    const lista = document.getElementById('eca-items-lista');
+    if (!lista) return;
+    const activos = _adminEditor.itemsEdit.filter(i => !i.eliminado);
+    lista.innerHTML = activos.length > 0
+        ? activos.map(it => _renderFilaItemAdmin(it)).join('')
+        : '<p style="padding:16px;font-size:12.5px;color:var(--text-3);">Sin ítems.</p>';
+    const totalEl = document.getElementById('eca-total-monto');
+    if (totalEl) totalEl.textContent = formatCOP(_calcularTotalAdmin());
+}
+
+async function guardarEdicionAdmin() {
+    if (_adminEditor.guardando) return;
+    const btnGuardar = document.getElementById('eca-btn-guardar');
+    _adminEditor.guardando = true;
+    if (btnGuardar) { btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando…'; }
+
     try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const now = ctx.currentTime;
-        // Tres tonos ascendentes más llamativos que los de cocina
-        [[880, 0], [1047, 0.18], [1318, 0.36]].forEach(([freq, offset]) => {
-            const osc  = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(freq, now + offset);
-            gain.gain.setValueAtTime(0,    now + offset);
-            gain.gain.linearRampToValueAtTime(0.22, now + offset + 0.04);
-            gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.45);
-            osc.start(now + offset);
-            osc.stop(now  + offset + 0.5);
-        });
-    } catch(e) { /* silencioso si no hay contexto de audio */ }
+        let resultado;
+        if (window.La26Core) {
+            const { data: rest } = await supabaseClient.from('restaurants').select('id').limit(1).maybeSingle();
+            resultado = await La26Core.guardarEdicionAdmin(
+                _adminEditor.orderId,
+                _adminEditor.itemsEdit,
+                _adminEditor.pedido.notes,
+                rest?.id || null
+            );
+        } else {
+            resultado = await _guardarEdicionLegacyAdmin();
+        }
+
+        if (!resultado.ok) { Toast.error(resultado.error || 'No se pudo guardar.'); return; }
+        Toast.ok('Comanda actualizada correctamente.');
+        cerrarModalEditarComanda();
+        await cargarDashboardReal();
+
+    } catch (err) {
+        console.error('[Admin] Error guardando edición:', err);
+        Toast.error('Error al guardar. Revisa la consola.');
+    } finally {
+        _adminEditor.guardando = false;
+        if (btnGuardar) { btnGuardar.disabled = false; btnGuardar.textContent = 'Guardar cambios'; }
+    }
 }
 
-function _mostrarBannerDespacho(mesa, platos, orderNumber) {
-    // Crear o reutilizar el banner de despacho
-    let banner = document.getElementById('banner-despacho-mesero');
-    if (!banner) {
-        banner = document.createElement('div');
-        banner.id = 'banner-despacho-mesero';
-        Object.assign(banner.style, {
-            position:     'fixed',
-            top:          '0',
-            left:         '0',
-            right:        '0',
-            zIndex:       '99999',
-            background:   'linear-gradient(135deg,#4a6741,#2e4028)',
-            color:        '#fff',
-            padding:      '18px 20px 14px',
-            boxShadow:    '0 6px 32px rgba(0,0,0,0.28)',
-            fontFamily:   "'DM Sans',sans-serif",
-            display:      'none',
-            flexDirection:'column',
-            gap:          '6px',
-            borderBottom: '3px solid #a3c96e',
-            animation:    'slideDownBanner .35s ease',
-        });
-        document.head.insertAdjacentHTML('beforeend', `
-            <style>
-                @keyframes slideDownBanner {
-                    from { transform: translateY(-100%); opacity: 0; }
-                    to   { transform: translateY(0);    opacity: 1; }
-                }
-                #banner-despacho-mesero .bd-title {
-                    font-size: 15px;
-                    font-weight: 700;
-                    letter-spacing: .2px;
-                }
-                #banner-despacho-mesero .bd-platos {
-                    font-size: 13px;
-                    opacity: .88;
-                    font-weight: 500;
-                }
-                #banner-despacho-mesero .bd-dismiss {
-                    position:absolute; top:10px; right:14px;
-                    background:rgba(255,255,255,.18); border:none;
-                    color:#fff; border-radius:50%; width:26px; height:26px;
-                    font-size:14px; cursor:pointer; line-height:1;
-                    display:flex; align-items:center; justify-content:center;
-                }
-            </style>
-        `);
-        document.body.appendChild(banner);
+// ============================================================
+// [FIX-9] _guardarEdicionLegacyAdmin — REESCRITA COMPLETA
+// Causa raíz del error v3.2:
+//   supabaseClient.from(...).insert(...).catch is not a function
+// Supabase JS v2 devuelve { data, error }, NO una Promise con
+// .catch(). Todo manejo de errores debe ser try/catch con await.
+// ============================================================
+async function _guardarEdicionLegacyAdmin() {
+    const pedido  = _adminEditor.pedido;
+    const orderId = _adminEditor.orderId;
+    const idsOrig = new Set((pedido.order_items || []).map(i => i.id));
+
+    const aEliminar   = _adminEditor.itemsEdit.filter(i => i.eliminado  && !i.esNuevo && idsOrig.has(i.id));
+    const aActualizar = _adminEditor.itemsEdit.filter(i => !i.eliminado && !i.esNuevo && idsOrig.has(i.id));
+    const aNuevos     = _adminEditor.itemsEdit.filter(i => i.esNuevo    && !i.eliminado);
+
+    // ── 1. Eliminar ítems marcados como borrados ───────────────
+    for (const it of aEliminar) {
+        const { error } = await supabaseClient
+            .from('order_items')
+            .delete()
+            .eq('id', it.id);
+        if (error) console.warn('[La 26] No se pudo eliminar ítem', it.id, '—', error.message);
     }
 
-    const numText = orderNumber ? ` · ${orderNumber}` : '';
-    banner.innerHTML = `
-        <div class="bd-title">🍽️ Pedido listo para entregar — ${_esc(mesa)}${_esc(numText)}</div>
-        <div class="bd-platos">📋 ${_esc(platos)}</div>
-        <button class="bd-dismiss" onclick="document.getElementById('banner-despacho-mesero').style.display='none'">✕</button>
-    `;
-    banner.style.display      = 'flex';
-    banner.style.animation    = 'none';
-    banner.offsetHeight; // reflow
-    banner.style.animation    = 'slideDownBanner .35s ease';
+    // ── 2. Actualizar cantidades modificadas ──────────────────
+    for (const it of aActualizar) {
+        const orig = (pedido.order_items || []).find(o => o.id === it.id);
+        if (orig && orig.quantity !== it.cantidad) {
+            const { error } = await supabaseClient
+                .from('order_items')
+                .update({ quantity: it.cantidad })
+                .eq('id', it.id);
+            if (error) console.warn('[La 26] No se pudo actualizar cantidad de ítem', it.id, '—', error.message);
+        }
+    }
 
-    // Toast adicional
-    // Auto-ocultar después de 12 segundos
-    clearTimeout(banner._autoHide);
-    banner._autoHide = setTimeout(() => {
-        banner.style.display = 'none';
-    }, 12000);
+    // ── 3. Insertar nuevos ítems ──────────────────────────────
+    if (aNuevos.length > 0) {
+        const insertPayload = aNuevos.map(it => ({
+            order_id:     orderId,
+            menu_item_id: it.menuItemId,
+            quantity:     it.cantidad,
+            unit_price:   it.precio,
+            item_status:  'pending',
+            notes:        `[nombre]${it.nombre}`,
+        }));
+
+        const { error } = await supabaseClient
+            .from('order_items')
+            .insert(insertPayload);
+
+        // No lanzamos — un fallo en insert no debe bloquear la actualización del total
+        if (error) console.warn('[La 26] No se pudieron insertar ítems nuevos —', error.message);
+    }
+
+    // ── 4. Recalcular y actualizar total de la orden ──────────
+    const nuevoTotal = _calcularTotalAdmin();
+    const { error: errTotal } = await supabaseClient
+        .from('orders')
+        .update({
+            total_amount: nuevoTotal,
+            updated_at:   new Date().toISOString(),
+        })
+        .eq('id', orderId);
+
+    if (errTotal) {
+        console.error('[La 26] Error actualizando total de orden:', errTotal.message);
+        return { ok: false, error: errTotal.message, nuevoTotal };
+    }
+
+    return { ok: true, error: null, nuevoTotal };
 }
 
-// Helper local de escape (igual al de app.js)
-function _esc(str) {
-    if (typeof str !== 'string') return String(str ?? '');
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-              .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+function cerrarModalEditarComanda() {
+    const modal = document.getElementById('modal-editar-comanda-admin');
+    if (modal) modal.style.display = 'none';
+    _adminEditor.orderId   = null;
+    _adminEditor.pedido    = null;
+    _adminEditor.itemsEdit = [];
+    _adminEditor.guardando = false;
+}
+
+// ============================================================
+// FIN DE admin.js v3.3
+// ============================================================
+// CAMBIOS RESPECTO A v3.2:
+//
+// [FIX-9] _guardarEdicionLegacyAdmin — reescrita desde cero.
+//   ANTES: usaba patrón .insert([...]).catch(() => {}) que
+//   lanzaba TypeError porque Supabase JS v2 no devuelve promesas
+//   con .catch().
+//   AHORA: usa for...of + try/catch + await en cada operación.
+//   Las operaciones de delete/update/insert ahora son secuenciales
+//   y manejadas correctamente. El error ya no ocurre.
+//
+// [FIX-10] _buildTableMap() — nueva función helper.
+//   Consulta la tabla 'tables' (o 'restaurant_tables' como fallback)
+//   y construye un mapa { [table_id]: nombreMesa }.
+//
+// [FIX-10] cargarDashboardReal — actualizado.
+//   Ahora llama _buildTableMap() en Promise.all junto con las órdenes.
+//   La lógica de resolución del mesaLabel es:
+//     1. [MESA ...] en notes (legado) → usa ese valor
+//     2. table_id en tableMap → usa el nombre de la BD
+//     3. table_id existe pero no está en mapa → muestra últimos 4 chars
+//     4. Sin table_id → 'P.L.' (Para Llevar)
+//
+// SQL DE DIAGNÓSTICO (ejecutar en Supabase SQL Editor si la mesa
+// sigue sin aparecer — verifica qué tabla existe y qué columnas tiene):
+//
+//   SELECT table_name FROM information_schema.tables
+//   WHERE table_schema = 'public'
+//   AND table_name IN ('tables', 'restaurant_tables');
+//
+//   -- Si existe 'tables':
+//   SELECT id, name, number, table_number FROM tables LIMIT 5;
+//
+// ============================================================
+// ============================================================
+// REACTIVAR PRODUCTO INACTIVO (solo admin)
+// ============================================================
+async function reactivarProducto(idItem, nombreItem) {
+    if (!confirm(`¿Reactivar "${nombreItem}" en el catálogo?`)) return;
+    try {
+        const { error } = await supabaseClient
+            .from('menu_items')
+            .update({ is_active: true, deleted_at: null })
+            .eq('id', idItem);
+        if (error) throw error;
+        Toast.ok(`"${nombreItem}" reactivado correctamente.`);
+        cargarSlotsMenuReal();
+        if (window.lucide) lucide.createIcons();
+    } catch (err) {
+        console.error('[La 26] Error reactivando producto:', err);
+        Toast.error('No se pudo reactivar el producto.');
+    }
+}
+
+// ============================================================
+// HISTORIAL DE PEDIDOS — tab-pedidos
+// ============================================================
+
+let _vistaHistorialPedidos = 'pendientes'; // 'pendientes' | 'pagados'
+
+function filtrarHistorialPedidos(vista) {
+    _vistaHistorialPedidos = vista;
+    // Estilos botones filtro
+    const btnP = document.getElementById('btn-hp-pendientes');
+    const btnPg = document.getElementById('btn-hp-pagados');
+    if (btnP && btnPg) {
+        if (vista === 'pendientes') {
+            btnP.style.background  = 'var(--amber-lt)';  btnP.style.color  = 'var(--amber)';   btnP.style.borderColor  = 'var(--amber)';
+            btnPg.style.background = 'var(--surface-2)'; btnPg.style.color = 'var(--text-3)';  btnPg.style.borderColor = 'var(--border)';
+        } else {
+            btnPg.style.background = 'var(--olive-lt)';  btnPg.style.color = 'var(--olive)';   btnPg.style.borderColor = 'var(--olive-bd)';
+            btnP.style.background  = 'var(--surface-2)'; btnP.style.color  = 'var(--text-3)';  btnP.style.borderColor  = 'var(--border)';
+        }
+    }
+    cargarHistorialPedidos();
+}
+
+async function cargarHistorialPedidos() {
+    const grid = document.getElementById('grid-historial-pedidos');
+    if (!grid) return;
+
+    grid.innerHTML = `<p style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">Cargando pedidos…</p>`;
+
+    try {
+        const _ahora     = new Date();
+        const _offsetMs  = -5 * 60 * 60 * 1000;
+        const _hoyLocal  = new Date(_ahora.getTime() - _offsetMs);
+        const _yyyy      = _hoyLocal.getUTCFullYear();
+        const _mm        = String(_hoyLocal.getUTCMonth() + 1).padStart(2, '0');
+        const _dd        = String(_hoyLocal.getUTCDate()).padStart(2, '0');
+        const _inicioDia = `${_yyyy}-${_mm}-${_dd}T00:00:00-05:00`;
+        const _finDia    = `${_yyyy}-${_mm}-${_dd}T23:59:59-05:00`;
+        // [v3.4 · FIX-CIERRE] Corte persistente (localStorage), con piso por día
+        const _inicioDiaEfectivo = _resolverInicioDiaEfectivo(_inicioDia);
+
+        // Filtra solo los status válidos del enum (evita error 400 al usar 'canceled'/'cancelled'
+        // que no existen en order_status_enum de esta BD)
+        let query = supabaseClient
+            .from('orders')
+            .select(`id, order_number, customer_name, total_amount, status, notes, payment_method, table_id,
+                     order_items ( quantity, notes, unit_price )`)
+            .gte('created_at', _inicioDiaEfectivo)
+            .lte('created_at', _finDia)
+            .in('status', ['pending', 'confirmed', 'in_kitchen', 'delivered', 'paid']);
+
+        // [v3.4 · CAMBIO-3/4] El split Pagados/Pendientes ya NO depende de
+        // status='paid' (eso sacaba el pedido de la pantalla de cocina).
+        // Ahora "Pagado" = tiene método de pago registrado (payment_method
+        // o nota [pago]); el filtrado se hace en memoria.
+        query = query.order('created_at', { ascending: false });
+
+        const { data: ordersRaw, error } = await query;
+        if (error) throw error;
+
+        const _estaPagado = (o) => !!(o.payment_method || _extraerMetodoDeNotes(o.notes || ''));
+        const orders = (ordersRaw || []).filter(o =>
+            _vistaHistorialPedidos === 'pagados' ? _estaPagado(o) : !_estaPagado(o)
+        );
+
+        const tableMap = await _buildTableMap();
+        grid.innerHTML = '';
+
+        if (!orders || orders.length === 0) {
+            grid.innerHTML = `<p style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">
+                Sin pedidos ${_vistaHistorialPedidos === 'pagados' ? 'pagados' : 'pendientes'} hoy.</p>`;
+            return;
+        }
+
+        orders.forEach(ord => {
+            const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
+
+            // Resolver mesa
+            const mesaMatch = (ord.notes || '').match(/\[MESA\]\s*Mesa:\s*([^|]+)/i);
+            const esPL  = (ord.notes || '').includes('[PARA LLEVAR]');
+            const esDom = (ord.notes || '').includes('[DOMICILIO]');
+            let mesaLabel;
+            if (mesaMatch)                           mesaLabel = mesaMatch[1].trim();
+            else if (esPL)                           mesaLabel = 'Para Llevar';
+            else if (esDom)                          mesaLabel = 'Domicilio';
+            else if (ord.table_id && tableMap[ord.table_id]) mesaLabel = tableMap[ord.table_id];
+            else if (ord.table_id)                   mesaLabel = String(ord.table_id).slice(-4).toUpperCase();
+            else                                     mesaLabel = 'P.L.';
+
+            // Resumen de items
+            const itemsResumen = (ord.order_items || []).map(it => {
+                let nombre = 'Ítem';
+                if (it.notes && it.notes.includes('[nombre]'))
+                    nombre = it.notes.split('[nombre]')[1].split('|')[0].trim();
+                return `${it.quantity}× ${nombre}`;
+            }).join(', ') || '—';
+
+            // [v3.4 · CAMBIO-4] La celda se decide por si YA hay método
+            // registrado, no por la pestaña: si lo hay → badge + botón
+            // "Cambiar" (permite corregir un método elegido por error en
+            // cualquier momento). Si no hay → select para registrarlo.
+            let metodoCelda;
+            if (metodo) {
+                const badgeHtml = _badgeMetodo(metodo);
+                metodoCelda = `
+                    <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
+                        <div id="badge-metodo-${ord.id}">${badgeHtml}</div>
+                        <button onclick="cambiarMetodoPago('${ord.id}')"
+                            style="font-size:10px;font-weight:600;padding:3px 10px;border-radius:999px;border:1.5px solid var(--border);background:var(--surface-2);color:var(--text-3);cursor:pointer;font-family:'DM Sans',sans-serif;display:inline-flex;align-items:center;gap:4px;">
+                            <i data-lucide="pencil" style="width:10px;height:10px;"></i> Cambiar
+                        </button>
+                    </div>`;
+            } else {
+                metodoCelda = `
+                    <select onchange="registrarMetodoPago('${ord.id}', this.value)"
+                        style="font-size:11px;padding:4px 10px;border-radius:8px;height:32px;width:100%;cursor:pointer;background:var(--amber-lt);border:1.5px solid rgba(154,108,26,.28);color:var(--amber);font-family:'DM Sans',sans-serif;">
+                        <option value="">💳 Registrar pago…</option>
+                        <option value="efectivo">💵 Efectivo</option>
+                        <option value="transferencia">📲 Transferencia</option>
+                        <option value="fiado">🤝 Fiado</option>
+                    </select>`;
+            }
+
+            grid.insertAdjacentHTML('beforeend', `
+                <div class="card" style="display:flex;flex-direction:column;gap:12px;border-radius:14px;">
+                    <!-- Cabecera -->
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="mono" style="font-size:13px;font-weight:700;color:var(--olive);">${ord.order_number}</span>
+                        <span style="font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;
+                            background:${_vistaHistorialPedidos === 'pagados' ? 'var(--olive-lt)' : 'var(--amber-lt)'};
+                            color:${_vistaHistorialPedidos === 'pagados' ? 'var(--olive)' : 'var(--amber)'};
+                            border:1.5px solid ${_vistaHistorialPedidos === 'pagados' ? 'var(--olive-bd)' : 'rgba(154,108,26,.28)'};">
+                            ${_vistaHistorialPedidos === 'pagados' ? '✅ Pagado' : '⏳ Pendiente'}
+                        </span>
+                    </div>
+
+                    <!-- Info -->
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;">
+                        <div>
+                            <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">Mesa</p>
+                            <p style="font-size:13px;font-weight:600;color:var(--text-1);">${mesaLabel}</p>
+                        </div>
+                        <div>
+                            <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">Cliente</p>
+                            <p style="font-size:12px;font-weight:500;color:var(--text-2);">${ord.customer_name || 'Consumidor Final'}</p>
+                        </div>
+                    </div>
+
+                    <!-- Ítems -->
+                    <p style="font-size:11.5px;color:var(--text-2);line-height:1.5;border-left:3px solid var(--border);padding-left:10px;">${itemsResumen}</p>
+
+                    <!-- Total + método -->
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;border-top:1.5px solid var(--border);padding-top:10px;">
+                        <div>
+                            <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">Total</p>
+                            <span class="mono" style="font-size:16px;font-weight:700;color:var(--olive);">${formatCOP(ord.total_amount)}</span>
+                        </div>
+                        <div style="text-align:right;min-width:0;">${metodoCelda}</div>
+                    </div>
+
+                    <!-- Acciones -->
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <button onclick="exportarReciboPDF('${ord.id}')"
+                            style="flex:1;min-width:60px;background:var(--surface-2);border:1.5px solid var(--border);color:var(--text-2);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                            📄 PDF
+                        </button>
+                        <button onclick="abrirModalFacturaElectronica('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
+                            style="flex:1;min-width:60px;background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                            🧾 DIAN
+                        </button>
+                        <button onclick="editarComandaAdmin('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
+                            style="flex:1;min-width:60px;background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.28);color:var(--blue);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                            ✏️ Editar
+                        </button>
+                        <button onclick="eliminarComandaReal('${ord.id}', '${ord.order_number}')"
+                            style="background:var(--red-lt,#fff0f0);border:1.5px solid rgba(185,28,28,.22);color:var(--red);border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;">
+                            🗑️
+                        </button>
+                    </div>
+                </div>`);
+        });
+
+        if (window.lucide) lucide.createIcons();
+
+    } catch (err) {
+        console.error('[La 26] Error cargando historial pedidos:', err);
+        grid.innerHTML = `<p style="color:var(--red);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">Error al cargar los pedidos. Revisa la consola.</p>`;
+    }
+}
+
+// ============================================================
+// CAMBIAR MÉTODO DE PAGO EN PEDIDO YA PAGADO
+// ============================================================
+async function cambiarMetodoPago(orderId) {
+    const metodos = ['efectivo', 'transferencia', 'fiado'];
+    const labels  = { efectivo: '💵 Efectivo', transferencia: '📲 Transferencia', fiado: '🤝 Fiado' };
+
+    // Mini-modal inline — confirmar nuevo método
+    const elegido = await new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;';
+        overlay.innerHTML = `
+            <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:18px;padding:24px;min-width:260px;display:flex;flex-direction:column;gap:14px;box-shadow:0 8px 32px rgba(0,0,0,.18);">
+                <h3 style="font-size:14px;font-weight:700;color:var(--text-1);margin:0;">Cambiar método de pago</h3>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    ${metodos.map(m => `
+                        <button data-metodo="${m}"
+                            style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface-2);color:var(--text-1);font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;">
+                            ${labels[m]}
+                        </button>`).join('')}
+                </div>
+                <button data-metodo="" style="font-size:12px;color:var(--text-3);background:none;border:none;cursor:pointer;font-family:'DM Sans',sans-serif;">Cancelar</button>
+            </div>`;
+        overlay.querySelectorAll('button[data-metodo]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.body.removeChild(overlay);
+                resolve(btn.dataset.metodo || null);
+            });
+        });
+        document.body.appendChild(overlay);
+    });
+
+    if (!elegido) return;
+
+    try {
+        const { data: ordData, error: errRead } = await supabaseClient
+            .from('orders')
+            .select('total_amount, notes, payment_method')
+            .eq('id', orderId)
+            .single();
+        if (errRead) throw errRead;
+
+        const monto = parseFloat(ordData.total_amount) || 0;
+        const metodoAnterior = ordData.payment_method || _extraerMetodoDeNotes(ordData.notes || '');
+
+        // Ajustar sessionStorage
+        if (metodoAnterior && metodoAnterior !== elegido) {
+            const keyViejo  = `pm_${metodoAnterior}`;
+            const acumViejo = parseFloat(sessionStorage.getItem(keyViejo) || '0');
+            sessionStorage.setItem(keyViejo, String(Math.max(0, acumViejo - monto)));
+        }
+        if (metodoAnterior !== elegido) {
+            const keyNuevo = `pm_${elegido}`;
+            const acumNuevo = parseFloat(sessionStorage.getItem(keyNuevo) || '0');
+            sessionStorage.setItem(keyNuevo, String(acumNuevo + monto));
+        }
+
+        totalEfectivo      = parseFloat(sessionStorage.getItem('pm_efectivo')      || '0');
+        totalTransferencia = parseFloat(sessionStorage.getItem('pm_transferencia') || '0');
+        totalFiado         = parseFloat(sessionStorage.getItem('pm_fiado')         || '0');
+        renderizarTotales();
+
+        const notesBase  = (ordData.notes || '').replace(/\|\[pago\][^|]*/g, '').trimEnd();
+        const notesNuevo = `${notesBase}|[pago]${elegido}`;
+
+        const { error } = await supabaseClient
+            .from('orders')
+            .update({ payment_method: elegido, notes: notesNuevo })
+            .eq('id', orderId);
+        if (error) throw error;
+
+        Toast.ok(`Método cambiado a ${labels[elegido]}`);
+
+        // Actualizar badge en la tarjeta sin recargar todo
+        const badgeEl = document.getElementById(`badge-metodo-${orderId}`);
+        if (badgeEl) badgeEl.innerHTML = _badgeMetodo(elegido);
+
+    } catch (err) {
+        console.error('[La 26] Error cambiando método de pago:', err);
+        Toast.error('No se pudo cambiar el método de pago.');
+    }
 }
