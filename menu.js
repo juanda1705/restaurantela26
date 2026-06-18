@@ -1329,7 +1329,7 @@ const Order = {
             // Adicionales libres (porciones extra ingresadas por el mesero)
             State.adicionales.forEach(a => {
                 payload.push({
-                    order_id: orden.id, menu_item_id: null,
+                    order_id: orden.id, menu_item_id: fallbackId,
                     quantity: 1, unit_price: a.precio || 0,
                     item_status: 'pending',
                     product_name: a.nombre,
