@@ -8,7 +8,7 @@
 //  [FIX-MESA] _crearCardHTML: identificadorMesa ahora lee el
 //             número de mesa DESDE NOTES con máxima prioridad.
 //             El formato en notes es "[MESA] Mesa: N" y se
-//             extrae con regex. El JOIN a tables solo se usa 
+//             extrae con regex. El JOIN a tables solo se usa
 //             como último recurso para compatibilidad legacy.
 //
 //             PROBLEMA ORIGINAL:
@@ -665,6 +665,21 @@ function _crearCardHTML(order, esNuevo = false) {
             </p>`;
     } else {
         itemsHTML = items.map(item => {
+            const esAdicional = (item.notes || '').startsWith('[adicional]');
+
+            if (esAdicional) {
+                const nombre = (item.notes || '').slice(11) || item.product_name || 'Adicional';
+                const precio = Number(item.unit_price) || 0;
+                return `
+                <div class="order-item" style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:8px 12px;margin-bottom:6px;">
+                    <div class="item-top">
+                        <span style="font-size:11px;font-weight:700;background:#22c55e;color:#fff;border-radius:999px;padding:2px 8px;margin-right:6px;">PORCIÓN</span>
+                        <span class="item-name">${_esc(nombre)}</span>
+                        ${precio > 0 ? `<span style="margin-left:auto;font-size:13px;font-weight:600;color:#16a34a;">+${precio.toLocaleString('es-CO')}</span>` : ''}
+                    </div>
+                </div>`;
+            }
+
             const parsed = _parsearNotes(item.notes);
 
             // Prioridad del nombre del plato (sin cambios desde v3.2):
