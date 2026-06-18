@@ -375,6 +375,18 @@
         .btn-kitchen.en-cocina:hover  { background:#c2410c; }
         .btn-kitchen.despachar  { background:#059669; color:#fff; box-shadow:0 3px 12px rgba(5,150,105,0.3); }
         .btn-kitchen.despachar:hover  { background:#047857; }
+
+        /* ── Historial cocina ── */
+        .hist-card { background:#fff; border:1.5px solid #e5e7eb; border-radius:14px; overflow:hidden; margin-bottom:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); opacity:0.88; }
+        .hist-card-head { display:flex; align-items:flex-start; justify-content:space-between; padding:12px 16px; background:#f9fafb; border-bottom:1px solid #e5e7eb; }
+        .hist-card-num { font-size:14px; font-weight:700; color:var(--ink); }
+        .hist-card-mesa { font-size:12px; color:var(--ink-muted); margin-top:2px; }
+        .hist-hora { font-size:11.5px; color:#9ca3af; }
+        .hist-card-items { display:flex; flex-wrap:wrap; gap:6px; padding:10px 16px; }
+        .hist-item-chip { font-size:12px; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:999px; padding:3px 10px; color:var(--ink); }
+        .btn-reactivar { font-size:12px; font-weight:600; background:#fffbeb; border:1.5px solid #f59e0b; color:#b45309; border-radius:8px; padding:5px 12px; cursor:pointer; margin-top:4px; transition:background .15s; }
+        .btn-reactivar:hover { background:#fef3c7; }
+        .btn-reactivar:disabled { opacity:0.5; cursor:not-allowed; }
         .btn-kitchen:disabled   { opacity:0.4; cursor:not-allowed; }
 
         /* ── Estado vacío / carga ── */
@@ -596,17 +608,34 @@
 
         <!-- Filtros -->
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:22px;">
-            <button class="filter-btn active" data-filter="all"       onclick="La26.setFilter('all',this)">Todos</button>
-            <button class="filter-btn"        data-filter="pending"   onclick="La26.setFilter('pending',this)"><span><i data-lucide="clock"></i></span> Pendientes</button>
-            <button class="filter-btn"        data-filter="in_kitchen" onclick="La26.setFilter('in_kitchen',this)"><span><i data-lucide="flame"></i></span> En Cocina</button>
-            <button class="filter-btn"        data-filter="confirmed" onclick="La26.setFilter('confirmed',this)"><span><i data-lucide="check"></i></span> Confirmados</button>
+            <button class="filter-btn active" data-filter="all"        onclick="_mostrarSeccionActiva();La26.setFilter('all',this)">Todos</button>
+            <button class="filter-btn"        data-filter="pending"    onclick="_mostrarSeccionActiva();La26.setFilter('pending',this)"><span><i data-lucide="clock"></i></span> Pendientes</button>
+            <button class="filter-btn"        data-filter="in_kitchen" onclick="_mostrarSeccionActiva();La26.setFilter('in_kitchen',this)"><span><i data-lucide="flame"></i></span> En Cocina</button>
+            <button class="filter-btn"        data-filter="confirmed"  onclick="_mostrarSeccionActiva();La26.setFilter('confirmed',this)"><span><i data-lucide="check"></i></span> Confirmados</button>
+            <button class="filter-btn" id="btn-filter-hist"            onclick="_mostrarSeccionHistCocina()"><span><i data-lucide="history"></i></span> Historial <span id="hist-cocina-count" style="background:var(--oliva);color:#fff;border-radius:999px;padding:1px 7px;font-size:11px;margin-left:4px;">0</span></button>
         </div>
 
-        <!-- Grid — el contenedor que app.js necesita -->
-        <div class="orders-grid" id="contenedor-pedidos">
-            <div class="loading-state">
-                <div class="spinner"></div>
-                <span>Cargando comandas…</span>
+        <!-- Sección comandas activas -->
+        <div id="cocina-main-section">
+            <div class="orders-grid" id="contenedor-pedidos">
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <span>Cargando comandas…</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sección historial despachados -->
+        <div id="hist-cocina-section" style="display:none;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                <div>
+                    <h3 style="font-size:17px;font-weight:700;color:var(--ink);margin:0;">Pedidos despachados hoy</h3>
+                    <p style="font-size:12.5px;color:var(--ink-muted);margin-top:3px;">Solo se muestran los pedidos del día actual. Se reinicia a medianoche.</p>
+                </div>
+                <button class="btn-kitchen despachar" style="padding:9px 18px;font-size:13px;" onclick="CocinaHist.cargar()">↺ Actualizar</button>
+            </div>
+            <div class="orders-grid" id="hist-cocina-grid">
+                <div class="loading-state"><div class="spinner"></div><span>Cargando historial…</span></div>
             </div>
         </div>
     </div>
