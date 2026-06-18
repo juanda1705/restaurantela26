@@ -1694,10 +1694,14 @@ function _crearTarjetaPedido(pedido, idx) {
     const items = pedido.order_items || [];
     const itemsHTML = items.length > 0
         ? items.map(it => {
-            // Formato: [nombre]Proteína · Principio | Nota · Empaque
+            // Formato: [nombre]Proteína · Principio | Nota  o  [adicional]Nombre
             let nombreCompleto = it.menu_items?.name || '';
             let notaItem = '';
-            if (it.notes && it.notes.startsWith('[nombre]')) {
+            let esAdicional = false;
+            if (it.notes && it.notes.startsWith('[adicional]')) {
+                nombreCompleto = it.notes.slice(11).trim();
+                esAdicional = true;
+            } else if (it.notes && it.notes.startsWith('[nombre]')) {
                 const sinPrefijo = it.notes.slice(8);
                 const partes     = sinPrefijo.split(' | ');
                 nombreCompleto   = partes[0] || nombreCompleto;
@@ -1706,6 +1710,19 @@ function _crearTarjetaPedido(pedido, idx) {
                 nombreCompleto = it.notes;
             }
             if (!nombreCompleto) nombreCompleto = 'Ítem';
+
+            if (esAdicional) {
+                const precio = Number(it.unit_price) || 0;
+                return `<div class="item-row" style="flex-direction:column;align-items:flex-start;gap:2px;padding-bottom:8px;border-bottom:1px solid var(--border-lt);margin-bottom:4px;">
+                    <div style="display:flex;justify-content:space-between;width:100%;align-items:center;">
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span style="font-size:10px;font-weight:700;background:#22c55e;color:#fff;border-radius:999px;padding:2px 7px;">PORCIÓN</span>
+                            <span class="item-name">${nombreCompleto}</span>
+                        </div>
+                        <span class="item-price">${precio > 0 ? formatCOP(precio) : '—'}</span>
+                    </div>
+                </div>`;
+            }
 
             // Separar proteína y principio (guardados como "Proteína · Principio")
             const parteNombre = nombreCompleto.split(' · ');
