@@ -251,9 +251,39 @@ const State = {
     slots:           [],
     cart:            [],   // ítems sueltos: bebidas, a la carta, postres, menú ejecutivo
     platos:          [],   // [v7.7] almuerzos armados por plato (proteína + principio + nota)
+    adicionales:     [],   // porciones/adicionales libres: [{uid, nombre, precio}]
     filtro:          'todos',
     isSubmitting:    false,
     realtimeChannel: null,
+};
+
+// ============================================================
+// ═══ MÓDULO ADICIONALES / PORCIONES ═══
+// ============================================================
+const Adicional = {
+    abrir() {
+        document.getElementById('adicional-modal').classList.add('open');
+        document.getElementById('adicional-nombre').value = '';
+        document.getElementById('adicional-precio').value = '';
+        setTimeout(() => document.getElementById('adicional-nombre').focus(), 120);
+    },
+    cerrar() {
+        document.getElementById('adicional-modal').classList.remove('open');
+    },
+    agregar() {
+        const nombre = document.getElementById('adicional-nombre').value.trim();
+        const precio = parseInt(document.getElementById('adicional-precio').value.replace(/\D/g,''), 10) || 0;
+        if (!nombre) { Toast.error('Escribe el nombre del adicional.'); return; }
+        State.adicionales.push({ uid: crypto.randomUUID(), nombre, precio });
+        _actualizarCartBar();
+        this.cerrar();
+        Toast.ok(`✅ "${nombre}" agregado al pedido`);
+    },
+    quitar(uid) {
+        State.adicionales = State.adicionales.filter(a => a.uid !== uid);
+        _actualizarCartBar();
+        Cart.abrir();
+    },
 };
 
 // ============================================================
@@ -481,8 +511,9 @@ function calcularTotal() {
         const prot = State.slots.find(s => s.id === p.proteinaSlotId);
         return acc + (prot ? prot.precio : 0);
     }, 0);
+    const baseAdicionales = State.adicionales.reduce((acc, a) => acc + (a.precio || 0), 0);
     // [v7.6 · CAMBIO-11] + recargo por desechable de los almuerzos para llevar
-    return baseCart + basePlatos + calcularRecargoEmpaque();
+    return baseCart + basePlatos + calcularRecargoEmpaque() + baseAdicionales;
 }
 function calcularCantidadTotal() {
     const qCart = State.cart.reduce((acc, item) => acc + item.cantidad, 0);
@@ -959,6 +990,28 @@ const Cart = {
             });
         }
 
+        // Adicionales / Porciones libres
+        if (State.adicionales.length > 0) {
+            const sepA = document.createElement('div');
+            sepA.style.cssText = 'padding:12px 20px 8px;font-size:11px;font-weight:700;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.09em;';
+            sepA.textContent = 'Porciones / Adicionales';
+            listEl.appendChild(sepA);
+            State.adicionales.forEach(a => {
+                const row = document.createElement('div');
+                row.className = 'summary-row';
+                row.innerHTML = `
+                    <div style="flex:1;min-width:0;">
+                        <p class="summary-name">🍽️ ${a.nombre}</p>
+                        <p class="summary-qty">Porción / Adicional</p>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span class="summary-price">${a.precio > 0 ? formatCOP(a.precio) : '—'}</span>
+                        <button onclick="Adicional.quitar('${a.uid}')" style="background:none;border:none;font-size:18px;color:#ef4444;cursor:pointer;line-height:1;padding:0 4px;">×</button>
+                    </div>`;
+                listEl.appendChild(row);
+            });
+        }
+
         // Línea del recargo por desechable
         const recargo = calcularRecargoEmpaque();
         if (recargo > 0) {
@@ -979,8 +1032,9 @@ const Cart = {
 };
 
 function _actualizarCartBar() {
-    const qty = calcularCantidadTotal();
+    const qty     = calcularCantidadTotal();
     const bar     = document.getElementById('cart-bar');
+    const btnAd   = document.getElementById('btn-adicional');
     const countEl = document.getElementById('cart-count');
     const totalEl = document.getElementById('cart-total');
     if (countEl) countEl.textContent = qty;
@@ -988,6 +1042,11 @@ function _actualizarCartBar() {
     if (bar) {
         if (qty > 0) bar.classList.add('visible');
         else         bar.classList.remove('visible');
+    }
+    // El botón de adicional aparece cuando hay algo en el pedido
+    if (btnAd) {
+        if (qty > 0) btnAd.classList.add('visible');
+        else         btnAd.classList.remove('visible');
     }
 }
 
@@ -1267,6 +1326,17 @@ const Order = {
                 });
             });
 
+            // Adicionales libres (porciones extra ingresadas por el mesero)
+            State.adicionales.forEach(a => {
+                payload.push({
+                    order_id: orden.id, menu_item_id: null,
+                    quantity: 1, unit_price: a.precio || 0,
+                    item_status: 'pending',
+                    product_name: a.nombre,
+                    notes: `[adicional]${a.nombre}`,
+                });
+            });
+
             if (payload.length > 0) {
                 const { error: errItems } = await db.from('order_items').insert(payload);
                 if (errItems) {
@@ -1314,8 +1384,9 @@ const Order = {
         const el = document.getElementById('success-order-no');
         if (el) el.textContent = numeroOrden;
         document.getElementById('success-modal').classList.add('open');
-        State.cart   = [];
-        State.platos = [];   // [v7.7] limpiar platos armados
+        State.cart        = [];
+        State.platos      = [];   // [v7.7] limpiar platos armados
+        State.adicionales = [];
         _actualizarCartBar();
         // [v7.5 · CAMBIO-1] Dejar el formulario en blanco para el próximo pedido
         _resetFormularioPedido();
