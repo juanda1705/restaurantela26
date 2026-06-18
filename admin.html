@@ -960,10 +960,6 @@
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;border:1.5px solid transparent;">
                 <span class="ic ic-md"><i data-lucide="layout-dashboard"></i></span> Dashboard Contable
             </button>
-            <button onclick="cambiarTab('pedidos')" id="btn-tab-pedidos" class="tab-inactive w-full text-left"
-                style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
-                <span class="ic ic-md"><i data-lucide="clipboard-list"></i></span> Historial de Pedidos
-            </button>
             <button onclick="cambiarTab('menu')" id="btn-tab-menu" class="tab-inactive w-full text-left"
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
                 <span class="ic ic-md"><i data-lucide="book-open"></i></span> Control de Menú
@@ -1117,83 +1113,59 @@
                     </div>
                 </div>
 
-                <!-- Acceso rápido a pedidos -->
-                <div class="card" style="background:var(--surface-2);border-style:dashed;padding:18px 20px;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-                        <div style="display:flex;align-items:center;gap:10px;">
-                            <span class="ic ic-lg" style="color:var(--olive);"><i data-lucide="clipboard-list"></i></span>
-                            <div>
-                                <p style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:2px;">Historial de Pedidos</p>
-                                <p style="font-size:12px;color:var(--text-2);">Gestiona y registra pagos de los pedidos del día.</p>
-                            </div>
+                <!-- Tablas -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;" class="tables-grid">
+                    <div class="card" style="padding:0;overflow:hidden;">
+                        <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
+                            <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="receipt"></i></span> Historial de Facturación
+                            </h3>
                         </div>
-                        <button onclick="cambiarTab('pedidos')" class="btn-olive" style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px;">
-                            <span class="ic ic-sm"><i data-lucide="arrow-right"></i></span> Ver Pedidos del Día
-                        </button>
+                        <div style="overflow-x:auto;">
+                            <table style="width:100%;border-collapse:collapse;">
+                                <thead>
+                                    <tr class="thead-row">
+                                        <th>Código</th>
+                                        <th>Mesa</th>
+                                        <th>Cliente</th>
+                                        <th>Total</th>
+                                        <th style="text-align:center;">Método</th>
+                                        <th style="text-align:center;">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabla-facturas">
+                                    <tr>
+                                        <td colspan="6"
+                                            style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                                            Cargando...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card" style="padding:0;overflow:hidden;">
+                        <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
+                            <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md" style="color:var(--red);"><i data-lucide="flame"></i></span> Platos Más Solicitados
+                            </h3>
+                        </div>
+                        <div style="overflow-x:auto;">
+                            <table style="width:100%;border-collapse:collapse;">
+                                <thead>
+                                    <tr class="thead-row">
+                                        <th>Plato</th>
+                                        <th style="text-align:center;">Cantidad</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabla-top-platos">
+                                    <tr>
+                                        <td colspan="2"
+                                            style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                                            Cargando...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
-
-                <!-- Top Platos -->
-                <div class="card" style="padding:0;overflow:hidden;">
-                    <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
-                        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;">
-                            <span class="ic ic-md" style="color:var(--red);"><i data-lucide="flame"></i></span> Platos Más Solicitados Hoy
-                        </h3>
-                    </div>
-                    <div style="overflow-x:auto;">
-                        <table style="width:100%;border-collapse:collapse;">
-                            <thead>
-                                <tr class="thead-row">
-                                    <th>Plato</th>
-                                    <th style="text-align:center;">Cantidad</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tabla-top-platos">
-                                <tr>
-                                    <td colspan="2" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">Cargando...</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-
-            <!-- TAB: PEDIDOS DEL DÍA -->
-            <section id="tab-pedidos" style="display:none;flex-direction:column;gap:20px;">
-
-                <!-- Sub-tabs -->
-                <div style="display:flex;gap:0;border-bottom:1.5px solid var(--border);">
-                    <button id="btn-subtab-pendientes" onclick="cambiarSubTabPedidos('pendientes')"
-                        style="display:inline-flex;align-items:center;gap:7px;padding:10px 20px;font-size:13px;font-weight:600;border-radius:10px 10px 0 0;border:1.5px solid var(--border);border-bottom:none;background:var(--surface);color:var(--olive);cursor:pointer;font-family:'DM Sans',sans-serif;margin-bottom:-1.5px;position:relative;z-index:1;">
-                        <span class="ic ic-sm"><i data-lucide="clock"></i></span> Pendientes de Pago
-                    </button>
-                    <button id="btn-subtab-pagados" onclick="cambiarSubTabPedidos('pagados')"
-                        style="display:inline-flex;align-items:center;gap:7px;padding:10px 20px;font-size:13px;font-weight:600;border-radius:10px 10px 0 0;border:1.5px solid var(--border);border-bottom:none;background:var(--surface-2);color:var(--text-3);cursor:pointer;font-family:'DM Sans',sans-serif;margin-bottom:-1.5px;">
-                        <span class="ic ic-sm"><i data-lucide="check-circle"></i></span> Ya Pagados
-                    </button>
-                    <div style="flex:1;"></div>
-                    <button onclick="cargarPedidosTab()" style="display:inline-flex;align-items:center;gap:5px;padding:7px 14px;font-size:12px;border-radius:999px;border:1.5px solid var(--border);background:var(--surface-2);color:var(--text-2);cursor:pointer;font-family:'DM Sans',sans-serif;margin-bottom:6px;align-self:flex-end;">
-                        <span class="ic ic-sm"><i data-lucide="refresh-cw"></i></span> Actualizar
-                    </button>
-                </div>
-
-                <!-- Panel Pendientes -->
-                <div id="panel-pedidos-pendientes">
-                    <div id="grid-pedidos-pendientes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
-                        <div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--text-3);">Cargando pedidos...</div>
-                    </div>
-                </div>
-
-                <!-- Panel Pagados -->
-                <div id="panel-pedidos-pagados" style="display:none;">
-                    <div id="grid-pedidos-pagados" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
-                        <div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--text-3);">Cargando pedidos...</div>
-                    </div>
-                </div>
-
-                <!-- tabla-facturas oculta: necesaria para que cargarDashboardReal() no rompa -->
-                <div style="display:none;"><table><tbody id="tabla-facturas"></tbody></table></div>
-
             </section>
 
             <!-- TAB: MENÚ -->
@@ -1267,8 +1239,20 @@
                         class="filter-btn btn-comp" style="display:inline-flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="star"></i></span> A la Carta</button>
                     <button type="button" onclick="filtrarMenuComponente('drink')" id="btn-comp-drink"
                         class="filter-btn btn-comp" style="display:inline-flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="cup-soda"></i></span> Bebidas</button>
-                    <button type="button" onclick="filtrarMenuComponente('dessert')" id="btn-comp-dessert"
-                        class="filter-btn btn-comp" style="display:inline-flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="cake-slice"></i></span> Postres</button>
+                    <button type="button" onclick="filtrarMenuComponente('soup')" id="btn-comp-soup"
+                        class="filter-btn btn-comp" style="display:inline-flex;align-items:center;gap:5px;"><span class="ic ic-sm"><i data-lucide="soup"></i></span> Sopas</button>
+                </div>
+
+                <!-- Toggle activos / inactivos — solo admin -->
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button type="button" onclick="verProductosActivos()" id="btn-vista-activos"
+                        style="display:inline-flex;align-items:center;gap:6px;padding:7px 16px;font-size:12px;font-weight:600;border-radius:999px;border:1.5px solid var(--olive-bd);background:var(--olive);color:#fff;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;">
+                        <span class="ic ic-sm"><i data-lucide="circle-check"></i></span> Activos
+                    </button>
+                    <button type="button" onclick="verProductosInactivos()" id="btn-vista-inactivos"
+                        style="display:inline-flex;align-items:center;gap:6px;padding:7px 16px;font-size:12px;font-weight:600;border-radius:999px;border:1.5px solid var(--border);background:var(--surface-2);color:var(--text-3);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;">
+                        <span class="ic ic-sm"><i data-lucide="circle-x"></i></span> Inactivos
+                    </button>
                 </div>
 
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;" id="contenedor-slots-menu">
@@ -2029,7 +2013,7 @@
         })();
 
         // ═══ GESTIÓN DE TABS ═══
-        const TABS = ['dashboard', 'pedidos', 'menu', 'personal', 'nomina', 'inventario', 'dian', 'permisos', 'produccion', 'calendario'];
+        const TABS = ['dashboard', 'menu', 'personal', 'nomina', 'inventario', 'dian', 'permisos', 'produccion', 'calendario'];
 
         function cambiarTab(dest) {
             // 1. Ocultar todos los tabs de forma atómica
@@ -2063,7 +2047,6 @@
             if (dest === 'nomina')     cargarGastosReal();
             if (dest === 'inventario') cargarInventarioReal();
             if (dest === 'permisos')   cargarEstadoSistema();
-            if (dest === 'pedidos')    cargarPedidosTab();
             if (dest === 'calendario') cargarCalendarioCierres();
             if (dest === 'produccion') {
                 cargarRecetas();
