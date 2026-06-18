@@ -862,122 +862,90 @@ const Cart = {
         // ── [v7.8] PLATOS: vista en 3 pasos agrupados ──────────────────────
         if (State.platos.length > 0) {
 
-            function _stepHeader(num, titulo) {
-                const d = document.createElement('div');
-                d.style.cssText = 'display:flex;align-items:center;gap:10px;padding:14px 20px 10px;';
-                d.innerHTML = `
-                    <span style="display:flex;align-items:center;justify-content:center;
-                        width:22px;height:22px;border-radius:50%;
-                        background:var(--oliva);color:#fff;
-                        font-size:11px;font-weight:700;flex-shrink:0;">${num}</span>
-                    <span style="font-size:11px;font-weight:700;color:var(--ink-muted);
-                        text-transform:uppercase;letter-spacing:0.09em;">${titulo}</span>`;
-                return d;
-            }
-
-            function _stepBlock() {
-                const b = document.createElement('div');
-                b.style.cssText = 'background:#fafaf8;border-top:1px solid var(--border-lt);border-bottom:1px solid var(--border-lt);margin-bottom:2px;';
-                return b;
-            }
-
-            // ── Paso 1: Proteína ────────────────────────────────────────
-            listEl.appendChild(_stepHeader(1, 'Proteína — por plato'));
-            const blk1 = _stepBlock();
+            // ── Un card por plato con todo integrado ───────────────────
             State.platos.forEach((p, i) => {
-                const prot = State.slots.find(s => s.id === p.proteinaSlotId);
+                const prot      = State.slots.find(s => s.id === p.proteinaSlotId);
                 if (!prot) return;
-                const r = document.createElement('div');
-                r.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 20px;border-bottom:1px solid var(--border-lt);';
-                r.innerHTML = `
-                    <div style="display:flex;align-items:center;gap:10px;">
-                        <span style="font-size:10.5px;font-weight:600;color:var(--ink-ghost);white-space:nowrap;">Plato ${i + 1}</span>
-                        <span style="font-size:14px;font-weight:500;color:var(--ink);">${prot.nombre}</span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        ${prot.precio > 0 ? `<span style="font-family:'Cormorant Garamond',serif;font-size:1.05rem;font-weight:500;color:var(--oliva);">${formatCOP(prot.precio)}</span>` : ''}
-                        <button onclick="Platos.quitarPorUid('${p.uid}')" aria-label="Quitar plato"
-                            style="width:22px;height:22px;border-radius:50%;background:rgba(184,50,50,0.08);
-                                color:var(--red,#b83232);border:none;font-size:14px;cursor:pointer;
-                                display:flex;align-items:center;justify-content:center;">×</button>
-                    </div>`;
-                blk1.appendChild(r);
-            });
-            listEl.appendChild(blk1);
+                const principio = principios.find(s => s.id === p.principioSlotId);
+                const marcado   = modLlevarTodo || !!p.paraLlevar;
 
-            // ── Paso 2: Principio ───────────────────────────────────────
-            listEl.appendChild(_stepHeader(2, 'Principio — por plato'));
-            const blk2 = _stepBlock();
-            State.platos.forEach((p, i) => {
-                const prot = State.slots.find(s => s.id === p.proteinaSlotId);
-                if (!prot) return;
-                const opciones = [`<option value="">Sin principio</option>`]
+                const opciones = [`<option value="">— Elegir principio —</option>`]
                     .concat(principios.map(s =>
                         `<option value="${s.id}" ${p.principioSlotId === s.id ? 'selected' : ''}>${s.nombre}</option>`
                     )).join('');
-                const r = document.createElement('div');
-                r.style.cssText = 'display:flex;align-items:center;gap:12px;padding:9px 20px;border-bottom:1px solid var(--border-lt);';
-                r.innerHTML = `
-                    <span style="font-size:12px;color:var(--ink-muted);white-space:nowrap;min-width:72px;">
-                        Plato ${i + 1} · <em style="font-style:normal;font-weight:500;color:var(--ink);">${prot.nombre.split(' ')[0]}</em>
-                    </span>
-                    <select onchange="Platos.setPrincipio('${p.uid}', this.value)"
-                        style="flex:1;font-size:13px;padding:7px 10px;border-radius:8px;
-                            border:1.5px solid var(--border);background:#fff;
-                            font-family:inherit;color:var(--ink);">
-                        ${opciones}
-                    </select>`;
-                blk2.appendChild(r);
-            });
-            listEl.appendChild(blk2);
 
-            // ── Paso 3: Nota + para llevar ──────────────────────────────
-            listEl.appendChild(_stepHeader(3, 'Nota — por plato'));
-            const blk3 = _stepBlock();
-            State.platos.forEach((p, i) => {
-                const prot      = State.slots.find(s => s.id === p.proteinaSlotId);
-                const principio = principios.find(s => s.id === p.principioSlotId);
-                if (!prot) return;
-                const marcado = modLlevarTodo || !!p.paraLlevar;
+                const seccionLlevar = modLlevarTodo
+                    ? `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;
+                            background:rgba(180,83,9,0.06);border-radius:10px;
+                            border:1px solid rgba(180,83,9,0.18);">
+                           <span style="font-size:16px;">🛍️</span>
+                           <span style="font-size:13px;font-weight:500;color:#92400e;">
+                               Para llevar · +${formatCOP(RECARGO_DESECHABLE)} empaque
+                           </span>
+                       </div>`
+                    : `<label style="display:flex;align-items:center;gap:10px;padding:11px 14px;
+                            background:${marcado ? 'rgba(180,83,9,0.06)' : '#fafaf8'};
+                            border-radius:10px;cursor:pointer;
+                            border:1.5px solid ${marcado ? 'rgba(180,83,9,0.25)' : 'var(--border)'};">
+                           <input type="checkbox" ${marcado ? 'checked' : ''}
+                               onchange="Platos.toggleLlevar('${p.uid}', this.checked)"
+                               style="width:18px;height:18px;flex-shrink:0;accent-color:var(--oliva);cursor:pointer;">
+                           <span style="font-size:13px;font-weight:500;color:${marcado ? '#92400e' : 'var(--ink-muted)'};">
+                               🛍️ Para llevar (+${formatCOP(RECARGO_DESECHABLE)})
+                           </span>
+                       </label>`;
 
-                const tagLlevar = marcado
-                    ? `<span style="display:inline-flex;align-items:center;gap:4px;
-                            font-size:10px;font-weight:600;color:#92400e;
-                            background:rgba(180,83,9,0.09);
-                            border:1px solid rgba(180,83,9,0.20);
-                            padding:2px 9px;border-radius:9999px;flex-shrink:0;">
-                           🛍 para llevar
-                       </span>`
-                    : '';
-
-                const checkboxHtml = modLlevarTodo ? '' : `
-                    <label style="display:flex;align-items:center;gap:7px;margin-top:7px;
-                        font-size:12px;color:var(--ink-muted);cursor:pointer;">
-                        <input type="checkbox" ${marcado ? 'checked' : ''}
-                            onchange="Platos.toggleLlevar('${p.uid}', this.checked)"
-                            style="width:15px;height:15px;flex-shrink:0;">
-                        Este plato es para llevar (+${formatCOP(RECARGO_DESECHABLE)})
-                    </label>`;
-
-                const r = document.createElement('div');
-                r.style.cssText = 'padding:10px 20px;border-bottom:1px solid var(--border-lt);';
-                r.innerHTML = `
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;flex-wrap:wrap;">
-                        <span style="font-size:12.5px;font-weight:600;color:var(--ink);">
-                            Plato ${i + 1} · ${prot.nombre}${principio ? ` · ${principio.nombre}` : ''}
-                        </span>
-                        ${tagLlevar}
+                const card = document.createElement('div');
+                card.style.cssText = 'margin:10px 16px;border:1.5px solid var(--oliva-bd,#c2d09c);border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 2px 8px rgba(74,90,40,0.07);';
+                card.innerHTML = `
+                    <div style="display:flex;align-items:center;justify-content:space-between;
+                        padding:13px 16px;background:var(--oliva-pale,#f0f3e8);
+                        border-bottom:1.5px solid var(--oliva-bd,#c2d09c);">
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            <span style="display:flex;align-items:center;justify-content:center;
+                                width:30px;height:30px;border-radius:50%;
+                                background:var(--oliva,#4a5a28);color:#fff;
+                                font-size:14px;font-weight:700;flex-shrink:0;">${i + 1}</span>
+                            <div>
+                                <div style="font-size:15px;font-weight:600;color:var(--ink);">${prot.nombre}</div>
+                                <div style="font-size:12px;color:${principio ? 'var(--oliva)' : 'var(--ink-ghost)'};font-weight:500;margin-top:1px;">
+                                    ${principio ? `con ${principio.nombre}` : 'sin principio aún'}
+                                </div>
+                            </div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            ${prot.precio > 0 ? `<span style="font-family:'Cormorant Garamond',serif;font-size:1.2rem;font-weight:600;color:var(--oliva);">${formatCOP(prot.precio)}</span>` : ''}
+                            <button onclick="Platos.quitarPorUid('${p.uid}')" aria-label="Quitar"
+                                style="width:30px;height:30px;border-radius:50%;
+                                    background:rgba(184,50,50,0.10);color:#b83232;
+                                    border:1px solid rgba(184,50,50,0.20);font-size:17px;
+                                    cursor:pointer;display:flex;align-items:center;justify-content:center;">×</button>
+                        </div>
                     </div>
-                    <input type="text" value="${(p.nota || '').replace(/"/g, '&quot;')}"
-                        oninput="Platos.setNota('${p.uid}', this.value)"
-                        placeholder="Nota del plato (opcional)…"
-                        style="width:100%;font-size:13px;padding:8px 11px;border-radius:9px;
-                            border:1.5px solid var(--border);font-family:inherit;
-                            background:#fff;color:var(--ink);outline:none;">
-                    ${checkboxHtml}`;
-                blk3.appendChild(r);
+                    <div style="padding:13px 16px;border-bottom:1px solid var(--border-lt);">
+                        <div style="font-size:10.5px;font-weight:700;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">🥘 Principio</div>
+                        <select onchange="Platos.setPrincipio('${p.uid}', this.value)"
+                            style="width:100%;font-size:14px;padding:11px 14px;border-radius:10px;
+                                border:1.5px solid var(--border);background:#fff;
+                                font-family:inherit;color:var(--ink);">
+                            ${opciones}
+                        </select>
+                    </div>
+                    <div style="padding:13px 16px;border-bottom:1px solid var(--border-lt);">
+                        <div style="font-size:10.5px;font-weight:700;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">✏️ Nota del plato</div>
+                        <input type="text" value="${(p.nota || '').replace(/"/g, '&quot;')}"
+                            oninput="Platos.setNota('${p.uid}', this.value)"
+                            placeholder="Ej: sin ensalada, sin cebolla…"
+                            style="width:100%;font-size:14px;padding:11px 14px;border-radius:10px;
+                                border:1.5px solid var(--border);font-family:inherit;
+                                background:#fff;color:var(--ink);outline:none;"
+                            onfocus="this.style.borderColor='var(--oliva)'"
+                            onblur="this.style.borderColor='var(--border)'">
+                    </div>
+                    <div style="padding:12px 16px;">${seccionLlevar}</div>`;
+
+                listEl.appendChild(card);
             });
-            listEl.appendChild(blk3);
         }
 
         // ── Ítems sueltos (bebidas, a la carta, postres, menú ejecutivo) ──
