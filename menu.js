@@ -1,6 +1,14 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE MESERO
-// menu.js · Versión 7.4.2
+// menu.js · Versión 7.5
+//
+// CAMBIOS v7.5:
+//  [CAMBIO-1] Al enviar un pedido se reinicia TODO el formulario
+//    (mesa, nombre del cliente, notas, dirección) y la modalidad
+//    vuelve a "mesa". Antes el número de mesa y el nombre quedaban
+//    pegados del pedido anterior. Nuevo helper _resetFormularioPedido()
+//    llamado desde Order._mostrarExito() y Order.nuevoPedido().
+//    NO afecta la sesión del mesero.
 //
 // CAMBIOS v7.4.2 (patches aplicados sobre v7.4.1):
 //  [FIX-PORCIONES-CRITICO]
@@ -676,6 +684,39 @@ function _actualizarCartBar() {
 }
 
 // ============================================================
+// [v7.5 · CAMBIO-1] REINICIO DEL FORMULARIO TRAS UN PEDIDO
+// ------------------------------------------------------------
+// Deja mesa, nombre, notas y dirección en blanco, y vuelve la
+// modalidad a "mesa". Se llama SIEMPRE que se confirma un pedido
+// para que la siguiente comanda arranque limpia (antes el número
+// de mesa y el nombre del cliente quedaban pegados del pedido
+// anterior). NO toca la sesión del mesero.
+// ============================================================
+function _resetFormularioPedido() {
+    const mesaEl      = document.getElementById('form-mesa');
+    const nombreEl    = document.getElementById('form-nombre');
+    const notasEl     = document.getElementById('form-notas');
+    const direccionEl = document.getElementById('form-direccion');
+
+    if (mesaEl)      { mesaEl.value      = ''; mesaEl.classList.remove('error'); }
+    if (nombreEl)    nombreEl.value    = '';
+    if (notasEl)     notasEl.value     = '';
+    if (direccionEl) { direccionEl.value = ''; direccionEl.classList.remove('error'); }
+
+    // Volver a la modalidad por defecto ("mesa")
+    document.querySelectorAll('.modalidad-tab').forEach(tab => {
+        const radio  = tab.querySelector('input[type="radio"]');
+        const esMesa = radio && radio.value === 'mesa';
+        tab.classList.toggle('active', !!esMesa);
+        if (radio) radio.checked = !!esMesa;
+    });
+    const mesaWrap = document.getElementById('campo-mesa-wrapper');
+    const dirWrap  = document.getElementById('campo-direccion-wrapper');
+    if (mesaWrap) mesaWrap.style.display = 'block';
+    if (dirWrap)  dirWrap.style.display  = 'none';
+}
+
+// ============================================================
 // [FIX-PORCIONES-CRITICO] DESCUENTO DIRECTO DE PORCIONES
 // ============================================================
 // Esta función se ejecuta SIEMPRE después de confirmar una orden,
@@ -925,15 +966,15 @@ const Order = {
         document.getElementById('success-modal').classList.add('open');
         State.cart = [];
         _actualizarCartBar();
+        // [v7.5 · CAMBIO-1] Dejar el formulario en blanco para el próximo pedido
+        _resetFormularioPedido();
         if (HistState.cargado) Hist.cargar();
     },
 
     nuevoPedido() {
         document.getElementById('success-modal').classList.remove('open');
-        const notasEl     = document.getElementById('form-notas');
-        const direccionEl = document.getElementById('form-direccion');
-        if (notasEl)     notasEl.value     = '';
-        if (direccionEl) direccionEl.value = '';
+        // [v7.5 · CAMBIO-1] Reinicio completo del formulario (mesa, nombre, notas, dirección)
+        _resetFormularioPedido();
         window.scrollTo({ top: 0, behavior: 'smooth' });
         _renderizarMenu();
     },
