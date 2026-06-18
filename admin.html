@@ -1118,34 +1118,8 @@
                 </div>
 
                 <!-- Tablas -->
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;" class="tables-grid">
-                    <div class="card" style="padding:0;overflow:hidden;">
-                        <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
-                            <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md"><i data-lucide="receipt"></i></span> Historial de Facturación
-                            </h3>
-                        </div>
-                        <div style="overflow-x:auto;">
-                            <table style="width:100%;border-collapse:collapse;">
-                                <thead>
-                                    <tr class="thead-row">
-                                        <th>Código</th>
-                                        <th>Mesa</th>
-                                        <th>Cliente</th>
-                                        <th>Total</th>
-                                        <th style="text-align:center;">Método</th>
-                                        <th style="text-align:center;">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="tabla-facturas">
-                                    <tr>
-                                        <td colspan="6"
-                                            style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
-                                            Cargando...</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
+                <!-- [v3.5] La tabla "Historial de Facturación" se movió a la pestaña Pedidos -->
+                <div style="display:grid;grid-template-columns:1fr;gap:20px;" class="tables-grid">
                     <div class="card" style="padding:0;overflow:hidden;">
                         <div style="padding:18px 20px 14px;border-bottom:1.5px solid var(--border);">
                             <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;"><span class="ic ic-md" style="color:var(--red);"><i data-lucide="flame"></i></span> Platos Más Solicitados
@@ -1183,7 +1157,7 @@
                     </button>
                     <button type="button" onclick="filtrarHistorialPedidos('pagados')" id="btn-hp-pagados"
                         style="display:inline-flex;align-items:center;gap:6px;padding:7px 16px;font-size:12px;font-weight:600;border-radius:999px;border:1.5px solid var(--border);background:var(--surface-2);color:var(--text-3);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;">
-                        <span class="ic ic-sm"><i data-lucide="circle-check"></i></span> Pagados
+                        <span class="ic ic-sm"><i data-lucide="circle-check"></i></span> Historial de pagados
                     </button>
                 </div>
 
