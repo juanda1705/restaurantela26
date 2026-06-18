@@ -10,7 +10,7 @@
 //  muestran sueltos en el menú. Las bebidas, postres, a la carta y
 //  menú ejecutivo siguen agregándose como ítems sueltos.
 //  Cada plato se guarda como UNA línea de order_items: la proteína
-//  (con precio), con el principio dentro del nombre y la nota del
+//  (con precio), con el principio dentro del nombre y la nota del 
 //  plato en la nota del ítem → cocina lo ve junto ("Pechuga · Frijol —
 //  sin ensalada"). El recargo de desechable aplica por plato para llevar.
 //  Nuevo estado State.platos y controlador Platos.
