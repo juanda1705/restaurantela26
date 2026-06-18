@@ -1,6 +1,15 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE ADMINISTRACIÓN
-// admin.js · Versión 3.3
+// admin.js · Versión 3.4
+// FIXES v3.4 (nuevos):
+//  [CAMBIO-3] registrarMetodoPago ya NO marca status='paid'. El pago
+//             se guarda solo en payment_method (+ nota [pago]) para que
+//             el pedido siga apareciendo en la pantalla de cocina hasta
+//             que se despache. cargarHistorialPedidos divide
+//             Pagados/Pendientes por payment_method, no por status.
+//  [CAMBIO-4] La celda de método en el historial muestra "Cambiar"
+//             siempre que haya un método registrado, permitiendo
+//             corregir un método elegido por error en cualquier momento.
 // FIXES v3.1 (heredados):
 //  [FIX-1] SELECT orders: eliminado 'payment_method' (columna inexistente → error 400).
 //  [FIX-2] UPDATE orders: cambiado status 'completed' → 'paid'
@@ -400,9 +409,14 @@ async function registrarMetodoPago(orderId, metodo) {
         const notesBase  = (ordData.notes || '').replace(/\|\[pago\][^|]*/g, '').trimEnd();
         const notesNuevo = `${notesBase}|[pago]${metodo}`;
 
+        // [v3.4 · CAMBIO-3] NO se cambia el status a 'paid'. El pago se
+        // registra SOLO en payment_method (+ nota [pago]). Así el pedido
+        // sigue visible en la pantalla de cocina hasta que se despache.
+        // "Pagado" (payment_method) y "despachado" (status=delivered)
+        // quedan desacoplados.
         const { error } = await supabaseClient
             .from('orders')
-            .update({ status: 'paid', notes: notesNuevo, payment_method: metodo })
+            .update({ notes: notesNuevo, payment_method: metodo })
             .eq('id', orderId);
         if (error) throw error;
 
@@ -2568,16 +2582,19 @@ async function cargarHistorialPedidos() {
             .lte('created_at', _finDia)
             .in('status', ['pending', 'confirmed', 'in_kitchen', 'delivered', 'paid']);
 
-        if (_vistaHistorialPedidos === 'pagados') {
-            query = query.eq('status', 'paid');
-        } else {
-            query = query.neq('status', 'paid');
-        }
-
+        // [v3.4 · CAMBIO-3/4] El split Pagados/Pendientes ya NO depende de
+        // status='paid' (eso sacaba el pedido de la pantalla de cocina).
+        // Ahora "Pagado" = tiene método de pago registrado (payment_method
+        // o nota [pago]); el filtrado se hace en memoria.
         query = query.order('created_at', { ascending: false });
 
-        const { data: orders, error } = await query;
+        const { data: ordersRaw, error } = await query;
         if (error) throw error;
+
+        const _estaPagado = (o) => !!(o.payment_method || _extraerMetodoDeNotes(o.notes || ''));
+        const orders = (ordersRaw || []).filter(o =>
+            _vistaHistorialPedidos === 'pagados' ? _estaPagado(o) : !_estaPagado(o)
+        );
 
         const tableMap = await _buildTableMap();
         grid.innerHTML = '';
@@ -2611,10 +2628,13 @@ async function cargarHistorialPedidos() {
                 return `${it.quantity}× ${nombre}`;
             }).join(', ') || '—';
 
-            // Badge método — en pendientes muestra select; en pagados muestra badge + botón cambiar
+            // [v3.4 · CAMBIO-4] La celda se decide por si YA hay método
+            // registrado, no por la pestaña: si lo hay → badge + botón
+            // "Cambiar" (permite corregir un método elegido por error en
+            // cualquier momento). Si no hay → select para registrarlo.
             let metodoCelda;
-            if (_vistaHistorialPedidos === 'pagados') {
-                const badgeHtml = metodo ? _badgeMetodo(metodo) : `<span style="font-size:10px;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--surface-2);color:var(--text-3);border:1.5px solid var(--border);">Sin método</span>`;
+            if (metodo) {
+                const badgeHtml = _badgeMetodo(metodo);
                 metodoCelda = `
                     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
                         <div id="badge-metodo-${ord.id}">${badgeHtml}</div>
