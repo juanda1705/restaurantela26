@@ -391,9 +391,12 @@ async function cargarDashboardReal() {
             if (!ord.order_items) return;
             ord.order_items.forEach(item => {
                 let nombre = 'Plato Especial';
-                if (item.notes && item.notes.includes('[nombre]')) {
+                if (item.notes && item.notes.includes('[nombre]'))
                     nombre = item.notes.split('[nombre]')[1].split('|')[0].trim();
-                }
+                else if (item.notes && item.notes.includes('[adicional]'))
+                    nombre = item.notes.split('[adicional]')[1].trim();
+                else if (item.product_name)
+                    nombre = item.product_name;
                 ranking[nombre] = (ranking[nombre] || 0) + (item.quantity || 1);
             });
         });
@@ -601,9 +604,12 @@ async function exportarReciboPDF(orderId) {
         if (ord.order_items && ord.order_items.length > 0) {
             ord.order_items.forEach(item => {
                 let nombre = 'Plato Especial';
-                if (item.notes && item.notes.includes('[nombre]')) {
+                if (item.notes && item.notes.includes('[nombre]'))
                     nombre = item.notes.split('[nombre]')[1].split('|')[0].trim();
-                }
+                else if (item.notes && item.notes.includes('[adicional]'))
+                    nombre = '+' + item.notes.split('[adicional]')[1].trim();
+                else if (item.product_name)
+                    nombre = item.product_name;
                 if (nombre.length > 20) nombre = nombre.substring(0, 18) + '..';
                 const sub = (item.quantity || 1) * (item.unit_price || 0);
                 pdf.text(`${item.quantity}x    ${nombre.padEnd(22, ' ')} $${sub.toLocaleString()}`, 5, y);
@@ -2697,6 +2703,10 @@ async function cargarHistorialPedidos() {
                 let nombre = 'Ítem';
                 if (it.notes && it.notes.includes('[nombre]'))
                     nombre = it.notes.split('[nombre]')[1].split('|')[0].trim();
+                else if (it.notes && it.notes.includes('[adicional]'))
+                    nombre = '➕ ' + it.notes.split('[adicional]')[1].trim();
+                else if (it.product_name)
+                    nombre = it.product_name;
                 return `${it.quantity}× ${nombre}`;
             }).join(', ') || '—';
 
