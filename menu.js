@@ -8,7 +8,7 @@
 //  de revisión, cada plato elige su PRINCIPIO (de los productos tipo
 //  'side'), su NOTA y si va "para llevar". Los principios ya no se
 //  muestran sueltos en el menú. Las bebidas, postres, a la carta y
-//  menú ejecutivo siguen agregándose como ítems sueltos.
+//  menú ejecutivo siguen agregándose como ítems sueltos. 
 //  Cada plato se guarda como UNA línea de order_items: la proteína
 //  (con precio), con el principio dentro del nombre y la nota del
 //  plato en la nota del ítem → cocina lo ve junto ("Pechuga · Frijol —
