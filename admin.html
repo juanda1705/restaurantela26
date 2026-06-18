@@ -960,6 +960,10 @@
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;border:1.5px solid transparent;">
                 <span class="ic ic-md"><i data-lucide="layout-dashboard"></i></span> Dashboard Contable
             </button>
+            <button onclick="cambiarTab('pedidos')" id="btn-tab-pedidos" class="tab-inactive w-full text-left"
+                style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
+                <span class="ic ic-md"><i data-lucide="shopping-bag"></i></span> Historial de Pedidos
+            </button>
             <button onclick="cambiarTab('menu')" id="btn-tab-menu" class="tab-inactive w-full text-left"
                 style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;font-size:13px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif;">
                 <span class="ic ic-md"><i data-lucide="book-open"></i></span> Control de Menú
@@ -1166,6 +1170,30 @@
                         </div>
                     </div>
                 </div>
+            </section>
+
+            <!-- TAB: HISTORIAL DE PEDIDOS -->
+            <section id="tab-pedidos" style="display:none;flex-direction:column;gap:20px;">
+
+                <!-- Filtros -->
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <button type="button" onclick="filtrarHistorialPedidos('pendientes')" id="btn-hp-pendientes"
+                        style="display:inline-flex;align-items:center;gap:6px;padding:7px 16px;font-size:12px;font-weight:600;border-radius:999px;border:1.5px solid var(--amber);background:var(--amber-lt);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;">
+                        <span class="ic ic-sm"><i data-lucide="clock"></i></span> Por Cobrar
+                    </button>
+                    <button type="button" onclick="filtrarHistorialPedidos('pagados')" id="btn-hp-pagados"
+                        style="display:inline-flex;align-items:center;gap:6px;padding:7px 16px;font-size:12px;font-weight:600;border-radius:999px;border:1.5px solid var(--border);background:var(--surface-2);color:var(--text-3);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;">
+                        <span class="ic ic-sm"><i data-lucide="circle-check"></i></span> Pagados
+                    </button>
+                </div>
+
+                <!-- Grid tarjetas -->
+                <div id="grid-historial-pedidos"
+                    style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
+                    <p style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">
+                        Cargando pedidos…</p>
+                </div>
+
             </section>
 
             <!-- TAB: MENÚ -->
@@ -1809,6 +1837,9 @@
         <button class="bnav-item bnav-active" id="bnav-dashboard" onclick="cambiarTab('dashboard')">
             <span class="bnav-icon ic-nav"><i data-lucide="layout-dashboard"></i></span><span class="bnav-label">Dashboard</span>
         </button>
+        <button class="bnav-item" id="bnav-pedidos" onclick="cambiarTab('pedidos')">
+            <span class="bnav-icon ic-nav"><i data-lucide="shopping-bag"></i></span><span class="bnav-label">Pedidos</span>
+        </button>
         <button class="bnav-item" id="bnav-menu" onclick="cambiarTab('menu')">
             <span class="bnav-icon ic-nav"><i data-lucide="book-open"></i></span><span class="bnav-label">Productos</span>
         </button>
@@ -2013,7 +2044,7 @@
         })();
 
         // ═══ GESTIÓN DE TABS ═══
-        const TABS = ['dashboard', 'menu', 'personal', 'nomina', 'inventario', 'dian', 'permisos', 'produccion', 'calendario'];
+        const TABS = ['dashboard', 'pedidos', 'menu', 'personal', 'nomina', 'inventario', 'dian', 'permisos', 'produccion', 'calendario'];
 
         function cambiarTab(dest) {
             // 1. Ocultar todos los tabs de forma atómica
@@ -2042,6 +2073,7 @@
 
             // 4. Disparar carga de datos — solo cuando el contenedor ya es visible
             if (dest === 'dashboard')  cargarDashboardReal();
+            if (dest === 'pedidos')    cargarHistorialPedidos();
             if (dest === 'menu')       cargarSlotsMenuReal();
             if (dest === 'personal')   renderTablaEmpleados();
             if (dest === 'nomina')     cargarGastosReal();
