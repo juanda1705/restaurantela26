@@ -118,7 +118,7 @@ const ITEM_TYPES_VALIDOS = ['executive_lunch','a_la_carte','drink','dessert','si
 // principios incluidos, postres ni platos a la carta.
 // ============================================================
 const RECARGO_DESECHABLE = 1000;
-const TIPOS_ALMUERZO     = ['protein', 'executive_lunch'];
+const TIPOS_ALMUERZO     = ['protein', 'executive_lunch', 'a_la_carte'];
 
 function _esAlmuerzo(slot) {
     return !!slot && TIPOS_ALMUERZO.includes(slot.itemType);
