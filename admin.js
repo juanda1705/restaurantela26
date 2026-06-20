@@ -1726,11 +1726,29 @@ async function cargarCalendarioCierres(resetPagina = true) {
             <td class="mono" style="text-align:right;${utClass};font-weight:700;">${formatCOP(c.utilidad_neta || 0)}</td>
             <td class="mono" style="text-align:right;font-size:11.5px;">${formatCOP(c.efectivo || 0)}</td>
             <td class="mono" style="text-align:right;font-size:11.5px;">${formatCOP(c.transferencia || 0)}</td>
-            <td class="mono" style="text-align:right;font-size:11.5px;color:var(--amber);">${formatCOP(c.fiado || 0)}</td>`;
+            <td class="mono" style="text-align:right;font-size:11.5px;color:var(--amber);">${formatCOP(c.fiado || 0)}</td>
+            <td style="text-align:center;">
+                <button onclick="eliminarCierre('${c.id}', '${c.fecha}')" title="Eliminar registro"
+                    style="background:none;border:none;cursor:pointer;color:var(--red);padding:4px 8px;border-radius:6px;opacity:0.7;display:inline-flex;align-items:center;"
+                    onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'"><i data-lucide="trash-2" style="width:16px;height:16px;"></i></button>
+            </td>`;
         fragment.appendChild(tr);
     });
     tbody.innerHTML = '';
     tbody.appendChild(fragment);
+    if (window.lucide) lucide.createIcons();
+}
+
+async function eliminarCierre(id, fecha) {
+    if (!confirm(`¿Eliminar el registro del ${fecha}? Esta acción no se puede deshacer.`)) return;
+    try {
+        const { error } = await supabaseClient.from('historial_cierres').delete().eq('id', id);
+        if (error) throw error;
+        Toast.ok('Registro eliminado.');
+        cargarCalendarioCierres(false);
+    } catch (err) {
+        Toast.err('Error al eliminar: ' + err.message);
+    }
 }
 
 function _aplicarFiltroCierres(fecha) {
