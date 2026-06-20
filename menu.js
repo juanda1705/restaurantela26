@@ -6,7 +6,7 @@
 //  El almuerzo ahora se arma POR PLATO. Cada toque de una proteína
 //  crea un plato independiente (3 pechugas = 3 platos). En la pantalla
 //  de revisión, cada plato elige su PRINCIPIO (de los productos tipo
-//  'side'), su NOTA y si va "para llevar". Los principios ya no se
+//  'side'), su NOTA y si va "para llevar". Los principios ya no se 
 //  muestran sueltos en el menú. Las bebidas, postres, a la carta y
 //  menú ejecutivo siguen agregándose como ítems sueltos.
 //  Cada plato se guarda como UNA línea de order_items: la proteína
