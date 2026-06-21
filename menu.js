@@ -6,7 +6,7 @@
 //  El almuerzo ahora se arma POR PLATO. Cada toque de una proteína
 //  crea un plato independiente (3 pechugas = 3 platos). En la pantalla
 //  de revisión, cada plato elige su PRINCIPIO (de los productos tipo
-//  'side'), su NOTA y si va "para llevar". Los principios ya no se 
+//  'side'), su NOTA y si va "para llevar". Los principios ya no se
 //  muestran sueltos en el menú. Las bebidas, postres, a la carta y
 //  menú ejecutivo siguen agregándose como ítems sueltos.
 //  Cada plato se guarda como UNA línea de order_items: la proteína
@@ -840,10 +840,15 @@ const Cart = {
             }
             existente.cantidad++;
         } else {
-            State.cart.push({ slotId, cantidad: 1 });
+            State.cart.push({ slotId, cantidad: 1, nota: '' });
         }
         _refrescarTarjeta(slotId);
         _actualizarCartBar();
+    },
+
+    setNotaCart(slotId, txt) {
+        const item = State.cart.find(c => c.slotId === slotId);
+        if (item) item.nota = txt;
     },
 
     cambiar(slotId, delta) {
@@ -978,14 +983,26 @@ const Cart = {
             State.cart.forEach(item => {
                 const slot = State.slots.find(s => s.id === item.slotId);
                 if (!slot) return;
+                const esCartaNota = slot.itemType === 'a_la_carte';
                 const row = document.createElement('div');
                 row.className = 'summary-row';
+                row.style.flexDirection = 'column';
+                row.style.alignItems = 'stretch';
+                row.style.gap = '6px';
+                const notaEscapada = (item.nota || '').replace(/"/g, '&quot;');
                 row.innerHTML = `
-                    <div style="flex:1;min-width:0;">
-                        <p class="summary-name">${slot.nombre}</p>
-                        <p class="summary-qty">${item.cantidad} × ${slot.precio > 0 ? formatCOP(slot.precio) : 'Incluido'}</p>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <div style="flex:1;min-width:0;">
+                            <p class="summary-name">${slot.nombre}</p>
+                            <p class="summary-qty">${item.cantidad} × ${slot.precio > 0 ? formatCOP(slot.precio) : 'Incluido'}</p>
+                        </div>
+                        <span class="summary-price">${slot.precio > 0 ? formatCOP(slot.precio * item.cantidad) : '—'}</span>
                     </div>
-                    <span class="summary-price">${slot.precio > 0 ? formatCOP(slot.precio * item.cantidad) : '—'}</span>`;
+                    ${esCartaNota ? `<input class="plato-input" type="text"
+                        value="${notaEscapada}"
+                        oninput="Cart.setNotaCart('${slot.id}', this.value)"
+                        placeholder="Nota: sin cebolla, término…"
+                        style="font-size:12px;">` : ''}`;
                 listEl.appendChild(row);
             });
         }
@@ -1288,7 +1305,7 @@ const Order = {
                     quantity: item.cantidad, unit_price: precioFinal,
                     item_status: 'pending',
                     product_name: slot.nombre,
-                    notes: `[nombre]${slot.nombre}${llevaEmpaque ? ' | Empaque desechable incluido' : ''}`,
+                    notes: `[nombre]${slot.nombre}${item.nota ? ' | ' + item.nota.trim() : ''}${llevaEmpaque ? ' | Empaque desechable incluido' : ''}`,
                 };
             }).filter(Boolean);
 
@@ -1962,6 +1979,19 @@ const EditarPedido = {
             </div>
 
             <div class="edit-section">
+                <p class="edit-section-title">Agregar porción / adicional</p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <input id="edit-adicional-nombre" class="form-input" type="text"
+                        placeholder="Ej: Porción de pollo"
+                        style="flex:2;min-width:130px;">
+                    <input id="edit-adicional-precio" class="form-input" type="number" min="0" step="500"
+                        placeholder="Precio"
+                        style="flex:1;min-width:90px;">
+                    <button class="btn-agregar-item" onclick="EditarPedido._agregarAdicional()">Agregar</button>
+                </div>
+            </div>
+
+            <div class="edit-section">
                 <p class="edit-section-title">Nota del pedido</p>
                 <textarea id="edit-nota-input" class="form-input" rows="2"
                     placeholder="Sin picante, sin cebolla, alergia a…">${this._notaEdit}</textarea>
@@ -2087,6 +2117,32 @@ const EditarPedido = {
         this._refrescarListaItems();
         this._actualizarTotalPreview();
         Toast.ok(`"${nombreCompleto}" agregado al pedido.`);
+    },
+
+    _agregarAdicional() {
+        const nombreEl = document.getElementById('edit-adicional-nombre');
+        const precioEl = document.getElementById('edit-adicional-precio');
+        const nombre   = (nombreEl?.value || '').trim();
+        const precio   = Number(precioEl?.value) || 0;
+        if (!nombre) { Toast.error('Escribe el nombre de la porción o adicional.'); return; }
+
+        this._itemsEdit.push({
+            id:          `new-${Date.now()}`,
+            menuItemId:  null,
+            nombre:      nombre,
+            notesItem:   `[adicional]${nombre}`,
+            precio:      precio,
+            cantidad:    1,
+            item_status: 'pending',
+            esNuevo:     true,
+            eliminado:   false,
+        });
+
+        if (nombreEl) nombreEl.value = '';
+        if (precioEl) precioEl.value = '';
+        this._refrescarListaItems();
+        this._actualizarTotalPreview();
+        Toast.ok(`"${nombre}" agregado como porción/adicional.`);
     },
 
     _cambiarCantidad(itemId, delta) {
