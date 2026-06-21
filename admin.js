@@ -2293,12 +2293,16 @@ async function editarComandaAdmin(orderId, orderNo, totalBruto) {
         _adminEditor.pedido    = pedido;
         _adminEditor.itemsEdit = (pedido.order_items || []).map(it => {
             let nombre = it.menu_items?.name || '';
+            let notesItem = it.notes || '';
             if (!nombre && (it.notes || '').includes('[nombre]'))
                 nombre = it.notes.split('[nombre]')[1].split('|')[0].trim();
+            else if (!nombre && (it.notes || '').includes('[adicional]'))
+                nombre = '➕ ' + it.notes.split('[adicional]')[1].trim();
             return {
                 id:          it.id,
                 menuItemId:  it.menu_item_id,
-                nombre:      nombre || 'Ítem',
+                nombre:      nombre || it.product_name || 'Ítem',
+                notesItem,
                 precio:      Number(it.unit_price) || 0,
                 cantidad:    it.quantity,
                 item_status: it.item_status || 'pending',
@@ -2359,6 +2363,18 @@ async function _renderEditorAdmin() {
                     <span id="eca-nueva-qty" style="font-size:14px;font-weight:600;color:var(--text-1);min-width:24px;text-align:center;">1</span>
                     <button onclick="_ecaIncQty()" style="width:30px;height:30px;border-radius:50%;border:1.5px solid var(--olive-bd);background:var(--olive-lt);color:var(--olive);font-size:16px;cursor:pointer;font-family:'DM Sans',sans-serif;">+</button>
                     <button onclick="_ecaAgregarItem()" class="btn-olive" style="flex:1;min-width:120px;height:36px;">+ Agregar al pedido</button>
+                </div>
+            </div>
+        </div>
+        <div style="border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px;">
+            <div style="background:var(--surface-2);padding:10px 14px;border-bottom:1.5px solid var(--border);">
+                <p style="font-size:11px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.6px;">Agregar porción / adicional</p>
+            </div>
+            <div style="padding:14px;display:flex;flex-direction:column;gap:10px;">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <input id="eca-adicional-nombre" class="form-input" type="text" placeholder="Ej: Porción de pollo" style="flex:2;min-width:130px;border-radius:999px;font-size:13px;">
+                    <input id="eca-adicional-precio" class="form-input" type="number" min="0" step="500" placeholder="Precio" style="flex:1;min-width:90px;border-radius:999px;font-size:13px;">
+                    <button onclick="_ecaAgregarAdicional()" class="btn-olive" style="flex:1;min-width:120px;height:36px;">+ Agregar porción</button>
                 </div>
             </div>
         </div>
@@ -2428,6 +2444,22 @@ window._ecaCambiarCantidad = function(itemId, delta) {
     const nueva = it.cantidad + delta;
     if (nueva <= 0) { it.eliminado = true; } else { it.cantidad = nueva; }
     _ecaRefrescarLista();
+};
+window._ecaAgregarAdicional = function() {
+    const nombreEl = document.getElementById('eca-adicional-nombre');
+    const precioEl = document.getElementById('eca-adicional-precio');
+    const nombre   = (nombreEl?.value || '').trim();
+    const precio   = Number(precioEl?.value) || 0;
+    if (!nombre) { Toast.error('Escribe el nombre de la porción o adicional.'); return; }
+    _adminEditor.itemsEdit.push({
+        id: `new-${Date.now()}`, menuItemId: null,
+        nombre, notesItem: `[adicional]${nombre}`,
+        precio, cantidad: 1, item_status: 'pending', esNuevo: true, eliminado: false,
+    });
+    if (nombreEl) nombreEl.value = '';
+    if (precioEl) precioEl.value = '';
+    _ecaRefrescarLista();
+    Toast.ok(`"${nombre}" agregado como porción/adicional.`);
 };
 window._ecaEliminarItem = function(itemId) {
     const it = _adminEditor.itemsEdit.find(i => i.id === itemId);
@@ -2525,13 +2557,16 @@ async function _guardarEdicionLegacyAdmin() {
 
     // ── 3. Insertar nuevos ítems ──────────────────────────────
     if (aNuevos.length > 0) {
+        const { data: fallbackItems } = await supabaseClient
+            .from('menu_items').select('id').eq('is_active', true).limit(1).maybeSingle();
+        const fallbackId = fallbackItems?.id || null;
         const insertPayload = aNuevos.map(it => ({
             order_id:     orderId,
-            menu_item_id: it.menuItemId,
+            menu_item_id: it.menuItemId || fallbackId,
             quantity:     it.cantidad,
             unit_price:   it.precio,
             item_status:  'pending',
-            notes:        `[nombre]${it.nombre}`,
+            notes:        it.notesItem || `[nombre]${it.nombre}`,
         }));
 
         const { error } = await supabaseClient
