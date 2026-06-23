@@ -582,7 +582,7 @@ async function exportarReciboPDF(orderId) {
     try {
         const { data: ord, error } = await supabaseClient
             .from('orders')
-            .select(`order_number, customer_name, total_amount, created_at,
+            .select(`order_number, customer_name, notes, total_amount, created_at,
                      order_items ( quantity, notes, unit_price )`)
             .eq('id', orderId)
             .single();
