@@ -157,6 +157,14 @@ function getRangoByCodigo(codigo) {
     return { label: '—', color: 'var(--text-3)' };
 }
 
+// ── Extrae el nombre del cliente desde customer_name o desde notes ──
+function _nombreCliente(ord) {
+    if (ord.customer_name) return ord.customer_name;
+    const m = (ord.notes || '').match(/Cliente:\s*([^|]+)/i);
+    if (m) return m[1].trim();
+    return 'Consumidor Final';
+}
+
 // ============================================================
 // [FIX-10 v2] _buildTableMap — tolerante a nombres de columna
 // Consulta la tabla de mesas y construye { [id]: etiqueta }.
@@ -350,7 +358,7 @@ async function cargarDashboardReal() {
                                 <span class="mono" style="font-size:11.5px;font-weight:700;color:var(--olive);">${ord.order_number}</span>
                             </td>
                             <td style="font-size:12px;color:var(--text-2);font-weight:600;white-space:nowrap;">${mesaLabel}</td>
-                            <td style="font-size:13px;color:var(--text-1);font-weight:500;">${ord.customer_name || 'Consumidor Final'}</td>
+                            <td style="font-size:13px;color:var(--text-1);font-weight:500;">${_nombreCliente(ord)}</td>
                             <td>
                                 <span class="mono" style="font-size:13px;font-weight:700;color:var(--olive);">${formatCOP(ord.total_amount)}</span>
                             </td>
@@ -593,7 +601,7 @@ async function exportarReciboPDF(orderId) {
         pdf.text('Nit: 900.123.456-7', 40, 19, { align: 'center' });
         pdf.text('----------------------------------------', 40, 23, { align: 'center' });
         pdf.text(`Ref: ${ord.order_number}`, 5, 29);
-        pdf.text(`Cliente: ${ord.customer_name || 'Consumidor Final'}`, 5, 34);
+        pdf.text(`Cliente: ${_nombreCliente(ord)}`, 5, 34);
         pdf.text(`Fecha: ${new Date(ord.created_at).toLocaleString('es-CO')}`, 5, 39);
         pdf.text('----------------------------------------', 40, 44, { align: 'center' });
         pdf.setFont('monospace', 'bold');
@@ -1597,6 +1605,12 @@ async function realizarCierre() {
     ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(k));
     totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
     globalIngresos = 0; globalEgresos = 0;
+    // Actualizar DOM inmediatamente sin esperar la query
+    const _elPed = document.getElementById('total-pedidos');
+    const _elGas = document.getElementById('total-gastos');
+    if (_elPed) _elPed.textContent = '0 pedidos';
+    if (_elGas) _elGas.textContent = formatCOP(0);
+    renderizarTotales();
 
     const panelApertura = document.getElementById('panel-apertura-caja');
     const inputBase     = document.getElementById('input-base-caja');
@@ -2814,7 +2828,7 @@ async function cargarHistorialPedidos() {
                         </div>
                         <div>
                             <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">Cliente</p>
-                            <p style="font-size:12px;font-weight:500;color:var(--text-2);">${ord.customer_name || 'Consumidor Final'}</p>
+                            <p style="font-size:12px;font-weight:500;color:var(--text-2);">${_nombreCliente(ord)}</p>
                         </div>
                     </div>
 
