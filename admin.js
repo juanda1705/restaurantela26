@@ -911,7 +911,7 @@ async function cargarSlotsMenuReal() {
     try {
         let query = supabaseClient
             .from('menu_items')
-            .select('id, name, description, price, item_type, is_active, portions_today, restaurant_id, category_id, created_at')
+            .select('id, name, description, price, item_type, is_active, portions_today, restaurant_id, category_id, created_at, image_url')
             .eq('is_active', _vistaMenuAdmin === 'activos')
             .order('name', { ascending: true });
 
@@ -978,6 +978,22 @@ async function cargarSlotsMenuReal() {
                                 class="card-input" style="color:var(--amber);">
                         </div>
                     </div>
+
+                    ${item.item_type === 'a_la_carte' ? `
+                    <div style="background:var(--surface-2);border:1.5px solid var(--border);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:10px;">
+                        <p style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin:0;">Descripción (carta)</p>
+                        <textarea rows="2"
+                            placeholder="Descripción breve del plato…"
+                            onchange="actualizarDescripcionPlato('${item.id}', this.value)"
+                            style="width:100%;resize:vertical;background:var(--surface-1);border:1.5px solid var(--border);border-radius:8px;color:var(--text-1);font-size:12.5px;padding:8px;font-family:'DM Sans',sans-serif;line-height:1.4;">${(item.description || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+                        <p style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin:0;">Imagen del plato</p>
+                        ${item.image_url ? `<img src="${item.image_url}" alt="${item.name}" style="width:100%;height:120px;object-fit:cover;border-radius:8px;border:1.5px solid var(--border);">` : ''}
+                        <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:6px 14px;border-radius:999px;border:1.5px solid var(--border);background:var(--surface-1);color:var(--text-2);cursor:pointer;">
+                            <i data-lucide="upload" style="width:13px;height:13px;"></i>
+                            ${item.image_url ? 'Cambiar imagen' : 'Subir imagen'}
+                            <input type="file" accept="image/*" style="display:none;" onchange="subirImagenPlato('${item.id}', this)">
+                        </label>
+                    </div>` : ''}
 
                     <div style="display:flex;align-items:center;justify-content:space-between;border-top:1.5px solid var(--border);padding-top:10px;">
                         ${_vistaMenuAdmin === 'inactivos'
@@ -1215,6 +1231,60 @@ async function eliminarComponenteCatalogo(idItem, nombreItem) {
     } catch (err) {
         console.error('[La 26] Error en eliminarComponenteCatalogo:', err);
         Toast.error(`No se pudo dar de baja "${nombreItem}". Revisa la consola.`);
+    }
+}
+
+// ============================================================
+// ACTUALIZAR DESCRIPCIÓN (a_la_carte)
+// ============================================================
+async function actualizarDescripcionPlato(idPlato, descripcion) {
+    try {
+        const { error } = await supabaseClient
+            .from('menu_items')
+            .update({ description: descripcion.trim() })
+            .eq('id', idPlato);
+        if (error) throw error;
+        Toast.ok('Descripción actualizada.');
+    } catch (err) {
+        console.error('Error actualizando descripción:', err);
+        Toast.error('No se pudo guardar la descripción.');
+    }
+}
+
+// ============================================================
+// SUBIR IMAGEN (a_la_carte) → Supabase Storage bucket: menu-images
+// ============================================================
+async function subirImagenPlato(idPlato, input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+
+    const ext  = file.name.split('.').pop();
+    const path = `platos/${idPlato}.${ext}`;
+
+    try {
+        Toast.info('Subiendo imagen…');
+        const { error: upErr } = await supabaseClient.storage
+            .from('menu-images')
+            .upload(path, file, { upsert: true, contentType: file.type });
+        if (upErr) throw upErr;
+
+        const { data: urlData } = supabaseClient.storage
+            .from('menu-images')
+            .getPublicUrl(path);
+
+        const publicUrl = urlData.publicUrl + '?t=' + Date.now();
+
+        const { error: dbErr } = await supabaseClient
+            .from('menu_items')
+            .update({ image_url: publicUrl })
+            .eq('id', idPlato);
+        if (dbErr) throw dbErr;
+
+        Toast.ok('Imagen subida correctamente.');
+        cargarSlotsMenuReal();
+    } catch (err) {
+        console.error('Error subiendo imagen:', err);
+        Toast.error('No se pudo subir la imagen: ' + (err.message || err));
     }
 }
 
@@ -2339,11 +2409,13 @@ async function _renderEditorAdmin() {
     const pedido = _adminEditor.pedido;
     if (!pedido) return;
 
-    const { data: menuItems } = await supabaseClient
-        .from('menu_items')
-        .select('id, name, price, is_active, portions_today')
-        .eq('is_active', true)
-        .order('name', { ascending: true });
+    const [{ data: menuItems }, { data: tablasData }] = await Promise.all([
+        supabaseClient.from('menu_items')
+            .select('id, name, price, is_active, portions_today')
+            .eq('is_active', true).order('name', { ascending: true }),
+        supabaseClient.from('tables').select('id, label, number').order('number', { ascending: true }),
+    ]);
+    const tablas = (tablasData || []).map(t => ({ id: t.id, label: t.label || String(t.number || '') }));
 
     const opcionesMenu = (menuItems || []).map(m => {
         const p = m.portions_today != null ? ` (${m.portions_today} disp.)` : '';
@@ -2380,6 +2452,18 @@ async function _renderEditorAdmin() {
                 </div>
             </div>
         </div>
+        ${(pedido.notes || '').includes('[MESA]') && tablas.length > 0 ? `
+        <div style="border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px;">
+            <div style="background:var(--surface-2);padding:10px 14px;border-bottom:1.5px solid var(--border);">
+                <p style="font-size:11px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.6px;">Cambiar mesa</p>
+            </div>
+            <div style="padding:14px;">
+                <select id="eca-sel-mesa" style="border-radius:999px;font-size:13px;width:100%;">
+                    <option value="">— Mantener mesa actual —</option>
+                    ${tablas.map(t => `<option value="${t.id}" data-label="${t.label}">Mesa ${t.label}</option>`).join('')}
+                </select>
+            </div>
+        </div>` : ''}
         <div style="border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px;">
             <div style="background:var(--surface-2);padding:10px 14px;border-bottom:1.5px solid var(--border);">
                 <p style="font-size:11px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.6px;">Agregar porción / adicional</p>
@@ -2505,6 +2589,18 @@ async function guardarEdicionAdmin() {
     if (btnGuardar) { btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando…'; }
 
     try {
+        // Cambio de mesa (solo órdenes de mesa)
+        const selMesa = document.getElementById('eca-sel-mesa');
+        if (selMesa && selMesa.value) {
+            const nuevaTableId = selMesa.value;
+            const nuevaLabel   = selMesa.options[selMesa.selectedIndex].dataset.label;
+            const notasNuevas  = (_adminEditor.pedido.notes || '')
+                .replace(/(\[MESA\]\s*Mesa:\s*)[^|]*/i, `$1${nuevaLabel} `).trim();
+            await supabaseClient.from('orders')
+                .update({ table_id: nuevaTableId, notes: notasNuevas })
+                .eq('id', _adminEditor.orderId);
+        }
+
         let resultado;
         if (window.La26Core) {
             const { data: rest } = await supabaseClient.from('restaurants').select('id').limit(1).maybeSingle();
