@@ -2416,6 +2416,7 @@ async function _renderEditorAdmin() {
         supabaseClient.from('tables').select('id, label, number').order('number', { ascending: true }),
     ]);
     const tablas = (tablasData || []).map(t => ({ id: t.id, label: t.label || String(t.number || '') }));
+    _adminEditor.tablas = tablas;
 
     const opcionesMenu = (menuItems || []).map(m => {
         const p = m.portions_today != null ? ` (${m.portions_today} disp.)` : '';
@@ -2452,16 +2453,14 @@ async function _renderEditorAdmin() {
                 </div>
             </div>
         </div>
-        ${(pedido.notes || '').includes('[MESA]') && tablas.length > 0 ? `
+        ${(pedido.notes || '').includes('[MESA]') ? `
         <div style="border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px;">
             <div style="background:var(--surface-2);padding:10px 14px;border-bottom:1.5px solid var(--border);">
                 <p style="font-size:11px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.6px;">Cambiar mesa</p>
             </div>
             <div style="padding:14px;">
-                <select id="eca-sel-mesa" style="border-radius:999px;font-size:13px;width:100%;">
-                    <option value="">— Mantener mesa actual —</option>
-                    ${tablas.map(t => `<option value="${t.id}" data-label="${t.label}">Mesa ${t.label}</option>`).join('')}
-                </select>
+                <input id="eca-inp-mesa" type="text" placeholder="Ej: 1, 2, 5…"
+                    style="border-radius:999px;font-size:13px;width:100%;padding:8px 14px;border:1.5px solid var(--border);background:var(--surface-1);color:var(--text-1);font-family:'DM Sans',sans-serif;">
             </div>
         </div>` : ''}
         <div style="border:1.5px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px;">
@@ -2590,10 +2589,19 @@ async function guardarEdicionAdmin() {
 
     try {
         // Cambio de mesa (solo órdenes de mesa)
-        const selMesa = document.getElementById('eca-sel-mesa');
-        if (selMesa && selMesa.value) {
-            const nuevaTableId = selMesa.value;
-            const nuevaLabel   = selMesa.options[selMesa.selectedIndex].dataset.label;
+        const inpMesa = document.getElementById('eca-inp-mesa');
+        if (inpMesa && inpMesa.value.trim()) {
+            const labelDigitado = inpMesa.value.trim();
+            const tablasList = _adminEditor.tablas || [];
+            const mesaEncontrada = tablasList.find(t => t.label === labelDigitado || t.label === String(parseInt(labelDigitado)));
+            if (!mesaEncontrada) {
+                Toast.error(`Mesa "${labelDigitado}" no existe. Verifica el número.`);
+                _adminEditor.guardando = false;
+                if (btnGuardar) { btnGuardar.disabled = false; btnGuardar.textContent = 'Guardar cambios'; }
+                return;
+            }
+            const nuevaTableId = mesaEncontrada.id;
+            const nuevaLabel   = mesaEncontrada.label;
             const notasNuevas  = (_adminEditor.pedido.notes || '')
                 .replace(/(\[MESA\]\s*Mesa:\s*)[^|]*/i, `$1${nuevaLabel} `).trim();
             await supabaseClient.from('orders')
