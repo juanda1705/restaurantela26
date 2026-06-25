@@ -1835,6 +1835,7 @@ const EditarPedido = {
     _itemsEdit:   [],
     _notaEdit:    '',
     _guardando:   false,
+    _tablas:      [],
 
     async abrir(pedidoId) {
         this._pedidoId  = pedidoId;
@@ -1869,6 +1870,11 @@ const EditarPedido = {
             }
 
             this._pedido = pedido;
+
+            // Cargar lista de mesas para el selector
+            const { data: tablasData } = await db.from('tables')
+                .select('id, label, number').order('number', { ascending: true });
+            this._tablas = (tablasData || []).map(t => ({ id: t.id, label: t.label || String(t.number || '') }));
 
             const parsed = _parsearNota(pedido.notes);
             this._notaEdit = parsed.nota;
@@ -1990,6 +1996,15 @@ const EditarPedido = {
                     <button class="btn-agregar-item" onclick="EditarPedido._agregarAdicional()">Agregar</button>
                 </div>
             </div>
+
+            ${(this._pedido.notes || '').includes('[MESA]') && this._tablas.length > 0 ? `
+            <div class="edit-section">
+                <p class="edit-section-title">Cambiar mesa</p>
+                <select id="edit-sel-mesa" class="form-input edit-select">
+                    <option value="">— Mantener mesa actual —</option>
+                    ${this._tablas.map(t => `<option value="${t.id}" data-label="${t.label}">Mesa ${t.label}</option>`).join('')}
+                </select>
+            </div>` : ''}
 
             <div class="edit-section">
                 <p class="edit-section-title">Nota del pedido</p>
@@ -2212,6 +2227,19 @@ const EditarPedido = {
         if (btnGuardar) { btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando…'; }
 
         try {
+            // Cambio de mesa (solo órdenes de mesa)
+            const selMesa = document.getElementById('edit-sel-mesa');
+            if (selMesa && selMesa.value) {
+                const nuevaTableId = selMesa.value;
+                const nuevaLabel   = selMesa.options[selMesa.selectedIndex].dataset.label;
+                const notasMesa    = (this._pedido.notes || '')
+                    .replace(/(\[MESA\]\s*Mesa:\s*)[^|]*/i, `$1${nuevaLabel} `).trim();
+                await db.from('orders')
+                    .update({ table_id: nuevaTableId, notes: notasMesa })
+                    .eq('id', this._pedidoId);
+                this._pedido.notes = notasMesa; // actualizar local para que notaFinal use el valor nuevo
+            }
+
             const notaInput = document.getElementById('edit-nota-input');
             const nuevaNota = (notaInput?.value || '').trim();
 
