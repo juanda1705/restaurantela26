@@ -1389,7 +1389,7 @@ async function cargarGastosReal() {
     if (!tbody) return;
 
     tbody.innerHTML = `
-        <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+        <tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
             Consultando movimientos...
         </td></tr>`;
 
@@ -1427,7 +1427,7 @@ async function cargarGastosReal() {
 
         if (!egresos || egresos.length === 0) {
             tbody.innerHTML = `
-                <tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
+                <tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text-3);font-size:12.5px;">
                     Sin salidas registradas.
                 </td></tr>`;
             return;
@@ -1437,21 +1437,49 @@ async function cargarGastosReal() {
             const hora = new Date(g.created_at).toLocaleTimeString('es-CO', {
                 hour: '2-digit', minute: '2-digit'
             });
+            const descEscapada = (g.description || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
             tbody.insertAdjacentHTML('beforeend', `
                 <tr class="tbody-row">
                     <td>
                         <span style="background:var(--red-lt);color:var(--red);border:1.5px solid var(--red-bd);border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;">${g.expense_type}</span>
                     </td>
                     <td style="color:var(--text-1);font-size:13px;">${g.description}</td>
-                    <td>
+                    <td style="text-align:right;">
                         <span class="mono" style="font-size:13px;font-weight:600;color:var(--red);">- ${formatCOP(g.amount)}</span>
                     </td>
-                    <td style="text-align:right;font-size:11.5px;color:var(--text-3);" class="mono">${hora}</td>
+                    <td style="text-align:center;font-size:11.5px;color:var(--text-3);" class="mono">${hora}</td>
+                    <td style="text-align:center;">
+                        <button onclick="eliminarGastoReal('${g.id}','${descEscapada}',${parseFloat(g.amount) || 0})" title="Eliminar gasto"
+                            style="background:none;border:none;cursor:pointer;color:var(--red);padding:4px 8px;border-radius:6px;opacity:0.7;display:inline-flex;align-items:center;"
+                            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'"><i data-lucide="trash-2" style="width:16px;height:16px;"></i></button>
+                    </td>
                 </tr>`);
         });
 
+        if (window.lucide) lucide.createIcons();
+
     } catch (err) {
         console.error('Error cargando egresos:', err);
+    }
+}
+
+// ============================================================
+// [v3.7] ELIMINAR GASTO — para corregir salidas registradas
+// por error (monto equivocado, duplicado, prueba, etc.)
+// ============================================================
+async function eliminarGastoReal(idGasto, descripcion, monto) {
+    if (!confirm(`⚠️ ¿Eliminar el gasto "${descripcion}" por ${formatCOP(monto)}?\n\nEsta acción no se puede deshacer y ajustará los totales del día.`)) return;
+    try {
+        const { error } = await supabaseClient
+            .from('operating_expenses')
+            .delete()
+            .eq('id', idGasto);
+        if (error) throw error;
+        Toast.ok(`Gasto "${descripcion}" eliminado. Totales actualizados.`);
+        cargarGastosReal();
+    } catch (err) {
+        console.error('Error eliminando gasto:', err);
+        Toast.error(`No se pudo eliminar el gasto: ${err.message || 'error desconocido'}`);
     }
 }
 
