@@ -19,6 +19,8 @@
             crossorigin="anonymous"></script>
         <!-- Lucide Icons — librería de iconos SVG vía CDN -->
         <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+        <!-- Anime.js — animaciones del módulo de estadísticas mensuales -->
+        <script src="https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.min.js"></script>
         <style>
             :root {
                 --olive: #4a6741;
@@ -1775,8 +1777,11 @@
                     </div>
                 </div>
 
-                <!-- Resumen acumulado -->
+                <!-- Resumen acumulado del mes (selector + tarjetas) -->
                 <div id="resumen-calendario"></div>
+
+                <!-- Estadísticas mensuales animadas -->
+                <div id="estadisticas-mensuales"></div>
 
                 <!-- Tabla de cierres -->
                 <div class="card" style="padding:0;overflow:hidden;">
