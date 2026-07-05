@@ -1699,7 +1699,79 @@ async function realizarCierre() {
 }
 
 // ── Calendario de cierres ──────────────────────────────────────
+// [v3.5 · FIX-CALENDARIO]
+//  1. La consulta ahora ordena por fecha DESC y, como desempate,
+//     por created_at DESC (antes dos cierres del mismo día salían
+//     en orden aleatorio).
+//  2. Los cierres que quedaron atrapados en localStorage
+//     ('cierres_local') porque el insert a Supabase falló en su
+//     momento, ahora se RE-SINCRONIZAN automáticamente a la base
+//     de datos al abrir el calendario. Esto era la causa de que
+//     los cierres posteriores al 25-jun no aparecieran: se
+//     guardaron localmente y la tabla solo mostraba lo de Supabase.
+//  3. Si algún cierre local no logra subirse, igual se MEZCLA en
+//     la tabla (con etiqueta "local") en vez de quedar invisible.
+//  4. La fecha se normaliza a YYYY-MM-DD aunque venga como
+//     timestamp completo desde la BD.
+//  5. Si la consulta a Supabase falla, ahora se muestra el error
+//     real en la tabla en vez de fallar en silencio.
 const _cierresState = { pagina: 0, limite: 20, total: 0, datos: [], filtroFecha: '' };
+
+// Normaliza cualquier formato de fecha (Date, timestamp, string) a 'YYYY-MM-DD'
+function _fechaCierreISO(f) {
+    if (!f) return '';
+    const s = String(f);
+    // 'YYYY-MM-DD...' → tomar los primeros 10 caracteres
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    const d = new Date(s);
+    return isNaN(d) ? s : d.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+}
+
+// [v3.5] Sube a Supabase los cierres que quedaron guardados solo en
+// localStorage (fallback antiguo). Los que suben con éxito se quitan
+// del almacenamiento local; los que fallan se conservan para reintentar.
+async function _sincronizarCierresLocales() {
+    let locales;
+    try {
+        locales = JSON.parse(localStorage.getItem('cierres_local') || '[]');
+    } catch (_) { locales = []; }
+    if (!Array.isArray(locales) || locales.length === 0) return [];
+
+    const pendientes = [];
+    for (const c of locales) {
+        // Quitar campos que no existen en la tabla
+        const { local, id, ...payload } = c;
+        payload.fecha = _fechaCierreISO(payload.fecha);
+        try {
+            // Evitar duplicados: ¿ya existe un cierre con misma fecha y mismo created_at?
+            let existe = false;
+            if (payload.created_at) {
+                const { data: dup } = await supabaseClient
+                    .from('historial_cierres')
+                    .select('id')
+                    .eq('fecha', payload.fecha)
+                    .eq('created_at', payload.created_at)
+                    .maybeSingle();
+                existe = !!dup;
+            }
+            if (!existe) {
+                const { error } = await supabaseClient
+                    .from('historial_cierres')
+                    .insert([payload]);
+                if (error) throw error;
+            }
+        } catch (_) {
+            pendientes.push(c);          // no se pudo subir: conservar local
+        }
+    }
+
+    if (pendientes.length > 0) {
+        localStorage.setItem('cierres_local', JSON.stringify(pendientes));
+    } else {
+        localStorage.removeItem('cierres_local');
+    }
+    return pendientes;                   // los que siguen solo en local
+}
 
 async function cargarCalendarioCierres(resetPagina = true) {
     const tbody   = document.getElementById('tabla-calendario-cierres');
@@ -1711,13 +1783,22 @@ async function cargarCalendarioCierres(resetPagina = true) {
         _cierresState.datos  = [];
     }
 
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-3);">Cargando historial…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-3);">Cargando historial…</td></tr>`;
 
+    // [v3.5] Paso 1: re-sincronizar cierres locales pendientes hacia Supabase.
+    let localesPendientes = [];
+    try {
+        localesPendientes = await _sincronizarCierresLocales();
+    } catch (_) { /* no bloquear la carga por esto */ }
+
+    // [v3.5] Paso 2: consultar Supabase con orden fecha DESC + created_at DESC.
+    let errorSupabase = null;
     try {
         let query = supabaseClient
             .from('historial_cierres')
             .select('*', { count: 'exact' })
-            .order('fecha', { ascending: false })
+            .order('fecha',      { ascending: false })
+            .order('created_at', { ascending: false })
             .range(
                 _cierresState.pagina * _cierresState.limite,
                 (_cierresState.pagina + 1) * _cierresState.limite - 1
@@ -1732,19 +1813,44 @@ async function cargarCalendarioCierres(resetPagina = true) {
 
         _cierresState.total = count || 0;
         _cierresState.datos = data || [];
-    } catch (_) {
-        const todos = JSON.parse(localStorage.getItem('cierres_local') || '[]');
-        _cierresState.datos  = todos.slice(
+    } catch (err) {
+        errorSupabase = err;
+        // Fallback: mostrar lo que haya en localStorage
+        let todos;
+        try { todos = JSON.parse(localStorage.getItem('cierres_local') || '[]'); }
+        catch (_) { todos = []; }
+        _cierresState.datos = todos.slice(
             _cierresState.pagina * _cierresState.limite,
             (_cierresState.pagina + 1) * _cierresState.limite
         );
         _cierresState.total = todos.length;
     }
 
+    // [v3.5] Paso 3: mezclar (solo en la página 1 y sin filtro activo) los
+    // cierres que siguen únicamente en local, para que NUNCA queden invisibles.
+    if (!errorSupabase && localesPendientes.length > 0 && _cierresState.pagina === 0) {
+        const extras = localesPendientes
+            .filter(c => !_cierresState.filtroFecha || _fechaCierreISO(c.fecha) === _cierresState.filtroFecha)
+            .map(c => ({ ...c, local: true }));
+        _cierresState.datos = [..._cierresState.datos, ...extras];
+        _cierresState.total += extras.length;
+    }
+
+    // [v3.5] Paso 4: garantizar el orden final en el cliente
+    // (fecha DESC, luego created_at DESC), pase lo que pase arriba.
+    _cierresState.datos.sort((a, b) => {
+        const fa = _fechaCierreISO(a.fecha), fb = _fechaCierreISO(b.fecha);
+        if (fa !== fb) return fb.localeCompare(fa);
+        const ca = a.created_at || '', cb = b.created_at || '';
+        return String(cb).localeCompare(String(ca));
+    });
+
     const cierres = _cierresState.datos;
 
     if (cierres.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:28px;color:var(--text-3);">Sin cierres registrados aún.</td></tr>`;
+        tbody.innerHTML = errorSupabase
+            ? `<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--red);">Error al cargar cierres: ${errorSupabase.message || errorSupabase}</td></tr>`
+            : `<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--text-3);">Sin cierres registrados aún.</td></tr>`;
         if (resumen) resumen.innerHTML = '';
         return;
     }
@@ -1762,8 +1868,14 @@ async function cargarCalendarioCierres(resetPagina = true) {
                 Mostrando ${cierres.length} de ${_cierresState.total} cierres · Página ${_cierresState.pagina + 1}
                </p>` : '';
 
+        const avisoError = errorSupabase
+            ? `<p style="font-size:11px;color:var(--red);margin-bottom:8px;text-align:center;">
+                ⚠️ Sin conexión con la base de datos — mostrando copia local. (${errorSupabase.message || ''})
+               </p>` : '';
+
         resumen.innerHTML = `
             <div style="margin-bottom:18px;">
+                ${avisoError}
                 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
                     <label style="font-size:12px;font-weight:600;color:var(--text-2);">📆 Filtrar por fecha:</label>
                     <input type="date" id="inp-filtro-fecha-cierres"
@@ -1801,10 +1913,11 @@ async function cargarCalendarioCierres(resetPagina = true) {
     cierres.forEach(c => {
         const utClass    = (c.utilidad_neta || 0) >= 0 ? 'color:var(--olive)' : 'color:var(--red)';
         const localBadge = c.local ? `<span style="font-size:9px;color:var(--amber);font-weight:700;"> (local)</span>` : '';
+        const fechaTxt   = _fechaCierreISO(c.fecha);
         const tr = document.createElement('tr');
         tr.className = 'tbody-row';
         tr.innerHTML = `
-            <td class="mono" style="font-size:12.5px;font-weight:600;">${c.fecha}${localBadge}</td>
+            <td class="mono" style="font-size:12.5px;font-weight:600;">${fechaTxt}${localBadge}</td>
             <td class="mono" style="text-align:right;color:var(--olive);font-weight:600;">${formatCOP(c.ingresos || 0)}</td>
             <td class="mono" style="text-align:right;color:var(--red);">${formatCOP(c.egresos || 0)}</td>
             <td class="mono" style="text-align:right;${utClass};font-weight:700;">${formatCOP(c.utilidad_neta || 0)}</td>
@@ -1812,9 +1925,9 @@ async function cargarCalendarioCierres(resetPagina = true) {
             <td class="mono" style="text-align:right;font-size:11.5px;">${formatCOP(c.transferencia || 0)}</td>
             <td class="mono" style="text-align:right;font-size:11.5px;color:var(--amber);">${formatCOP(c.fiado || 0)}</td>
             <td style="text-align:center;">
-                <button onclick="eliminarCierre('${c.id}', '${c.fecha}')" title="Eliminar registro"
+                ${c.local ? '' : `<button onclick="eliminarCierre('${c.id}', '${fechaTxt}')" title="Eliminar registro"
                     style="background:none;border:none;cursor:pointer;color:var(--red);padding:4px 8px;border-radius:6px;opacity:0.7;display:inline-flex;align-items:center;"
-                    onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'"><i data-lucide="trash-2" style="width:16px;height:16px;"></i></button>
+                    onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'"><i data-lucide="trash-2" style="width:16px;height:16px;"></i></button>`}
             </td>`;
         fragment.appendChild(tr);
     });
