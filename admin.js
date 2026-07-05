@@ -2,6 +2,16 @@
 // RESTAURANTE LA 26 — PANEL DE ADMINISTRACIÓN
 // admin.js · Versión 3.7
 // FIXES v3.7 (nuevos):
+//  [CIERRES-MENSUAL] El Calendario de Cierres ahora es estrictamente
+//             mensual: selector de mes (por defecto el actual, hora
+//             Bogotá), tarjetas de acumulados que suman SOLO el mes
+//             visible (cada día 1 arrancan en $0), tabla filtrada al
+//             mes y módulo de estadísticas animado con Anime.js
+//             (Ingresos vs Egresos + tendencia diaria + distribución
+//             de métodos de pago). Sin emojis: iconos Lucide.
+//             Se eliminó la paginación y el filtro por fecha puntual
+//             (el selector de mes los reemplaza). Fix: Toast.err →
+//             Toast.error en eliminarCierre.
 //  [FIX-EGRESOS] Varios cierres quedaron archivados con egresos $0 aunque
 //             sí hubo gastos: el cierre usaba las variables globales en
 //             memoria (globalIngresos/globalEgresos), que quedaban en cero
@@ -1789,7 +1799,63 @@ async function realizarCierre() {
 //     timestamp completo desde la BD.
 //  5. Si la consulta a Supabase falla, ahora se muestra el error
 //     real en la tabla en vez de fallar en silencio.
-const _cierresState = { pagina: 0, limite: 20, total: 0, datos: [], filtroFecha: '' };
+// [v3.7 · CIERRES-MENSUAL] Vista estrictamente mensual:
+//  - Selector de mes estilizado (por defecto, el mes actual hora Bogotá).
+//  - Las tarjetas de acumulados suman SOLO el mes seleccionado, así cada
+//    día 1 los acumulados arrancan automáticamente en $0.
+//  - La tabla solo muestra los cierres del mes visible (recientes primero).
+//  - Módulo de estadísticas animado con Anime.js (contadores y barras).
+const _cierresState = { mes: '', meses: [], datos: [] };
+
+const _MESES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                   'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+// 'YYYY-MM' del mes actual en hora Bogotá
+function _mesActualISO() {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }).slice(0, 7);
+}
+
+// '2026-07' → 'Julio 2026'
+function _labelMes(mesISO) {
+    const [y, m] = (mesISO || '').split('-').map(Number);
+    return `${_MESES_ES[(m || 1) - 1]} ${y || ''}`.trim();
+}
+
+// Rango [primer día, último día] del mes, como fechas 'YYYY-MM-DD'
+function _rangoMes(mesISO) {
+    const [y, m] = mesISO.split('-').map(Number);
+    const ultimoDia = new Date(y, m, 0).getDate();
+    return {
+        ini: `${mesISO}-01`,
+        fin: `${mesISO}-${String(ultimoDia).padStart(2, '0')}`,
+    };
+}
+
+// Lista de meses desde el primer cierre registrado hasta el mes actual
+async function _construirListaMeses() {
+    const actual = _mesActualISO();
+    let primero  = actual;
+    try {
+        const { data } = await supabaseClient
+            .from('historial_cierres')
+            .select('fecha')
+            .order('fecha', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+        if (data && data.fecha) primero = _fechaCierreISO(data.fecha).slice(0, 7);
+    } catch (_) { /* sin conexión: se ofrece solo el mes actual */ }
+
+    const meses = [];
+    let [y, m]     = primero.split('-').map(Number);
+    const [ya, ma] = actual.split('-').map(Number);
+    let guardia = 0;
+    while ((y < ya || (y === ya && m <= ma)) && guardia < 48) {
+        meses.push(`${y}-${String(m).padStart(2, '0')}`);
+        m++; if (m > 12) { m = 1; y++; }
+        guardia++;
+    }
+    _cierresState.meses = meses.reverse();   // más reciente primero
+}
 
 // Normaliza cualquier formato de fecha (Date, timestamp, string) a 'YYYY-MM-DD'
 function _fechaCierreISO(f) {
@@ -1847,167 +1913,349 @@ async function _sincronizarCierresLocales() {
     return pendientes;                   // los que siguen solo en local
 }
 
-async function cargarCalendarioCierres(resetPagina = true) {
+async function cargarCalendarioCierres() {
     const tbody   = document.getElementById('tabla-calendario-cierres');
     const resumen = document.getElementById('resumen-calendario');
+    const statsEl = document.getElementById('estadisticas-mensuales');
     if (!tbody) return;
-
-    if (resetPagina) {
-        _cierresState.pagina = 0;
-        _cierresState.datos  = [];
-    }
 
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-3);">Cargando historial…</td></tr>`;
 
-    // [v3.5] Paso 1: re-sincronizar cierres locales pendientes hacia Supabase.
+    // Paso 1: re-sincronizar cierres locales pendientes hacia Supabase.
     let localesPendientes = [];
     try {
         localesPendientes = await _sincronizarCierresLocales();
     } catch (_) { /* no bloquear la carga por esto */ }
 
-    // [v3.5] Paso 2: consultar Supabase con orden fecha DESC + created_at DESC.
+    // Paso 2: resolver mes seleccionado (por defecto el actual) y lista de meses.
+    if (!_cierresState.mes) _cierresState.mes = _mesActualISO();
+    if (_cierresState.meses.length === 0) await _construirListaMeses();
+    if (!_cierresState.meses.includes(_cierresState.mes)) {
+        _cierresState.meses.push(_cierresState.mes);
+        _cierresState.meses.sort().reverse();
+    }
+    const rango = _rangoMes(_cierresState.mes);
+
+    // Paso 3: consultar SOLO los cierres del mes seleccionado.
     let errorSupabase = null;
     try {
-        let query = supabaseClient
+        const { data, error } = await supabaseClient
             .from('historial_cierres')
-            .select('*', { count: 'exact' })
+            .select('*')
+            .gte('fecha', rango.ini)
+            .lte('fecha', rango.fin)
             .order('fecha',      { ascending: false })
-            .order('created_at', { ascending: false })
-            .range(
-                _cierresState.pagina * _cierresState.limite,
-                (_cierresState.pagina + 1) * _cierresState.limite - 1
-            );
-
-        if (_cierresState.filtroFecha) {
-            query = query.eq('fecha', _cierresState.filtroFecha);
-        }
-
-        const { data, error, count } = await query;
+            .order('created_at', { ascending: false });
         if (error) throw error;
-
-        _cierresState.total = count || 0;
         _cierresState.datos = data || [];
     } catch (err) {
         errorSupabase = err;
-        // Fallback: mostrar lo que haya en localStorage
+        // Fallback: mostrar lo que haya en localStorage (solo el mes visible)
         let todos;
         try { todos = JSON.parse(localStorage.getItem('cierres_local') || '[]'); }
         catch (_) { todos = []; }
-        _cierresState.datos = todos.slice(
-            _cierresState.pagina * _cierresState.limite,
-            (_cierresState.pagina + 1) * _cierresState.limite
+        _cierresState.datos = todos.filter(c =>
+            _fechaCierreISO(c.fecha).slice(0, 7) === _cierresState.mes
         );
-        _cierresState.total = todos.length;
     }
 
-    // [v3.5] Paso 3: mezclar (solo en la página 1 y sin filtro activo) los
-    // cierres que siguen únicamente en local, para que NUNCA queden invisibles.
-    if (!errorSupabase && localesPendientes.length > 0 && _cierresState.pagina === 0) {
+    // Paso 4: mezclar los cierres que siguen solo en local (del mes visible),
+    // para que NUNCA queden invisibles.
+    if (!errorSupabase && localesPendientes.length > 0) {
         const extras = localesPendientes
-            .filter(c => !_cierresState.filtroFecha || _fechaCierreISO(c.fecha) === _cierresState.filtroFecha)
+            .filter(c => _fechaCierreISO(c.fecha).slice(0, 7) === _cierresState.mes)
             .map(c => ({ ...c, local: true }));
         _cierresState.datos = [..._cierresState.datos, ...extras];
-        _cierresState.total += extras.length;
     }
 
-    // [v3.5] Paso 4: garantizar el orden final en el cliente
-    // (fecha DESC, luego created_at DESC), pase lo que pase arriba.
+    // Paso 5: orden final (fecha DESC, luego created_at DESC).
     _cierresState.datos.sort((a, b) => {
         const fa = _fechaCierreISO(a.fecha), fb = _fechaCierreISO(b.fecha);
         if (fa !== fb) return fb.localeCompare(fa);
-        const ca = a.created_at || '', cb = b.created_at || '';
-        return String(cb).localeCompare(String(ca));
+        return String(b.created_at || '').localeCompare(String(a.created_at || ''));
     });
 
-    const cierres = _cierresState.datos;
+    const cierres  = _cierresState.datos;
+    const labelMes = _labelMes(_cierresState.mes);
 
-    if (cierres.length === 0) {
-        tbody.innerHTML = errorSupabase
-            ? `<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--red);">Error al cargar cierres: ${errorSupabase.message || errorSupabase}</td></tr>`
-            : `<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--text-3);">Sin cierres registrados aún.</td></tr>`;
-        if (resumen) resumen.innerHTML = '';
-        return;
-    }
-
-    const totAcc = cierres.reduce((a, c) => ({
+    // Totales del MES visible — cada día 1 arrancan en $0 automáticamente
+    const tot = cierres.reduce((a, c) => ({
         ing: a.ing + (c.ingresos || 0),
         eg:  a.eg  + (c.egresos  || 0),
         ut:  a.ut  + (c.utilidad_neta || 0),
-    }), { ing: 0, eg: 0, ut: 0 });
+        ef:  a.ef  + (c.efectivo || 0),
+        tr:  a.tr  + (c.transferencia || 0),
+        fi:  a.fi  + (c.fiado || 0),
+    }), { ing: 0, eg: 0, ut: 0, ef: 0, tr: 0, fi: 0 });
 
+    // Paso 6: resumen — selector de mes + tarjetas del mes seleccionado.
     if (resumen) {
-        const hayPaginas = _cierresState.total > _cierresState.limite;
-        const labelPag   = hayPaginas
-            ? `<p style="font-size:11px;color:var(--text-3);margin-top:6px;text-align:center;">
-                Mostrando ${cierres.length} de ${_cierresState.total} cierres · Página ${_cierresState.pagina + 1}
+        const avisoError = errorSupabase
+            ? `<p style="font-size:11px;color:var(--red);margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:6px;">
+                <span class="ic ic-sm"><i data-lucide="wifi-off"></i></span>
+                Sin conexión con la base de datos — mostrando copia local. (${errorSupabase.message || ''})
                </p>` : '';
 
-        const avisoError = errorSupabase
-            ? `<p style="font-size:11px;color:var(--red);margin-bottom:8px;text-align:center;">
-                ⚠️ Sin conexión con la base de datos — mostrando copia local. (${errorSupabase.message || ''})
-               </p>` : '';
+        const opcionesMeses = _cierresState.meses.map(m =>
+            `<option value="${m}" ${m === _cierresState.mes ? 'selected' : ''}>${_labelMes(m)}</option>`
+        ).join('');
+
+        const tarjeta = (titulo, icono, id, color, bg, bd) => `
+            <div style="background:${bg};border:1.5px solid ${bd};border-radius:14px;padding:14px;text-align:center;">
+                <p style="font-size:10px;font-weight:700;color:${color};text-transform:uppercase;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:5px;">
+                    <span class="ic ic-sm"><i data-lucide="${icono}"></i></span> ${titulo}
+                </p>
+                <p id="${id}" style="font-size:18px;font-weight:800;color:${color};" class="mono">$ 0</p>
+            </div>`;
 
         resumen.innerHTML = `
             <div style="margin-bottom:18px;">
                 ${avisoError}
                 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
-                    <label style="font-size:12px;font-weight:600;color:var(--text-2);">📆 Filtrar por fecha:</label>
-                    <input type="date" id="inp-filtro-fecha-cierres"
-                        value="${_cierresState.filtroFecha}"
-                        onchange="_aplicarFiltroCierres(this.value)"
-                        style="width:180px;border-radius:999px;padding:5px 14px;font-size:12.5px;height:36px;">
-                    ${_cierresState.filtroFecha
-                        ? `<button onclick="_aplicarFiltroCierres('')" class="btn-ghost" style="font-size:12px;padding:5px 14px;height:36px;">✕ Quitar filtro</button>`
-                        : ''}
+                    <label style="font-size:12px;font-weight:600;color:var(--text-2);display:flex;align-items:center;gap:6px;">
+                        <span class="ic ic-sm"><i data-lucide="calendar"></i></span> Mes contable:
+                    </label>
+                    <select id="sel-mes-cierres" onchange="_cambiarMesCierres(this.value)"
+                        style="min-width:190px;border-radius:999px;padding:5px 16px;font-size:12.5px;height:36px;font-weight:600;color:var(--text-1);background:var(--surface-1);border:1.5px solid var(--border);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                        ${opcionesMeses}
+                    </select>
                     <div style="flex:1;"></div>
-                    ${_cierresState.pagina > 0
-                        ? `<button onclick="_paginaCierres(-1)" class="btn-ghost" style="font-size:12px;padding:5px 14px;height:36px;">← Anterior</button>` : ''}
-                    ${(_cierresState.pagina + 1) * _cierresState.limite < _cierresState.total
-                        ? `<button onclick="_paginaCierres(1)" class="btn-ghost" style="font-size:12px;padding:5px 14px;height:36px;">Siguiente →</button>` : ''}
+                    <span style="font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:5px;">
+                        <span class="ic ic-sm"><i data-lucide="archive"></i></span>
+                        ${cierres.length} cierre${cierres.length !== 1 ? 's' : ''} en ${labelMes}
+                    </span>
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;" class="tables-grid">
-                    <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px;text-align:center;">
-                        <p style="font-size:10px;font-weight:700;color:var(--olive);text-transform:uppercase;margin-bottom:4px;">Ingresos Acumulados</p>
-                        <p style="font-size:18px;font-weight:800;color:var(--olive);" class="mono">${formatCOP(totAcc.ing)}</p>
-                    </div>
-                    <div style="background:var(--red-lt);border:1.5px solid var(--red-bd);border-radius:14px;padding:14px;text-align:center;">
-                        <p style="font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;margin-bottom:4px;">Egresos Acumulados</p>
-                        <p style="font-size:18px;font-weight:800;color:var(--red);" class="mono">${formatCOP(totAcc.eg)}</p>
-                    </div>
-                    <div style="background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.25);border-radius:14px;padding:14px;text-align:center;">
-                        <p style="font-size:10px;font-weight:700;color:var(--blue);text-transform:uppercase;margin-bottom:4px;">Utilidad Acumulada</p>
-                        <p style="font-size:18px;font-weight:800;color:var(--blue);" class="mono">${formatCOP(totAcc.ut)}</p>
-                    </div>
+                    ${tarjeta('Ingresos del Mes', 'trending-up',   'em-card-ing', 'var(--olive)', 'var(--olive-lt)', 'var(--olive-bd)')}
+                    ${tarjeta('Egresos del Mes',  'trending-down', 'em-card-eg',  'var(--red)',   'var(--red-lt)',   'var(--red-bd)')}
+                    ${tarjeta('Utilidad del Mes', 'wallet',        'em-card-ut',  'var(--blue)',  'var(--blue-lt)',  'rgba(37,99,168,.25)')}
                 </div>
-                ${labelPag}
             </div>`;
     }
 
-    const fragment = document.createDocumentFragment();
-    cierres.forEach(c => {
-        const utClass    = (c.utilidad_neta || 0) >= 0 ? 'color:var(--olive)' : 'color:var(--red)';
-        const localBadge = c.local ? `<span style="font-size:9px;color:var(--amber);font-weight:700;"> (local)</span>` : '';
-        const fechaTxt   = _fechaCierreISO(c.fecha);
-        const tr = document.createElement('tr');
-        tr.className = 'tbody-row';
-        tr.innerHTML = `
-            <td class="mono" style="font-size:12.5px;font-weight:600;">${fechaTxt}${localBadge}</td>
-            <td class="mono" style="text-align:right;color:var(--olive);font-weight:600;">${formatCOP(c.ingresos || 0)}</td>
-            <td class="mono" style="text-align:right;color:var(--red);">${formatCOP(c.egresos || 0)}</td>
-            <td class="mono" style="text-align:right;${utClass};font-weight:700;">${formatCOP(c.utilidad_neta || 0)}</td>
-            <td class="mono" style="text-align:right;font-size:11.5px;">${formatCOP(c.efectivo || 0)}</td>
-            <td class="mono" style="text-align:right;font-size:11.5px;">${formatCOP(c.transferencia || 0)}</td>
-            <td class="mono" style="text-align:right;font-size:11.5px;color:var(--amber);">${formatCOP(c.fiado || 0)}</td>
-            <td style="text-align:center;">
-                ${c.local ? '' : `<button onclick="eliminarCierre('${c.id}', '${fechaTxt}')" title="Eliminar registro"
-                    style="background:none;border:none;cursor:pointer;color:var(--red);padding:4px 8px;border-radius:6px;opacity:0.7;display:inline-flex;align-items:center;"
-                    onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'"><i data-lucide="trash-2" style="width:16px;height:16px;"></i></button>`}
-            </td>`;
-        fragment.appendChild(tr);
-    });
-    tbody.innerHTML = '';
-    tbody.appendChild(fragment);
+    // Paso 7: módulo de estadísticas del mes.
+    if (statsEl) statsEl.innerHTML = _htmlEstadisticasMes(cierres, tot, labelMes);
+
+    // Paso 8: tabla de ciclos contables del mes.
+    if (cierres.length === 0) {
+        tbody.innerHTML = errorSupabase
+            ? `<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--red);">Error al cargar cierres: ${errorSupabase.message || errorSupabase}</td></tr>`
+            : `<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--text-3);">Sin cierres registrados en ${labelMes}.</td></tr>`;
+    } else {
+        const fragment = document.createDocumentFragment();
+        cierres.forEach(c => {
+            const utClass    = (c.utilidad_neta || 0) >= 0 ? 'color:var(--olive)' : 'color:var(--red)';
+            const localBadge = c.local ? `<span style="font-size:9px;color:var(--amber);font-weight:700;"> (local)</span>` : '';
+            const fechaTxt   = _fechaCierreISO(c.fecha);
+            const tr = document.createElement('tr');
+            tr.className = 'tbody-row';
+            tr.innerHTML = `
+                <td class="mono" style="font-size:12.5px;font-weight:600;">${fechaTxt}${localBadge}</td>
+                <td class="mono" style="text-align:right;color:var(--olive);font-weight:600;">${formatCOP(c.ingresos || 0)}</td>
+                <td class="mono" style="text-align:right;color:var(--red);">${formatCOP(c.egresos || 0)}</td>
+                <td class="mono" style="text-align:right;${utClass};font-weight:700;">${formatCOP(c.utilidad_neta || 0)}</td>
+                <td class="mono" style="text-align:right;font-size:11.5px;">${formatCOP(c.efectivo || 0)}</td>
+                <td class="mono" style="text-align:right;font-size:11.5px;">${formatCOP(c.transferencia || 0)}</td>
+                <td class="mono" style="text-align:right;font-size:11.5px;color:var(--amber);">${formatCOP(c.fiado || 0)}</td>
+                <td style="text-align:center;">
+                    ${c.local ? '' : `<button onclick="eliminarCierre('${c.id}', '${fechaTxt}')" title="Eliminar registro"
+                        style="background:none;border:none;cursor:pointer;color:var(--red);padding:4px 8px;border-radius:6px;opacity:0.7;display:inline-flex;align-items:center;"
+                        onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'"><i data-lucide="trash-2" style="width:16px;height:16px;"></i></button>`}
+                </td>`;
+            fragment.appendChild(tr);
+        });
+        tbody.innerHTML = '';
+        tbody.appendChild(fragment);
+    }
+
     if (window.lucide) lucide.createIcons();
+
+    // Paso 9: animar contadores y barras con Anime.js.
+    _animarEstadisticasMes(tot);
+}
+
+// Cambio de mes desde el desplegable
+function _cambiarMesCierres(mes) {
+    _cierresState.mes = mes;
+    cargarCalendarioCierres();
+}
+
+// ── Módulo de estadísticas mensuales ───────────────────────────
+// Construye el HTML: comparativo Ingresos vs Egresos (totales +
+// tendencia diaria con barras) y distribución de métodos de pago.
+// Los valores animables llevan data-atributos que _animarEstadisticasMes
+// usa como objetivo (las barras nacen en 0 y crecen a su valor real).
+function _htmlEstadisticasMes(cierres, tot, labelMes) {
+    if (cierres.length === 0) {
+        return `
+        <div class="card" style="text-align:center;padding:32px;color:var(--text-3);font-size:12.5px;">
+            <span class="ic ic-md" style="display:inline-flex;margin-bottom:6px;"><i data-lucide="bar-chart-3"></i></span>
+            <p>Sin datos para estadísticas en ${labelMes}.</p>
+        </div>`;
+    }
+
+    // — Tendencia diaria: agrupar por fecha (puede haber 2 cierres un día) —
+    const porDia = {};
+    cierres.forEach(c => {
+        const f = _fechaCierreISO(c.fecha);
+        if (!porDia[f]) porDia[f] = { ing: 0, eg: 0 };
+        porDia[f].ing += c.ingresos || 0;
+        porDia[f].eg  += c.egresos  || 0;
+    });
+    const dias   = Object.keys(porDia).sort();
+    const maxDia = Math.max(1, ...dias.map(d => Math.max(porDia[d].ing, porDia[d].eg)));
+    const ALTO   = 140;
+
+    const barrasDias = dias.map(d => {
+        const hIng = Math.max(3, Math.round(porDia[d].ing / maxDia * ALTO));
+        const hEg  = porDia[d].eg > 0 ? Math.max(3, Math.round(porDia[d].eg / maxDia * ALTO)) : 0;
+        return `
+        <div style="display:flex;flex-direction:column;align-items:center;gap:5px;flex:1;min-width:24px;"
+             title="${d} — Ingresos: ${formatCOP(porDia[d].ing)} · Egresos: ${formatCOP(porDia[d].eg)}">
+            <div style="display:flex;align-items:flex-end;gap:3px;height:${ALTO}px;">
+                <div class="em-bar-dia" data-h="${hIng}" style="width:9px;height:0;border-radius:4px 4px 0 0;background:var(--olive);"></div>
+                <div class="em-bar-dia" data-h="${hEg}"  style="width:9px;height:0;border-radius:4px 4px 0 0;background:var(--red);opacity:.85;"></div>
+            </div>
+            <span class="mono" style="font-size:9.5px;color:var(--text-3);">${d.slice(8)}</span>
+        </div>`;
+    }).join('');
+
+    // — Comparativo de totales del mes (barras horizontales) —
+    const maxTot = Math.max(1, tot.ing, tot.eg);
+    const barraTotal = (etiqueta, valor, color, id) => `
+        <div style="margin-bottom:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <span style="font-size:11.5px;font-weight:600;color:var(--text-2);">${etiqueta}</span>
+                <span class="mono em-contador" id="${id}" data-valor="${Math.round(valor)}"
+                    style="font-size:12px;font-weight:700;color:${color};">$ 0</span>
+            </div>
+            <div style="height:12px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border);overflow:hidden;">
+                <div class="em-bar-h" data-w="${Math.round(valor / maxTot * 100)}"
+                    style="height:100%;width:0;border-radius:999px;background:${color};"></div>
+            </div>
+        </div>`;
+
+    // — Distribución de métodos de pago —
+    const sumPagos = tot.ef + tot.tr + tot.fi;
+    const pct = v => sumPagos > 0 ? Math.round(v / sumPagos * 100) : 0;
+    const filaPago = (icono, nombre, valor, color) => `
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="ic ic-sm" style="color:${color};"><i data-lucide="${icono}"></i></span>
+                <span style="font-size:12px;font-weight:600;color:var(--text-2);flex:1;">${nombre}</span>
+                <span class="mono em-contador" data-valor="${Math.round(valor)}"
+                    style="font-size:12.5px;font-weight:700;color:${color};">$ 0</span>
+                <span class="mono" style="font-size:11px;color:var(--text-3);min-width:36px;text-align:right;">${pct(valor)}%</span>
+            </div>
+            <div style="height:10px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border);overflow:hidden;">
+                <div class="em-bar-h" data-w="${pct(valor)}"
+                    style="height:100%;width:0;border-radius:999px;background:${color};"></div>
+            </div>
+        </div>`;
+
+    return `
+    <div class="card">
+        <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;margin-bottom:20px;">
+            <span class="ic ic-md" style="color:var(--blue);"><i data-lucide="bar-chart-3"></i></span>
+            Estadísticas de ${labelMes}
+        </h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:28px;">
+            <div>
+                <p style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+                    <span class="ic ic-sm"><i data-lucide="scale"></i></span> Ingresos vs Egresos
+                </p>
+                ${barraTotal('Ingresos', tot.ing, 'var(--olive)', 'em-total-ing')}
+                ${barraTotal('Egresos',  tot.eg,  'var(--red)',   'em-total-eg')}
+                <p style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin:18px 0 10px;display:flex;align-items:center;gap:6px;">
+                    <span class="ic ic-sm"><i data-lucide="activity"></i></span> Tendencia diaria
+                </p>
+                <div style="display:flex;align-items:flex-end;gap:4px;overflow-x:auto;padding:4px 2px 0;">
+                    ${barrasDias}
+                </div>
+                <div style="display:flex;gap:16px;margin-top:10px;">
+                    <span style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--text-3);">
+                        <span style="width:9px;height:9px;border-radius:3px;background:var(--olive);display:inline-block;"></span> Ingresos
+                    </span>
+                    <span style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--text-3);">
+                        <span style="width:9px;height:9px;border-radius:3px;background:var(--red);display:inline-block;"></span> Egresos
+                    </span>
+                </div>
+            </div>
+            <div>
+                <p style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+                    <span class="ic ic-sm"><i data-lucide="credit-card"></i></span> Distribución de Métodos de Pago
+                </p>
+                ${filaPago('banknote',   'Efectivo',      tot.ef, 'var(--olive)')}
+                ${filaPago('smartphone', 'Transferencia', tot.tr, 'var(--blue)')}
+                ${filaPago('handshake',  'Fiado',         tot.fi, 'var(--amber)')}
+            </div>
+        </div>
+    </div>`;
+}
+
+// Anima contadores y barras con Anime.js. Si el CDN no cargó,
+// pinta los valores finales directamente (la información nunca
+// depende de la animación).
+function _animarEstadisticasMes(tot) {
+    const tarjetas = [
+        { id: 'em-card-ing', val: tot.ing },
+        { id: 'em-card-eg',  val: tot.eg  },
+        { id: 'em-card-ut',  val: tot.ut  },
+    ];
+
+    if (!window.anime) {
+        tarjetas.forEach(t => {
+            const el = document.getElementById(t.id);
+            if (el) el.textContent = formatCOP(t.val);
+        });
+        document.querySelectorAll('.em-contador').forEach(el => {
+            el.textContent = formatCOP(parseFloat(el.dataset.valor) || 0);
+        });
+        document.querySelectorAll('.em-bar-h').forEach(el => {
+            el.style.width = (el.dataset.w || 0) + '%';
+        });
+        document.querySelectorAll('.em-bar-dia').forEach(el => {
+            el.style.height = (el.dataset.h || 0) + 'px';
+        });
+        return;
+    }
+
+    // Contadores de las tarjetas superiores
+    tarjetas.forEach(t => {
+        const el = document.getElementById(t.id);
+        if (!el) return;
+        const obj = { v: 0 };
+        anime({
+            targets: obj, v: t.val, round: 1,
+            duration: 1100, easing: 'easeOutExpo',
+            update: () => { el.textContent = formatCOP(obj.v); },
+        });
+    });
+
+    // Contadores de montos (comparativo y métodos de pago)
+    document.querySelectorAll('.em-contador').forEach(el => {
+        const objetivo = parseFloat(el.dataset.valor) || 0;
+        const obj = { v: 0 };
+        anime({
+            targets: obj, v: objetivo, round: 1,
+            duration: 1100, easing: 'easeOutExpo',
+            update: () => { el.textContent = formatCOP(obj.v); },
+        });
+    });
+
+    // Barras horizontales: crecen hasta su porcentaje
+    anime({
+        targets: '.em-bar-h',
+        width: el => (el.dataset.w || 0) + '%',
+        duration: 900, delay: anime.stagger(90), easing: 'easeOutCubic',
+    });
+
+    // Barras de la tendencia diaria: suben escalonadas
+    anime({
+        targets: '.em-bar-dia',
+        height: el => (el.dataset.h || 0) + 'px',
+        duration: 800, delay: anime.stagger(18), easing: 'easeOutCubic',
+    });
 }
 
 async function eliminarCierre(id, fecha) {
@@ -2016,21 +2264,11 @@ async function eliminarCierre(id, fecha) {
         const { error } = await supabaseClient.from('historial_cierres').delete().eq('id', id);
         if (error) throw error;
         Toast.ok('Registro eliminado.');
-        cargarCalendarioCierres(false);
+        cargarCalendarioCierres();
     } catch (err) {
-        Toast.err('Error al eliminar: ' + err.message);
+        // [v3.7] Toast.err no existía (era Toast.error) — el error fallaba en silencio
+        Toast.error('Error al eliminar: ' + err.message);
     }
-}
-
-function _aplicarFiltroCierres(fecha) {
-    _cierresState.filtroFecha = fecha;
-    cargarCalendarioCierres(true);
-}
-
-function _paginaCierres(delta) {
-    const maxPag = Math.ceil(_cierresState.total / _cierresState.limite) - 1;
-    _cierresState.pagina = Math.max(0, Math.min(_cierresState.pagina + delta, maxPag));
-    cargarCalendarioCierres(false);
 }
 
 // ============================================================
