@@ -1,6 +1,21 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE ADMINISTRACIÓN
-// admin.js · Versión 3.6
+// admin.js · Versión 3.7
+// FIXES v3.7 (nuevos):
+//  [FIX-EGRESOS] Varios cierres quedaron archivados con egresos $0 aunque
+//             sí hubo gastos: el cierre usaba las variables globales en
+//             memoria (globalIngresos/globalEgresos), que quedaban en cero
+//             si no se visitaba el Dashboard/Gastos en esa sesión. Ahora:
+//             1. ejecutarCierreCaja() refresca SIEMPRE desde la BD antes
+//                de calcular el informe Z (await cargarDashboardReal()).
+//             2. realizarCierre() avisa si ya existe un cierre para hoy
+//                (confirmación explícita — no bloquea el doble cierre
+//                intencional, p. ej. recuperar un día olvidado).
+//             3. cargarGastosReal() usa el mismo corte del último cierre
+//                que el Dashboard (_resolverInicioDiaEfectivo), para que
+//                ambas pestañas no se pisen globalEgresos entre sí.
+//             4. Al registrar un gasto se confirma con toast verde; si el
+//                insert falla se muestra el error REAL en pantalla.
 // FIXES v3.6 (nuevos):
 //  [FIX-PEDIDOS] La pantalla "Pedidos" salía vacía por la noche: el
 //             cálculo de la fecha del día tenía el signo de zona horaria
@@ -1385,7 +1400,11 @@ async function cargarGastosReal() {
         const _yyyy2     = _hoyL2.getUTCFullYear();
         const _mm2       = String(_hoyL2.getUTCMonth() + 1).padStart(2, '0');
         const _dd2       = String(_hoyL2.getUTCDate()).padStart(2, '0');
-        const _ini2      = `${_yyyy2}-${_mm2}-${_dd2}T00:00:00-05:00`;
+        // [v3.7 · FIX-EGRESOS] Usar el mismo corte del último cierre que usa
+        // el Dashboard. Antes esta pestaña contaba el día completo mientras
+        // el Dashboard contaba desde el último cierre: dos ventanas distintas
+        // sobrescribiendo la misma variable globalEgresos.
+        const _ini2      = _resolverInicioDiaEfectivo(`${_yyyy2}-${_mm2}-${_dd2}T00:00:00-05:00`);
         const _fin2      = `${_yyyy2}-${_mm2}-${_dd2}T23:59:59-05:00`;
 
         const { data: egresos, error } = await supabaseClient
@@ -1450,10 +1469,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     .insert([{ expense_type, description, amount }]);
                 if (error) throw error;
                 formGasto.reset();
+                Toast.ok(`Salida de ${formatCOP(amount)} registrada correctamente.`);
                 cargarGastosReal();
             } catch (err) {
                 console.error('Error insertando gasto:', err);
-                Toast.error('Error al registrar el movimiento contable.');
+                // [v3.7 · FIX-EGRESOS] Mostrar el motivo real del fallo para
+                // que un error de permisos/red no pase desapercibido y el
+                // gasto no se pierda sin que nadie lo note.
+                Toast.error(`No se guardó el gasto: ${err.message || 'error desconocido'}. Verifica e inténtalo de nuevo.`, 8000);
             }
         });
     }
@@ -1599,6 +1622,13 @@ async function eliminarInsumoReal(idInsumo, nombreInsumo) {
 // 6. CIERRE DE CAJA INTELIGENTE — INFORME Z
 // ============================================================
 async function ejecutarCierreCaja() {
+    // [v3.7 · FIX-EGRESOS] Refrescar SIEMPRE ingresos y egresos desde la
+    // base de datos antes de calcular el informe Z. Antes el cierre usaba
+    // las variables globales en memoria, que podían estar en cero o viejas
+    // si no se había visitado el Dashboard o la pestaña de Gastos en esa
+    // sesión — por eso varios cierres quedaron archivados con egresos $0.
+    await cargarDashboardReal();
+
     const baseReteICA  = Math.max(0, globalIngresos - globalEgresos);
     const totalICA     = baseReteICA * TASA_RETE_ICA;
     const ivaConsumo   = globalIngresos * TASA_IMPOCONSUMO;
@@ -1632,11 +1662,27 @@ function cerrarModalCierre() {
 }
 
 async function realizarCierre() {
+    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+
+    // [v3.7 · FIX-EGRESOS] Aviso de cierre duplicado: si ya existe un cierre
+    // archivado con la fecha de hoy se pide confirmación explícita, para que
+    // un doble cierre sea siempre intencional (p. ej. recuperar el cierre
+    // olvidado del día anterior) y nunca un accidente. No bloquea nada.
+    try {
+        const { data: previos } = await supabaseClient
+            .from('historial_cierres')
+            .select('id')
+            .eq('fecha', hoy);
+        if (previos && previos.length > 0) {
+            const seguir = confirm(`⚠️ Ya existe un cierre archivado para ${hoy}.\n\n¿Seguro que quieres registrar OTRO cierre para la misma fecha?`);
+            if (!seguir) return;
+        }
+    } catch (_) { /* si la verificación falla, se continúa con el cierre normal */ }
+
     const baseReteICA  = Math.max(0, globalIngresos - globalEgresos);
     const totalICA     = baseReteICA * TASA_RETE_ICA;
     const ivaConsumo   = globalIngresos * TASA_IMPOCONSUMO;
     const utilidadNeta = globalIngresos - globalEgresos - totalICA;
-    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
     const cierrePayload = {
         fecha:         hoy,
         ingresos:      Math.round(globalIngresos),
