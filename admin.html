@@ -612,8 +612,8 @@
                 display: none;
             }
 
-            @media (max-width: 768px) {
-                aside {
+            @media (max-width: 1024px) {
+                #admin-sidebar {
                     display: none !important;
                 }
 
@@ -653,7 +653,7 @@
                     min-width: 0 !important;
                     max-width: 100% !important;
                     padding: 14px !important;
-                    padding-bottom: 90px !important;
+                    padding-bottom: 192px !important;
                     overflow-x: hidden !important;
                     box-sizing: border-box !important;
                 }
@@ -710,7 +710,10 @@
                 }
 
                 #bottom-nav {
-                    display: flex;
+                    display: grid;
+                    grid-template-columns: repeat(5, minmax(0, 1fr));
+                    grid-auto-rows: minmax(48px, auto);
+                    align-content: center;
                     position: fixed;
                     bottom: 0;
                     left: 0;
@@ -718,15 +721,13 @@
                     z-index: 9000;
                     background: var(--surface);
                     border-top: 1.5px solid var(--border);
-                    padding: 0;
-                    padding-bottom: env(safe-area-inset-bottom, 0px);
+                    padding: 6px 5px calc(6px + env(safe-area-inset-bottom, 0px));
                     box-shadow: 0 -4px 20px rgba(26, 31, 24, 0.08);
-                    height: 66px;
-                    align-items: stretch;
-                    overflow-x: auto;
+                    height: auto;
+                    max-height: calc(100dvh - 52px);
+                    overflow-x: hidden;
                     overflow-y: hidden;
-                    -webkit-overflow-scrolling: touch;
-                    scrollbar-width: none;
+                    box-sizing: border-box;
                 }
 
                 #bottom-nav::-webkit-scrollbar {
@@ -734,14 +735,15 @@
                 }
 
                 .bnav-item {
-                    flex: 0 0 72px;
-                    min-width: 72px;
+                    min-width: 0;
+                    width: 100%;
+                    min-height: 48px;
                     display: flex;
                     flex-direction: column;
                     align-items: center;
                     justify-content: center;
                     gap: 3px;
-                    padding: 8px 4px;
+                    padding: 5px 2px;
                     cursor: pointer;
                     border: none;
                     background: transparent;
@@ -788,7 +790,10 @@
                     font-size: 9.5px;
                     font-weight: 600;
                     letter-spacing: .2px;
-                    white-space: nowrap;
+                    line-height: 1.05;
+                    text-align: center;
+                    white-space: normal;
+                    overflow-wrap: anywhere;
                 }
 
                 .kpi-card {
@@ -814,6 +819,16 @@
             @media (max-width: 400px) {
                 #contenedor-slots-menu {
                     grid-template-columns: 1fr !important;
+                }
+            }
+
+            @media (max-width: 520px) {
+                #bottom-nav {
+                    grid-template-columns: repeat(4, minmax(0, 1fr));
+                }
+
+                main {
+                    padding-bottom: 248px !important;
                 }
             }
 

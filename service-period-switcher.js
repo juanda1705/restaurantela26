@@ -72,11 +72,14 @@
                 .service-period-dock { bottom:calc(10px + env(safe-area-inset-bottom, 0px)); width:calc(100vw - 20px); max-width:460px; justify-content:space-between; padding:7px; border-radius:16px; }
                 .service-period-dock__status { min-width:0; padding-left:7px; font-size:11px; }
                 .service-period-dock__button { flex:1; min-width:0; min-height:50px; padding:0 12px; font-size:14px; }
-                body.service-period-has-bottom-nav .service-period-dock { bottom:calc(78px + env(safe-area-inset-bottom, 0px)); }
+                body.service-period-has-bottom-nav .service-period-dock { bottom:calc(118px + env(safe-area-inset-bottom, 0px)); }
+            }
+            @media (max-width:520px) {
+                body.service-period-has-bottom-nav .service-period-dock { bottom:calc(166px + env(safe-area-inset-bottom, 0px)); }
             }
             @media (min-width:761px) and (max-width:1180px) {
                 .service-period-dock { bottom:16px; max-width:500px; }
-                body.service-period-has-bottom-nav .service-period-dock { bottom:88px; }
+                body.service-period-has-bottom-nav .service-period-dock { bottom:118px; }
             }
             @media (min-width:769px) {
                 .service-period-dock--sidebar { position:sticky; left:auto; bottom:0; transform:none; z-index:2; width:100%; max-width:none; display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:auto; padding:10px; border-radius:14px; box-shadow:0 -6px 14px rgba(15,25,17,.06); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); }
@@ -154,7 +157,7 @@
 
     function placeDock() {
         if (!dock) return;
-        const useSidebar = Boolean(adminSidebar && window.innerWidth > 768);
+        const useSidebar = Boolean(adminSidebar && window.innerWidth > 1024);
         dock.classList.toggle('service-period-dock--sidebar', useSidebar);
         const target = useSidebar ? adminSidebar : document.body;
         if (dock.parentElement !== target) target.appendChild(dock);
