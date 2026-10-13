@@ -3,24 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Restaurante la 26 — Sistema Interno</title>
-    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="icon" type="image/svg+xml" href="favicon-la26.svg?v=13">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
     <style>
         /* ══════════════════════════════════════════
            VARIABLES Y RESET
         ══════════════════════════════════════════ */
         :root {
-            --oliva:       #4a5a28;
-            --oliva-lt:    #5c7032;
-            --oliva-pale:  #eef1e6;
-            --oliva-bd:    #c8d4a8;
-            --crema:       #faf9f6;
+            --oliva:       #096b3a;
+            --oliva-lt:    #0b7d45;
+            --oliva-pale:  #eaf4ed;
+            --oliva-bd:    #b8d8c1;
+            --crema:       #fbfaf7;
             --ink:         #1a1a17;
             --ink-mid:     #3d3d38;
             --ink-muted:   #7a7a72;
@@ -135,6 +138,25 @@
             padding: 44px 40px 40px;
             width: 100%; max-width: 400px;
         }
+        /* Transición de acceso: confirma el perfil y acompaña la carga sin cambiar la autenticación. */
+        .auth-transition[hidden] { display:none; }
+        .auth-transition { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; padding:24px; background:rgba(10,31,20,.72); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); opacity:0; transition:opacity .28s ease; }
+        .auth-transition.is-visible { opacity:1; }
+        .auth-transition-card { width:min(100%,390px); padding:38px 32px 30px; border:1px solid rgba(255,255,255,.58); border-radius:28px; background:linear-gradient(155deg,#fff 0%,#fbfaf7 100%); box-shadow:0 34px 100px rgba(0,0,0,.28); text-align:center; transform:translateY(12px) scale(.97); transition:transform .4s cubic-bezier(.2,.8,.2,1); }
+        .auth-transition.is-visible .auth-transition-card { transform:translateY(0) scale(1); }
+        .auth-logo-wrap { position:relative; width:112px; height:112px; margin:0 auto 22px; display:grid; place-items:center; }
+        .auth-logo-wrap img { position:relative; z-index:1; width:82px; height:82px; object-fit:contain; border-radius:0; background:transparent; box-shadow:none; animation:auth-logo-breathe 1.8s ease-in-out infinite; }
+        .auth-logo-orbit { position:absolute; inset:2px; border:1px solid rgba(9,107,58,.18); border-top-color:#ed5b2a; border-right-color:#096b3a; border-radius:50%; animation:auth-orbit 1.25s linear infinite; }
+        .auth-eyebrow { color:#096b3a; font-size:11px; font-weight:700; letter-spacing:.18em; text-transform:uppercase; }
+        #auth-transition-title { margin:7px 0 4px; color:#20231f; font:400 clamp(1.8rem,7vw,2.25rem)/1.1 'Cormorant Garamond',Georgia,serif; }
+        .auth-transition-detail { color:#646b63; font-size:14px; }
+        .auth-progress { height:4px; margin:24px 0 15px; overflow:hidden; border-radius:99px; background:#e7eee8; }
+        .auth-progress span { display:block; width:42%; height:100%; border-radius:inherit; background:linear-gradient(90deg,#096b3a,#28a15e,#ed5b2a); animation:auth-progress 1.25s cubic-bezier(.35,0,.3,1) infinite; }
+        .auth-status { display:inline-flex; align-items:center; gap:7px; color:#838980; font-size:11px; letter-spacing:.04em; }
+        .auth-status i { width:7px; height:7px; border-radius:50%; background:#ed5b2a; box-shadow:0 0 0 4px rgba(237,91,42,.1); animation:pulse 1s ease-in-out infinite; }
+        @keyframes auth-orbit { to { transform:rotate(360deg); } }
+        @keyframes auth-logo-breathe { 0%,100% { transform:scale(1); } 50% { transform:scale(1.035); } }
+        @keyframes auth-progress { from { transform:translateX(-110%); } to { transform:translateX(245%); } }
         .login-card.shake { animation: shake 0.4s ease; }
 
         .rule-oliva {
@@ -257,9 +279,8 @@
             padding:4px 10px; border-radius:9999px; font-size:12px; font-weight:500;
             background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15);
         }
-        .stat-chip.pending   { background:rgba(217,119,6,0.25); border-color:rgba(217,119,6,0.4);  color:#fcd34d; }
-        .stat-chip.preparing { background:rgba(37,99,235,0.25);  border-color:rgba(37,99,235,0.4);  color:#93c5fd; }
-        .stat-chip.delivered { background:rgba(74,90,40,0.3);    border-color:rgba(200,212,168,0.4); color:var(--oliva-bd); }
+        .stat-chip.pending   { background:rgba(237,91,42,0.15); border-color:rgba(237,91,42,0.35); color:#ffc0a7; }
+        .stat-chip.delivered { background:rgba(134,164,143,0.13); border-color:rgba(169,196,176,0.28); color:#c7d9cb; }
 
         .btn-logout-dark {
             padding:5px 13px; border-radius:9999px; font-size:12px; font-weight:500;
@@ -330,8 +351,8 @@
             font-size:10px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
             border:1px solid; white-space:nowrap;
         }
-        .status-badge.pending    { background:rgba(217,119,6,0.09);  border-color:rgba(217,119,6,0.28);  color:#b45309; }
-        .status-badge.confirmed  { background:rgba(37,99,235,0.08);  border-color:rgba(37,99,235,0.25);  color:#1d4ed8; }
+        .status-badge.pending    { background:rgba(237,91,42,0.08); border-color:rgba(237,91,42,0.27); color:#b84a25; }
+        .status-badge.confirmed  { background:rgba(82,111,91,0.08); border-color:rgba(82,111,91,0.25); color:#385744; }
         .status-badge.in_kitchen { background:rgba(74,90,40,0.09);   border-color:rgba(74,90,40,0.28);   color:#4a5a28; }
 
         .mesa-tag {
@@ -373,10 +394,8 @@
             cursor:pointer; transition:all 0.2s; border:none;
             display:flex; align-items:center; justify-content:center; gap:6px;
         }
-        .btn-kitchen.en-cocina  { background:#ea580c; color:#fff; }
-        .btn-kitchen.en-cocina:hover  { background:#c2410c; }
-        .btn-kitchen.despachar  { background:#059669; color:#fff; box-shadow:0 3px 12px rgba(5,150,105,0.3); }
-        .btn-kitchen.despachar:hover  { background:#047857; }
+        .btn-kitchen.despachar  { background:#174b33; color:#fff; box-shadow:0 3px 10px rgba(23,75,51,0.14); }
+        .btn-kitchen.despachar:hover  { background:#103c29; }
 
         /* ── Historial cocina ── */
         .hist-card { background:#fff; border:1.5px solid #e5e7eb; border-radius:14px; overflow:hidden; margin-bottom:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); opacity:0.88; }
@@ -443,13 +462,376 @@
         #btn-toggle-pass svg      { width:16px; height:16px; }
         .empty-icon svg           { width:2.8rem; height:2.8rem; }
 
-        @media (max-width:600px) {
-            .login-card { padding:34px 22px 30px; }
-            .orders-grid { grid-template-columns:1fr; }
-            .nav-tabs .nav-tab:not(.active) { display:none; }
-            #bar-cocina .stat-chip { display:none; }
+        /* Login inspirado en la identidad de Restaurante la 26. */
+        #screen-login {
+            display:grid;
+            grid-template-columns:minmax(360px,45%) minmax(0,55%);
+            grid-template-rows:1fr auto;
+            align-items:center;
+            justify-items:stretch;
+            min-height:100vh;
+            min-height:100svh;
+            padding:0;
+            gap:0;
+            background:#f4f1e9;
         }
-    </style>
+        .login-brand-panel {
+            grid-column:1;
+            grid-row:1 / 3;
+            align-self:stretch;
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            justify-content:center;
+            width:100%;
+            min-height:100vh;
+            min-height:100svh;
+            padding:clamp(36px,6vw,96px);
+            margin:0 !important;
+            position:relative;
+            overflow:hidden;
+            isolation:isolate;
+            background:#14271e;
+        }
+        .login-brand-panel::before {
+            content:'';
+            position:absolute;
+            z-index:-1;
+            inset:0;
+            opacity:.35;
+            background:radial-gradient(ellipse at 50% 42%,rgba(123,143,118,.22),transparent 56%),repeating-linear-gradient(135deg,transparent 0 42px,rgba(255,255,255,.018) 43px 44px);
+        }
+        .login-brand-panel > div:first-child {
+            position:relative;
+            margin-bottom:34px !important;
+        }
+        .login-brand-panel img {
+            position:relative;
+            z-index:1;
+            display:block;
+            width:clamp(220px,24vw,320px) !important;
+            height:clamp(220px,29vw,370px) !important;
+            object-fit:contain !important;
+            margin:0 auto !important;
+            animation:logo-arrive .9s cubic-bezier(.2,.8,.2,1) both;
+        }
+        #screen-login h1 {
+            max-width:100%;
+            color:#f5f1e8 !important;
+            font-family:'Archivo Black','Arial Black',sans-serif !important;
+            font-size:clamp(2rem,3.6vw,3.4rem) !important;
+            font-weight:400 !important;
+            text-transform:uppercase;
+            letter-spacing:-.035em !important;
+            line-height:1.05 !important;
+        }
+        #screen-login h1 span {
+            display:block;
+            color:#ed5b2a !important;
+            font-style:normal !important;
+        }
+        .login-brand-panel > p {
+            color:#c1c5bd !important;
+            font-size:11px !important;
+            font-weight:600 !important;
+            letter-spacing:.16em !important;
+        }
+        #login-card {
+            grid-column:2;
+            grid-row:1;
+            justify-self:center;
+            align-self:center;
+            width:min(calc(100% - 72px),740px);
+            max-width:740px;
+            margin:42px 0 22px;
+            padding:clamp(48px,4.2vw,80px);
+            border:0;
+            border-radius:28px;
+            background:#fcfbf8;
+            box-shadow:0 24px 70px rgba(47,43,33,.07),0 2px 8px rgba(47,43,33,.02);
+            overflow:visible;
+        }
+        #login-card::before { content:none; }
+        #login-card > div:first-child {
+            margin-bottom:36px !important;
+            text-align:left !important;
+        }
+        #login-card .rule-oliva { display:none; }
+        #login-card h2 {
+            margin:0 0 8px !important;
+            color:#ed5b2a !important;
+            font-family:'Archivo Black','Arial Black',sans-serif !important;
+            font-size:clamp(2rem,3.6vw,2.7rem) !important;
+            font-weight:400 !important;
+            letter-spacing:-.035em !important;
+            line-height:1.08 !important;
+        }
+        #login-card > div:first-child p {
+            color:#657168 !important;
+            font-size:15px !important;
+            font-weight:500 !important;
+        }
+        #form-login { gap:10px !important; }
+        .auth-field-label {
+            margin:7px 0 -3px;
+            color:#695744;
+            font-size:10px;
+            font-weight:700;
+            letter-spacing:.13em;
+            text-transform:uppercase;
+        }
+        #login-card input.input-auth {
+            min-height:56px;
+            padding:15px 18px;
+            border:0;
+            border-bottom:2px solid #d7dfd8;
+            border-radius:8px 8px 2px 2px;
+            background:#f4f6f2;
+            color:#26362b;
+            font-size:15px;
+            font-weight:500;
+        }
+        #login-card input.input-auth::placeholder { color:#b39f88; }
+        #login-card input.input-auth:focus {
+            border-bottom-color:#096b3a;
+            box-shadow:0 2px 0 rgba(9,107,58,.12);
+        }
+        #login-card input.input-auth.field-error {
+            border-bottom-color:#c0392b;
+            box-shadow:0 2px 0 rgba(192,57,43,.12);
+        }
+        #btn-toggle-pass { right:16px !important; color:#52715e !important; }
+        #login-card .btn-primary {
+            position:relative;
+            min-height:58px;
+            margin-top:10px;
+            border:0;
+            border-radius:10px;
+            background:#ed5b2a;
+            color:#fff;
+            box-shadow:0 8px 20px rgba(237,91,42,.2);
+            font-family:'DM Sans',sans-serif;
+            font-size:15px;
+            font-weight:700;
+            letter-spacing:.04em;
+            text-transform:uppercase;
+        }
+        #login-card .btn-primary:hover:not(:disabled) {
+            background:#d94a20;
+            transform:translateY(-1px);
+            box-shadow:0 12px 24px rgba(237,91,42,.24);
+        }
+        .auth-submit-arrow {
+            position:absolute;
+            right:22px;
+            font-size:20px;
+            font-weight:400;
+            line-height:1;
+            transition:transform .25s ease;
+        }
+        #login-card .btn-primary:hover:not(:disabled) .auth-submit-arrow { transform:translateX(3px); }
+        #login-card > div:last-child { display:none; }
+        #screen-login > p:last-child {
+            grid-column:2;
+            grid-row:2;
+            justify-self:center;
+            align-self:start;
+            margin:0 20px 26px !important;
+            color:#9b917f !important;
+            font-size:11px !important;
+            letter-spacing:.03em !important;
+        }
+        #screen-cocina.visible .cocina-main { animation:fadeUp .48s cubic-bezier(.2,.75,.25,1) both; }
+        @keyframes logo-arrive {
+            from { opacity:0; transform:translateY(8px) scale(.92); }
+            to { opacity:1; transform:translateY(0) scale(1); }
+        }
+        @media (max-width:760px) {
+            #screen-login {
+                grid-template-columns:minmax(0,1fr);
+                grid-template-rows:auto 1fr auto;
+                align-items:start;
+            }
+            .login-brand-panel {
+                grid-column:1;
+                grid-row:1;
+                min-height:0;
+                padding:24px 18px 28px;
+            }
+            .login-brand-panel > div:first-child { margin-bottom:10px !important; }
+            .login-brand-panel img {
+                width:clamp(128px,36vw,176px) !important;
+                height:clamp(128px,36vw,176px) !important;
+            }
+            #screen-login h1 { font-size:clamp(1.9rem,7vw,2.5rem) !important; line-height:1 !important; }
+            .login-brand-panel > p { font-size:9px !important; }
+            #login-card {
+                grid-column:1;
+                grid-row:2;
+                width:min(calc(100% - 32px),520px);
+                margin:24px auto 16px;
+                padding:34px 28px;
+            }
+            #login-card > div:first-child { margin-bottom:26px !important; }
+            #login-card h2 { font-size:clamp(2.2rem,9vw,2.7rem) !important; }
+            #screen-login > p:last-child {
+                grid-column:1;
+                grid-row:3;
+                margin:0 12px 18px !important;
+                text-align:center;
+            }
+        }
+        @media (max-width:380px) {
+            #login-card { padding:30px 22px; }
+            #login-card h2 { font-size:2.4rem !important; }
+        }
+        @media (prefers-reduced-motion:reduce) {
+            *, *::before, *::after {
+                scroll-behavior:auto !important;
+                animation-duration:.01ms !important;
+                animation-iteration-count:1 !important;
+                transition-duration:.01ms !important;
+            }
+        }
+        /* Transición inmersiva después del acceso. */
+
+        .auth-transition {
+            overflow:hidden; isolation:isolate; color:#f4f0e7;
+            background:radial-gradient(ellipse at 50% 43%,rgba(92,119,91,.25),transparent 32%),radial-gradient(ellipse at 50% 100%,rgba(177,146,94,.10),transparent 42%),#101d17;
+            backdrop-filter:none; -webkit-backdrop-filter:none; transition:opacity .65s ease;
+        }
+        .auth-transition::before {
+            content:''; position:absolute; z-index:-1; inset:-30%; opacity:.34;
+            background:repeating-linear-gradient(132deg,transparent 0 54px,rgba(238,231,211,.035) 55px 56px),radial-gradient(ellipse at 50% 45%,transparent 0 27%,rgba(194,171,128,.10) 27.1% 27.2%,transparent 27.3% 38%,rgba(194,171,128,.07) 38.1% 38.2%,transparent 38.3%);
+            animation:auth-atmosphere 24s linear infinite;
+        }
+        .auth-transition::after {
+            content:''; position:absolute; z-index:-1; width:min(82vw,760px); aspect-ratio:1; border:1px solid rgba(222,205,169,.08); border-radius:50%;
+            box-shadow:0 0 0 42px rgba(222,205,169,.018),0 0 0 110px rgba(222,205,169,.012); animation:auth-halo 7s ease-in-out infinite;
+        }
+        .auth-transition-card {
+            width:min(100%,520px); padding:34px 30px 30px; border:0; border-radius:0; background:transparent; box-shadow:none;
+            transform:translateY(16px); transition:transform .85s cubic-bezier(.18,.72,.16,1);
+        }
+        .auth-transition.is-visible .auth-transition-card { transform:translateY(0); }
+        .auth-logo-wrap { width:174px; height:174px; margin-bottom:28px; }
+        .auth-logo-wrap::before { content:''; position:absolute; inset:17px; border:1px solid rgba(222,205,169,.13); border-radius:50%; box-shadow:0 0 38px rgba(200,176,127,.08); }
+        .auth-logo-wrap img { width:124px; height:124px; border-radius:0; background:transparent; box-shadow:none; animation:auth-logo-breathe 3.8s ease-in-out infinite; }
+        .auth-logo-orbit { inset:4px; border-color:rgba(221,205,170,.12); border-top-color:#d1b98d; border-right-color:rgba(232,225,207,.8); animation-duration:7s; }
+        .auth-eyebrow { color:#c6b38d; font-size:10px; letter-spacing:.24em; }
+        #auth-transition-title { margin:14px 0 8px; color:#f4f0e7; font:700 clamp(1.75rem,6vw,2.35rem)/1.08 'DM Sans',Arial,sans-serif; letter-spacing:-.025em; }
+        .auth-transition-detail { max-width:380px; margin:0 auto; color:rgba(235,233,222,.68); font-size:14px; line-height:1.65; }
+        .auth-progress { width:min(100%,300px); height:2px; margin:30px auto 18px; background:rgba(237,232,218,.15); }
+        .auth-progress span { width:30%; background:linear-gradient(90deg,transparent,#bfa879,#f2e5c6); animation-duration:2.8s; }
+        .auth-status { color:rgba(223,220,206,.62); font-size:9px; letter-spacing:.17em; }
+        .auth-status i { background:#c5ab78; box-shadow:0 0 0 5px rgba(197,171,120,.12),0 0 18px rgba(197,171,120,.32); animation-duration:2.4s; }
+        @keyframes auth-atmosphere { to { transform:rotate(360deg); } }
+        @keyframes auth-halo { 0%,100% { transform:scale(.97); opacity:.72; } 50% { transform:scale(1.025); opacity:1; } }
+        @media (max-width:600px) { .auth-transition-card { padding:24px 18px; } .auth-logo-wrap { width:148px; height:148px; } }
+        @media (prefers-reduced-motion:reduce) {
+            .auth-transition::before,.auth-transition::after,.auth-logo-wrap img,.auth-logo-orbit,.auth-progress span,.auth-status i { animation:none !important; }
+            .auth-transition,.auth-transition-card { transition-duration:.01ms !important; }
+        }
+        /* Presentación breve de marca al abrir el sistema. */
+        .brand-intro { position:fixed; inset:0; z-index:10001; display:grid; place-items:center; overflow:hidden; padding:28px; color:#f5f1e8; background:radial-gradient(ellipse at 50% 38%,rgba(237,91,42,.12),transparent 32%),#14271e; opacity:1; visibility:visible; transition:opacity .72s cubic-bezier(.22,.72,.22,1),visibility .72s; }
+        .brand-intro[hidden] { display:none; }
+        .brand-intro.is-ready { opacity:1; }
+        .brand-intro.is-leaving { opacity:0; visibility:hidden; }
+        .brand-intro::before { content:''; position:absolute; inset:0; pointer-events:none; background:repeating-linear-gradient(135deg,transparent 0 64px,rgba(255,255,255,.025) 65px 66px); }
+        .brand-intro-content { position:relative; z-index:1; display:flex; flex-direction:column; align-items:center; text-align:center; animation:login-luxe-arrive .9s cubic-bezier(.16,.84,.24,1) both; }
+        .brand-intro img { display:block; width:clamp(180px,25vw,270px); height:clamp(220px,30vw,370px); object-fit:contain; filter:drop-shadow(0 12px 32px rgba(237,91,42,.24)); animation:brand-mark-enter 1.15s cubic-bezier(.16,.84,.24,1) both, login-mascot-glow 3.6s 1.15s ease-in-out infinite; }
+        .brand-intro-rule { display:flex; align-items:center; gap:12px; width:116px; margin:18px 0 20px; color:#ed5b2a; animation:brand-copy-enter .8s .18s both; }
+        .brand-intro-rule::before,.brand-intro-rule::after { content:''; height:1px; flex:1; background:rgba(237,91,42,.55); }
+        .brand-intro-rule i { width:6px; height:6px; background:#ed5b2a; transform:rotate(45deg); }
+        .brand-intro-title { margin:0; color:#f5f1e8; font:900 clamp(2rem,5vw,4.2rem)/.98 'Archivo Black','Arial Black',sans-serif; letter-spacing:-.045em; text-transform:uppercase; animation:brand-copy-enter .85s .22s both; }
+        .brand-intro-title span { display:block; margin-top:.12em; color:#ed5b2a; }
+        .brand-intro-caption { margin-top:20px; color:rgba(245,241,232,.68); font:700 10px/1.4 'DM Sans',Arial,sans-serif; letter-spacing:.2em; text-transform:uppercase; animation:brand-copy-enter .85s .34s both; }
+        @keyframes brand-mark-enter { from { opacity:0; transform:translateY(18px) scale(.88); } to { opacity:1; transform:translateY(0) scale(1); } }
+        @keyframes brand-copy-enter { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes login-luxe-arrive { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes login-mascot-glow { 0%,100% { filter:drop-shadow(0 10px 26px rgba(237,91,42,.16)); } 50% { filter:drop-shadow(0 14px 38px rgba(237,91,42,.34)); } }
+        @media (max-width:600px) { .brand-intro img { width:clamp(142px,42vw,185px); height:clamp(142px,42vw,185px); } .brand-intro-title { font-size:clamp(2rem,10vw,3rem); } }
+        @media (prefers-reduced-motion:reduce) { .brand-intro,.brand-intro * { animation:none !important; transition-duration:.01ms !important; } }
+        body.theme-night { --crema:#171c19; --ink:#f1efe7; --ink-mid:#d0d0c5; --ink-muted:#a3a99f; --ink-ghost:#737d73; --oliva-pale:#29372d; --oliva-bd:#435c49; --red-pale:#3b2927; --amber-pale:#3b3424; --blue-pale:#263449; background:var(--crema); color:var(--ink); }
+        body.theme-night .app-header, body.theme-night .card, body.theme-night .panel, body.theme-night #screen-login > div { background-color:#202622; color:var(--ink); border-color:#3b463e; }
+        body.theme-night #screen-login > .login-brand-panel { background-color:#14271e !important; color:#f5f1e8 !important; border-color:transparent !important; }
+        body.theme-night #screen-login > #login-card { background-color:#fcfbf8 !important; color:#1a1a17 !important; border-color:transparent !important; }
+        body.theme-night input, body.theme-night select, body.theme-night textarea { background:#292f2b; color:var(--ink); border-color:#465149; }
+        body.theme-night .order-card, body.theme-night .order-card.es-llevar { background:#202622 !important; color:#f1efe7; border-color:#435047 !important; box-shadow:0 5px 18px rgba(0,0,0,.24) !important; }
+        body.theme-night .order-card .card-header, body.theme-night .order-card .card-body { border-color:#3b463e !important; color:#f1efe7; }
+        body.theme-night .order-card .customer-name, body.theme-night .order-card .item-row, body.theme-night .order-card p { color:#d0d0c5 !important; }
+        body.theme-night .order-card [style*="background:#fffbeb"], body.theme-night .order-card [style*="background:#fef3c7"] { background:#30372f !important; border-color:#596d50 !important; color:#e6e4da !important; }
+        body.theme-night .hist-card { background:#202622; border-color:#3b463e; box-shadow:0 5px 18px rgba(0,0,0,.2); opacity:1; }
+        body.theme-night .hist-card-head { background:#242d27; border-color:#3b463e; }
+        body.theme-night .hist-card-num { color:#f1efe7; }
+        body.theme-night .hist-card-mesa, body.theme-night .hist-hora { color:#aeb8ad; }
+        body.theme-night .hist-item-chip { background:#2b332d; border-color:#465149; color:#e3e7df; }
+        body.theme-night .btn-reactivar { background:#33251f; border-color:#80543d; color:#f1a27e; }
+        body.theme-night .btn-reactivar:hover { background:#453027; }
+
+        /* Cocina: tablero operativo claro, legible y sincronizado con el servicio activo. */
+        body.role-cocina { background:#f2f4f1; color:#1c2a22; }
+        body.role-cocina #screen-cocina { min-height:100svh; background:#f2f4f1; }
+        body.role-cocina #bar-cocina { height:66px; padding:0 30px; background:#174b33; border-bottom:1px solid rgba(255,255,255,.09); box-shadow:0 5px 20px rgba(17,42,30,.12); }
+        body.role-cocina .dot-live { background:#ed5b2a; }
+        body.role-cocina .bar-brand-logo { width:38px; height:34px; object-fit:contain; flex:0 0 auto; }
+        body.role-cocina .bar-title { display:flex; align-items:baseline; gap:12px; color:#f7f5ee; font:800 16px/1 'DM Sans',sans-serif; letter-spacing:.01em; }
+        body.role-cocina .bar-title span { color:rgba(247,245,238,.58); font:600 10px/1 'DM Sans',sans-serif; letter-spacing:.14em; text-transform:uppercase; }
+        body.role-cocina .cocina-main { width:min(100%,1600px); margin:0 auto; padding:96px 30px 42px; }
+        body.role-cocina .cocina-main > div:first-child { align-items:center !important; padding:22px 24px; margin-bottom:18px !important; border:1px solid #e2e7e1; border-radius:18px; background:#fff; box-shadow:0 8px 26px rgba(21,43,29,.045); }
+        body.role-cocina .section-title { color:#1b2d23; font:800 clamp(1.55rem,2.4vw,2rem)/1.1 'DM Sans',sans-serif; letter-spacing:-.035em; }
+        body.role-cocina .section-title em { color:#ed5b2a; font-style:normal; }
+        body.role-cocina #last-update-text { color:#77827a !important; font-size:12px !important; font-weight:500; }
+        body.role-cocina .cocina-main > div:nth-child(2) { gap:8px !important; margin-bottom:18px !important; }
+        body.role-cocina .filter-btn { min-height:42px; padding:0 17px; border:1px solid #dce3dc; border-radius:11px; background:#fff; color:#536158; font-size:12px; font-weight:700; box-shadow:0 2px 5px rgba(22,45,29,.025); }
+        body.role-cocina .filter-btn:hover { border-color:#9ab19e; background:#f4f8f4; color:#174b33; }
+        body.role-cocina .filter-btn.active { border-color:#174b33; background:#174b33; color:#fff; box-shadow:0 5px 13px rgba(23,75,51,.14); }
+        body.role-cocina .orders-grid { gap:16px; }
+        body.role-cocina .order-card { border-color:#dfe6df; border-radius:17px; box-shadow:0 5px 18px rgba(25,45,31,.055); }
+        body.role-cocina .order-card:hover { border-color:#b8cbbb; box-shadow:0 10px 28px rgba(25,45,31,.11); }
+        body.role-cocina .btn-kitchen.despachar { background:#174b33; box-shadow:0 3px 10px rgba(23,75,51,.14); }
+        body.role-cocina .btn-kitchen.despachar:hover { background:#103c29; }
+        body.role-cocina .card-header { padding:17px 18px; background:#fbfcfa; border-color:#e8ede8; }
+        body.role-cocina .order-number { color:#6c7d70; font:700 10px/1.3 'DM Sans',sans-serif; letter-spacing:.11em; }
+        body.role-cocina .customer-name { color:#1d2d23; font-size:16px; font-weight:750; }
+        body.role-cocina .mesa-tag { border-color:#dce5dc; border-radius:8px; background:#f0f5f0; color:#174b33; font-weight:700; }
+        body.role-cocina .order-time { display:flex; align-items:center; gap:5px; color:#78847b; font-size:11px; }
+        body.role-cocina .order-time svg { width:13px; height:13px; }
+        body.role-cocina .card-timer { color:#78847b !important; }
+        body.role-cocina .status-badge.pending { background:#fff0e9; border-color:#f2c2af; color:#a6401e; }
+        body.role-cocina .status-badge.confirmed { background:#edf3ee; border-color:#d5e1d7; color:#385744; }
+        body.role-cocina .status-badge.in_kitchen { background:#edf3ee; border-color:#d5e1d7; color:#385744; }
+        body.role-cocina .order-card.es-llevar { background:#fffaf7; border-color:#f0d7ca; box-shadow:0 5px 18px rgba(237,91,42,.045); }
+        body.role-cocina .order-card.es-llevar:hover { border-color:#e9b49e; box-shadow:0 10px 28px rgba(237,91,42,.09); }
+        body.role-cocina .empty-state { min-height:300px; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:44px 22px; border:1px dashed #d5dfd6; border-radius:20px; background:linear-gradient(145deg,#fff,#f8faf7); }
+        body.role-cocina .empty-icon { width:54px; height:54px; display:grid; place-items:center; margin:0 0 16px; border:1px solid #f2c2af; border-radius:16px; background:#fff0e9; color:#b84a25; opacity:1; }
+        body.role-cocina .empty-icon svg { width:24px; height:24px; stroke-width:1.8; }
+        body.role-cocina .empty-title { margin-bottom:6px; color:#26372d; font:750 17px/1.25 'DM Sans',sans-serif; }
+        body.role-cocina .empty-sub { color:#7a867d; font-size:13px; }
+        body.theme-night.role-cocina, body.theme-night.role-cocina #screen-cocina { background:#141b16; color:#edf0e9; }
+        body.theme-night.role-cocina .cocina-main > div:first-child { border-color:#35443a; background:#202923; box-shadow:0 8px 28px rgba(0,0,0,.16); }
+        body.theme-night.role-cocina .section-title, body.theme-night.role-cocina .customer-name, body.theme-night.role-cocina .empty-title { color:#f0f0e8; }
+        body.theme-night.role-cocina .filter-btn { border-color:#3b4a40; background:#202923; color:#c5cec5; }
+        body.theme-night.role-cocina .filter-btn.active { border-color:#174b33; background:#174b33; color:#fff; }
+        body.theme-night.role-cocina .order-card .card-header { background:#242d27; }
+        body.theme-night.role-cocina .order-card .item-name { color:#ecede6 !important; }
+        body.theme-night.role-cocina .empty-state { border-color:#3c4b40; background:linear-gradient(145deg,#202923,#19211b); }
+        body.theme-night.role-cocina .empty-title { color:#f0f0e8; }
+        body.theme-night.role-cocina .empty-sub { color:#a4afa5; }
+        @media (max-width:760px) {
+            body.role-cocina #bar-cocina { height:58px; padding:0 15px; }
+            body.role-cocina .bar-title { gap:0; font-size:14px; }
+            body.role-cocina .bar-title span { display:none; }
+            body.role-cocina .cocina-main { padding:76px 14px 90px; }
+            body.role-cocina .cocina-main > div:first-child { padding:17px 16px; border-radius:15px; }
+            body.role-cocina .section-title { font-size:1.5rem; }
+            body.role-cocina .filter-btn { min-height:40px; padding:0 12px; }
+            body.role-cocina .empty-state { min-height:240px; padding:34px 18px; }
+        }
+        @media (max-width:768px) {
+            body.role-cocina .cocina-main > div:first-child > .btn-kitchen { display:none !important; }
+        }
+</style>
 </head>
 <body>
 
@@ -474,7 +856,7 @@
     <div class="nav-tabs">
         <button class="nav-tab active" onclick="La26.navTo('cocina', this)"><span><i data-lucide="chef-hat"></i></span> Cocina</button>
         <button class="nav-tab"        onclick="La26.navTo('admin', this)"><span><i data-lucide="bar-chart-2"></i></span> Admin</button>
-        <button class="nav-tab"        onclick="La26.navTo('cliente', this)"><span><i data-lucide="user"></i></span> Cliente</button>
+        <button class="nav-tab"        onclick="La26.navTo('cliente', this)"><span><i data-lucide="book-open"></i></span> Carta</button>
     </div>
     <div class="nav-right">
         <div class="nav-user-chip">
@@ -488,16 +870,32 @@
 <!-- ══════════════════════════════════════════
      PANTALLA 1: LOGIN
 ══════════════════════════════════════════ -->
+<div id="brand-intro" class="brand-intro" aria-hidden="true">
+    <div class="brand-intro-content">
+        <img src="pez-mascota.svg?v=13" alt="">
+        <span class="brand-intro-rule" aria-hidden="true"><i></i></span>
+        <h1 class="brand-intro-title">Restaurante <span>la 26</span></h1>
+        <p class="brand-intro-caption">Bucaramanga · Colombia</p>
+    </div>
+</div>
+<div id="auth-transition" class="auth-transition" hidden aria-live="assertive" aria-atomic="true">
+    <div class="auth-transition-card">
+        <div class="auth-logo-wrap"><span class="auth-logo-orbit"></span><img src="pez-mascota.svg?v=13" alt="Pez cocinero de Restaurante la 26"></div>
+        <p class="auth-eyebrow">Restaurante la 26</p>
+        <h2 id="auth-transition-title">Preparando tu espacio</h2>
+        <p id="auth-transition-detail" class="auth-transition-detail">Un momento, por favor…</p>
+        <div class="auth-progress" aria-hidden="true"><span></span></div>
+        <span class="auth-status"><i></i> Iniciando sesión segura</span>
+    </div>
+</div>
 <div id="screen-login">
 
-    <div style="text-align:center;margin-bottom:36px;">
+    <div class="login-brand-panel" style="text-align:center;margin-bottom:36px;">
         <div class="anim-1" style="margin-bottom:18px;">
-            <div style="width:80px;height:80px;border-radius:20px;overflow:hidden;margin:0 auto;box-shadow:0 2px 12px rgba(74,90,40,0.14);border:1.5px solid var(--oliva-bd);background:var(--oliva-pale);display:flex;align-items:center;justify-content:center;">
-                <img src="logo.png" alt="Restaurante la 26" style="width:100%;height:100%;object-fit:cover;">
-            </div>
+            <img src="pez-mascota.svg?v=13" alt="Pez cocinero de Restaurante la 26" style="display:block;width:92px;height:92px;object-fit:contain;margin:0 auto;">
         </div>
-        <h1 class="font-display anim-2" style="font-size:clamp(1.9rem,5vw,2.6rem);font-weight:300;color:var(--ink);letter-spacing:-0.01em;line-height:1.1;margin-bottom:6px;">
-            Restaurante <span style="font-style:italic;color:var(--oliva);">la 26</span>
+        <h1 class="login-brand-title anim-2">
+            Restaurante <span>la 26</span>
         </h1>
         <p class="anim-3" style="font-size:13px;color:var(--ink-muted);font-weight:300;letter-spacing:0.08em;text-transform:uppercase;">
             Sistema Interno · Bucaramanga
@@ -507,8 +905,8 @@
     <div class="login-card anim-card" id="login-card">
         <div style="text-align:center;margin-bottom:28px;">
             <span class="rule-oliva"></span>
-            <h2 class="font-display" style="font-size:1.5rem;font-weight:400;color:var(--ink);letter-spacing:-0.01em;margin-bottom:6px;">
-                Acceso al Sistema
+            <h2 class="login-welcome-title">
+                Bienvenido
             </h2>
             <p style="font-size:13.5px;color:var(--ink-muted);font-weight:300;line-height:1.5;">
                 Ingresa tus credenciales para continuar.
@@ -518,23 +916,25 @@
         <!-- ► FORM con id para que app.js lo capture via addEventListener -->
         <form id="form-login" novalidate style="display:flex;flex-direction:column;gap:12px;">
 
+            <label class="auth-field-label" for="login-user">Usuario</label>
             <input
                 type="text"
                 id="login-user"
                 class="input-auth"
-                placeholder="Usuario"
+                placeholder="Ingresa tu usuario"
                 autocomplete="username"
                 spellcheck="false"
                 aria-label="Usuario"
                 required
             >
 
+            <label class="auth-field-label" for="login-pass">Contraseña</label>
             <div style="position:relative;">
                 <input
                     type="password"
                     id="login-pass"
                     class="input-auth"
-                    placeholder="Contraseña"
+                    placeholder="Ingresa tu contraseña"
                     autocomplete="current-password"
                     aria-label="Contraseña"
                     required
@@ -553,7 +953,7 @@
 
             <!-- type="submit" para que Enter funcione nativamente -->
             <button type="submit" class="btn-primary" id="btn-login">
-                <span id="btn-login-text">Ingresar</span>
+                <span id="btn-login-text">Ingresar</span><span class="auth-submit-arrow" aria-hidden="true">→</span>
             </button>
         </form>
 
@@ -568,7 +968,7 @@
     </div>
 
     <p class="anim-4" style="margin-top:24px;font-size:11.5px;color:var(--ink-ghost);letter-spacing:0.04em;text-align:center;">
-        © 2025 Restaurante la 26 · Uso exclusivo del personal
+        © 2026 Restaurante la 26 · Uso exclusivo del personal
     </p>
 </div>
 
@@ -581,11 +981,11 @@
     <div id="bar-cocina">
         <div style="display:flex;align-items:center;gap:12px;">
             <span class="dot-live" id="dot-live" title="Tiempo real"></span>
-            <span class="bar-title">Cocina — <em>la 26</em></span>
+            <img class="bar-brand-logo" src="logo-naranja.svg" alt="Restaurante La 26">
+            <span class="bar-title">Cocina <span></span></span>
         </div>
         <div style="display:flex;gap:12px;align-items:center;">
             <div class="stat-chip pending"><span><i data-lucide="clock"></i></span> <span id="count-pending">0</span> Pendientes</div>
-            <div class="stat-chip preparing"><span><i data-lucide="flame"></i></span> <span id="count-preparing">0</span> Preparando</div>
             <div class="stat-chip delivered"><span><i data-lucide="check"></i></span> <span id="count-delivered">0</span> Entregados</div>
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
@@ -603,8 +1003,8 @@
                     Conectando con Supabase…
                 </p>
             </div>
-            <button class="btn-kitchen despachar" style="flex:none;padding:9px 18px;font-size:13px;" onclick="La26.cargarPedidos()">
-                ↺ Actualizar
+            <button class="btn-kitchen despachar" style="flex:none;padding:9px 18px;font-size:13px;" onclick="_actualizarCocinaVisible()">
+                <i data-lucide="refresh-cw"></i> Actualizar
             </button>
         </div>
 
@@ -631,10 +1031,9 @@
         <div id="hist-cocina-section" style="display:none;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
                 <div>
-                    <h3 style="font-size:17px;font-weight:700;color:var(--ink);margin:0;">Pedidos despachados hoy</h3>
+                    <h3 id="hist-cocina-title" style="font-size:17px;font-weight:700;color:var(--ink);margin:0;">Pedidos despachados hoy</h3>
                     <p style="font-size:12.5px;color:var(--ink-muted);margin-top:3px;">Solo se muestran los pedidos del día actual. Se reinicia a medianoche.</p>
                 </div>
-                <button class="btn-kitchen despachar" style="padding:9px 18px;font-size:13px;" onclick="CocinaHist.cargar()">↺ Actualizar</button>
             </div>
             <div class="orders-grid" id="hist-cocina-grid">
                 <div class="loading-state"><div class="spinner"></div><span>Cargando historial…</span></div>
@@ -650,7 +1049,8 @@
 
 <!-- ► app.js va ANTES del script inline para que sus funciones
      estén disponibles cuando DOMContentLoaded se dispare aquí -->
-<script src="app.js"></script>
+<script src="app.js?v=20261012.2"></script>
+<script src="service-period-switcher.js?v=20261012.2"></script>
 
 <script>
 // ══════════════════════════════════════════════════════════════
@@ -661,6 +1061,23 @@
 // ── Inicializar iconos Lucide ──
 document.addEventListener('DOMContentLoaded', function () {
     lucide.createIcons();
+
+    const intro = document.getElementById('brand-intro');
+    const savedRole = sessionStorage.getItem('user_role');
+    const savedUser = sessionStorage.getItem('user_name');
+    const sessionIsValid = savedRole && savedUser && LA26_USERS?.[savedUser]?.role === savedRole;
+    if (intro) {
+        if (sessionIsValid) {
+            intro.hidden = true;
+        } else {
+            requestAnimationFrame(() => intro.classList.add('is-ready'));
+            const displayTime = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 200 : 1550;
+            setTimeout(() => {
+                intro.classList.add('is-leaving');
+                setTimeout(() => { intro.hidden = true; }, 760);
+            }, displayTime);
+        }
+    }
 
     // Re-ejecutar tras inyecciones dinámicas en el grid de pedidos
     const grid = document.getElementById('contenedor-pedidos');

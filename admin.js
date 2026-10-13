@@ -1,6 +1,13 @@
 // ============================================================
 // RESTAURANTE LA 26 — PANEL DE ADMINISTRACIÓN
-// admin.js · Versión 3.7
+// admin.js · Versión 3.8
+// FIXES v3.8 (nuevos):
+//  [CIERRES-POR-SERVICIO] Día y Noche pueden registrar cierres en la misma
+//             fecha. El calendario permite ver cada servicio por separado
+//             o ambos, mantiene independientes sus totales y estadísticas,
+//             y rotula cada registro según servicio y tipo de cierre.
+//             Nunca se guarda un cierre nocturno sin su identificador de
+//             servicio si la base de datos no tiene la columna requerida.
 // FIXES v3.7 (nuevos):
 //  [CIERRES-MENSUAL] El Calendario de Cierres ahora es estrictamente
 //             mensual: selector de mes (por defecto el actual, hora
@@ -42,7 +49,7 @@
 //  [CAMBIO-A] La tabla "Historial de Facturación" se quitó del Dashboard
 //             (ahora vive en la pestaña "Pedidos"). Los KPIs por método
 //             de pago se calculan SIEMPRE, fuera del bloque de la tabla.
-//  [CAMBIO-B] revertirPagoOrden(): botón "↩️ Por cobrar" en los pedidos
+//  [CAMBIO-B] revertirPagoOrden(): botón "<i data-lucide="undo-2" style="width:13px;height:13px;vertical-align:-2px;"></i> Por cobrar" en los pedidos
 //             pagados para deshacer un pago registrado por error. Quita
 //             payment_method y resta del acumulado. NO toca el status,
 //             así que no afecta la pantalla de cocina.
@@ -102,6 +109,18 @@ let totalEfectivo      = 0;
 let totalTransferencia = 0;
 let totalFiado         = 0;
 let baseInicial        = 0;
+
+function _periodoServicioActivo() {
+    return window.menuPeriodActivo === 'night' ? 'night' : 'day';
+}
+
+function _etiquetaPeriodoServicio(periodo = _periodoServicioActivo()) {
+    return periodo === 'night' ? 'Noche' : 'Día';
+}
+
+function _claveCajaPeriodo(clave, periodo = _periodoServicioActivo()) {
+    return `${clave}_${periodo}`;
+}
 
 // ============================================================
 // TOAST NOTIFICATIONS
@@ -164,23 +183,13 @@ function formatCOP(valor) {
 // MAPA DE TIPOS DE PLATO
 // ============================================================
 const MAPA_TIPO = {
-    executive_lunch: { label: 'Proteína con Salsa', icono: '🥩', porciones: 35, badgeClass: 'badge-protein' },
-    protein:         { label: 'Proteína con Salsa', icono: '🥩', porciones: 35, badgeClass: 'badge-protein' },
-    side:            { label: 'Principio',           icono: '🍲', porciones: 50, badgeClass: 'badge-side'    },
-    drink:           { label: 'Bebida',              icono: '🍹', porciones: 20, badgeClass: 'badge-drink'   },
-    a_la_carte:      { label: 'A la Carta',          icono: '✨', porciones: 15, badgeClass: 'badge-carte'   },
-    soup:            { label: 'Sopa',                icono: '🍜', porciones: 20, badgeClass: 'badge-dessert' },
+    executive_lunch: { label: 'Proteína con Salsa', icono: 'beef', porciones: 35, badgeClass: 'badge-protein' },
+    protein:         { label: 'Proteína con Salsa', icono: 'beef', porciones: 35, badgeClass: 'badge-protein' },
+    side:            { label: 'Principio',           icono: 'soup', porciones: 50, badgeClass: 'badge-side'    },
+    drink:           { label: 'Bebida',              icono: 'cup-soda', porciones: 20, badgeClass: 'badge-drink'   },
+    a_la_carte:      { label: 'A la Carta',          icono: 'sparkles', porciones: 15, badgeClass: 'badge-carte'   },
+    soup:            { label: 'Sopa',                icono: 'soup', porciones: 20, badgeClass: 'badge-dessert' },
 };
-
-function getRangoByCodigo(codigo) {
-    const n = parseInt(codigo) || 0;
-    if (n >= 1  && n <= 10)  return { label: 'Vegetal/Salsa/Base', color: 'var(--olive)' };
-    if (n >= 11 && n <= 30)  return { label: 'Carne/Proteína',     color: '#b43c3c'       };
-    if (n >= 31 && n <= 50)  return { label: 'Acompañamiento',     color: 'var(--amber)'  };
-    if (n >= 51 && n <= 70)  return { label: 'Bebida/Jugo',        color: 'var(--blue)'   };
-    if (n >= 71)             return { label: 'A la Carta',          color: 'var(--purple)' };
-    return { label: '—', color: 'var(--text-3)' };
-}
 
 // ── Extrae el nombre del cliente desde customer_name o desde notes ──
 function _nombreCliente(ord) {
@@ -246,9 +255,12 @@ async function _buildTableMap() {
 // día anterior se usa el inicio del día, para que cada jornada
 // arranque limpia sin arrastrar el corte viejo.
 // ============================================================
-function _resolverInicioDiaEfectivo(inicioDiaISO) {
-    const cierreDesde = localStorage.getItem('cierre_desde')
-                     || sessionStorage.getItem('cierre_desde');
+function _resolverInicioDiaEfectivo(inicioDiaISO, periodo = _periodoServicioActivo()) {
+    if (periodo === 'night' && _nightServiceStartAt && Number.isFinite(Date.parse(_nightServiceStartAt))) {
+        return _nightServiceStartAt;
+    }
+    const cierreDesde = localStorage.getItem(`cierre_desde_${periodo}`)
+                     || (periodo === 'day' && (localStorage.getItem('cierre_desde') || sessionStorage.getItem('cierre_desde')));
     if (!cierreDesde) return inicioDiaISO;
     const tsCierre = new Date(cierreDesde).getTime();
     const tsInicio = new Date(inicioDiaISO).getTime();
@@ -270,23 +282,35 @@ async function cargarDashboardReal() {
         const _finDia    = `${_yyyy}-${_mm}-${_dd}T23:59:59-05:00`;
 
         // [v3.4 · FIX-CIERRE] Corte persistente (localStorage), con piso por día
-        const _inicioDiaEfectivo = _resolverInicioDiaEfectivo(_inicioDia);
+        const _inicioDiaEfectivo = _resolverInicioDiaEfectivo(_inicioDia, _periodoServicioActivo());
 
         // [FIX-10] Cargar mapa de mesas en paralelo con las órdenes
-        const [{ data: orders, error }, tableMap] = await Promise.all([
+        const periodoServicio = _periodoServicioActivo();
+        const [resultadoOrdenesInicial, tableMap] = await Promise.all([
             supabaseClient
                 .from('orders')
-                .select(`id, order_number, customer_name, total_amount, status, notes, payment_method,
+                .select(`id, order_number, customer_name, total_amount, status, notes, payment_method, service_period,
                          table_id, order_items ( quantity, notes, unit_price )`)
                 .gte('created_at', _inicioDiaEfectivo)
                 .lte('created_at', _finDia),
             _buildTableMap()
         ]);
 
+        let { data: orders, error } = resultadoOrdenesInicial;
+        if (error?.code === '42703') {
+            const legacyOrders = await supabaseClient.from('orders')
+                .select(`id, order_number, customer_name, total_amount, status, notes, payment_method,
+                         table_id, order_items ( quantity, notes, unit_price )`)
+                .gte('created_at', _inicioDiaEfectivo).lte('created_at', _finDia);
+            orders = legacyOrders.data;
+            error = legacyOrders.error;
+            if (!error) orders = (orders || []).map(order => ({ ...order, service_period: 'day' }));
+        }
+
         if (error) throw error;
 
         const ordenesValidas = (orders || []).filter(o =>
-            o.status !== 'canceled' && o.status !== 'cancelled'
+            o.status !== 'canceled' && o.status !== 'cancelled' && (o.service_period || 'day') === periodoServicio
         );
 
         globalIngresos = ordenesValidas.reduce(
@@ -295,6 +319,8 @@ async function cargarDashboardReal() {
 
         const elPedidos2 = document.getElementById('total-pedidos');
         if (elPedidos2) elPedidos2.textContent = `${ordenesValidas.length} pedidos`;
+        const labelVentasServicio = document.getElementById('label-ventas-servicio');
+        if (labelVentasServicio) labelVentasServicio.textContent = '';
 
         // [v3.5 · CAMBIO-A] KPIs por método de pago (Efectivo / Transferencia /
         // Fiado). Se calculan SIEMPRE, independientemente de la tabla del
@@ -310,9 +336,9 @@ async function cargarDashboardReal() {
                 else if (metodo === 'transferencia') _tr += monto;
                 else if (metodo === 'fiado')         _fi += monto;
             });
-            sessionStorage.setItem('pm_efectivo',      String(_ef));
-            sessionStorage.setItem('pm_transferencia', String(_tr));
-            sessionStorage.setItem('pm_fiado',         String(_fi));
+            sessionStorage.setItem(_claveCajaPeriodo('pm_efectivo'),      String(_ef));
+            sessionStorage.setItem(_claveCajaPeriodo('pm_transferencia'), String(_tr));
+            sessionStorage.setItem(_claveCajaPeriodo('pm_fiado'),         String(_fi));
             totalEfectivo      = _ef;
             totalTransferencia = _tr;
             totalFiado         = _fi;
@@ -338,9 +364,9 @@ async function cargarDashboardReal() {
                     if (metodo === 'transferencia') _tr += monto;
                     if (metodo === 'fiado')         _fi += monto;
                 });
-                sessionStorage.setItem('pm_efectivo',      String(_ef));
-                sessionStorage.setItem('pm_transferencia', String(_tr));
-                sessionStorage.setItem('pm_fiado',         String(_fi));
+                sessionStorage.setItem(_claveCajaPeriodo('pm_efectivo'),      String(_ef));
+                sessionStorage.setItem(_claveCajaPeriodo('pm_transferencia'), String(_tr));
+                sessionStorage.setItem(_claveCajaPeriodo('pm_fiado'),         String(_fi));
                 totalEfectivo      = _ef;
                 totalTransferencia = _tr;
                 totalFiado         = _fi;
@@ -353,7 +379,7 @@ async function cargarDashboardReal() {
                         : `<span style="font-size:10px;font-weight:600;padding:3px 11px;border-radius:999px;
                             background:var(--amber-lt);color:var(--amber);border:1.5px solid rgba(154,108,26,.28);
                             display:inline-block;cursor:pointer;" onclick="cambiarTab('pedidos')"
-                            title="Ir a Historial de Pedidos para registrar el pago">⏳ Pendiente</span>`;
+                            title="Ir a Historial de Pedidos para registrar el pago">Pendiente</span>`;
 
                     // [FIX-10] Resolución de mesa:
                     // 1. Busca [MESA ...] o [PARA LLEVAR] / [DOMICILIO] en notes
@@ -394,22 +420,16 @@ async function cargarDashboardReal() {
                                         style="background:var(--surface-2);border:1.5px solid var(--border);color:var(--text-2);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
                                         onmouseover="this.style.background='var(--surface-3)'"
                                         onmouseout="this.style.background='var(--surface-2)'">
-                                        📄 PDF
-                                    </button>
-                                    <button onclick="abrirModalFacturaElectronica('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
-                                        style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
-                                        onmouseover="this.style.background='rgba(74,103,65,.16)'"
-                                        onmouseout="this.style.background='var(--olive-lt)'">
-                                        🧾 DIAN
+                                        <i data-lucide="file-down" style="width:13px;height:13px;vertical-align:-2px;"></i> PDF
                                     </button>
                                     <button onclick="editarComandaAdmin('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
                                         style="background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.28);color:var(--blue);border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;"
                                         onmouseover="this.style.background='rgba(37,99,168,.16)'"
                                         onmouseout="this.style.background='var(--blue-lt)'">
-                                        ✏️ Editar
+                                        <i data-lucide="pencil" style="width:13px;height:13px;vertical-align:-2px;"></i> Editar
                                     </button>
                                     <button onclick="eliminarComandaReal('${ord.id}', '${ord.order_number}')" class="btn-danger">
-                                        🗑️
+                                        <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
                                     </button>
                                 </div>
                             </td>
@@ -460,12 +480,19 @@ async function cargarDashboardReal() {
             }
         }
 
-        const { data: gastos } = await supabaseClient
+        let { data: gastos, error: errorGastos } = await supabaseClient
             .from('operating_expenses')
-            .select('amount')
+            .select('amount, service_period')
             .gte('created_at', _inicioDiaEfectivo)
             .lte('created_at', _finDia);
-        globalEgresos = (gastos || []).reduce(
+        if (errorGastos?.code === '42703') {
+            const legacyGastos = await supabaseClient.from('operating_expenses').select('amount')
+                .gte('created_at', _inicioDiaEfectivo).lte('created_at', _finDia);
+            gastos = (legacyGastos.data || []).map(g => ({ ...g, service_period: 'day' }));
+            errorGastos = legacyGastos.error;
+        }
+        if (errorGastos) throw errorGastos;
+        globalEgresos = (gastos || []).filter(g => (g.service_period || 'day') === periodoServicio).reduce(
             (acc, g) => acc + (parseFloat(g.amount) || 0), 0
         );
         const elTotalGastos = document.getElementById('total-gastos');
@@ -479,18 +506,90 @@ async function cargarDashboardReal() {
 // ============================================================
 // ELIMINAR COMANDA
 // ============================================================
+function confirmarEliminarComandaSistema(nroOrden) {
+    return new Promise(resolve => {
+        const focoAnterior = document.activeElement;
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.setAttribute('role', 'alertdialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-labelledby', 'confirmar-eliminar-comanda-titulo');
+        overlay.setAttribute('aria-describedby', 'confirmar-eliminar-comanda-texto');
+        overlay.innerHTML = `
+            <div class="modal-box" style="max-width:440px;padding:0;overflow:hidden;">
+                <div style="display:flex;align-items:flex-start;gap:13px;padding:22px 24px 16px;">
+                    <span style="display:grid;place-items:center;width:40px;height:40px;flex:none;border-radius:12px;background:var(--red-lt,#fff0f0);color:var(--red,#b91c1c);">
+                        <i data-lucide="trash-2" style="width:19px;height:19px;"></i>
+                    </span>
+                    <div>
+                        <h2 id="confirmar-eliminar-comanda-titulo" style="margin:0 0 7px;font-size:16px;font-weight:700;color:var(--text-1);">Eliminar pedido</h2>
+                        <p id="confirmar-eliminar-comanda-texto" style="margin:0;font-size:13px;line-height:1.55;color:var(--text-2);">
+                            ¿Deseas eliminar la orden <strong data-order-number style="color:var(--text-1);"></strong>?<br>
+                            El pedido saldrá de los reportes. Esta acción no se puede deshacer.
+                        </p>
+                    </div>
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:9px;padding:14px 24px 20px;border-top:1px solid var(--border);background:var(--surface-2);">
+                    <button type="button" data-action="cancel" class="btn-ghost">Cancelar</button>
+                    <button type="button" data-action="confirm"
+                        style="display:inline-flex;align-items:center;gap:7px;padding:8px 15px;border:1.5px solid var(--red,#b91c1c);border-radius:9px;background:var(--red,#b91c1c);color:#fff;font:600 12px 'DM Sans',sans-serif;cursor:pointer;">
+                        <i data-lucide="trash-2" style="width:13px;height:13px;"></i> Eliminar pedido
+                    </button>
+                </div>
+            </div>`;
+        overlay.querySelector('[data-order-number]').textContent = String(nroOrden || '—');
+
+        let terminado = false;
+        const cerrar = confirmado => {
+            if (terminado) return;
+            terminado = true;
+            document.removeEventListener('keydown', manejarTecla);
+            overlay.remove();
+            resolve(confirmado);
+            if (focoAnterior?.isConnected) focoAnterior.focus({ preventScroll: true });
+        };
+        const manejarTecla = event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                cerrar(false);
+            }
+        };
+
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) cerrar(false);
+        });
+        overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => cerrar(false));
+        overlay.querySelector('[data-action="confirm"]').addEventListener('click', () => cerrar(true));
+        document.addEventListener('keydown', manejarTecla);
+        document.body.appendChild(overlay);
+        if (window.lucide) lucide.createIcons();
+        overlay.querySelector('[data-action="cancel"]').focus();
+    });
+}
+
 async function eliminarComandaReal(idComanda, nroOrden) {
-    if (!confirm(`⚠️ ¿Eliminar la orden ${nroOrden}?\nEsto restará el monto de los reportes.`)) return;
+    const confirmado = await confirmarEliminarComandaSistema(nroOrden);
+    if (!confirmado) return;
+
+    let errorEliminacion = null;
     try {
-        await supabaseClient.from('order_items').delete().eq('order_id', idComanda);
+        const { error: errorItems } = await supabaseClient
+            .from('order_items')
+            .delete()
+            .eq('order_id', idComanda);
+        if (errorItems) throw errorItems;
+
         const { error } = await supabaseClient.from('orders').delete().eq('id', idComanda);
         if (error) throw error;
-        Toast.ok(`Orden ${nroOrden} eliminada correctamente.`);
-        cargarDashboardReal();
     } catch (err) {
         console.error('Error eliminando comanda:', err);
-        Toast.error('Error al eliminar el registro.');
+        errorEliminacion = err;
     }
+
+    // Actualizar el historial y los totales sin recargar manualmente el navegador.
+    await Promise.allSettled([cargarHistorialPedidos(), cargarDashboardReal()]);
+    if (errorEliminacion) Toast.error('No se pudo eliminar el pedido. La información se actualizó.');
+    else Toast.ok(`Orden ${nroOrden} eliminada y datos actualizados.`);
 }
 
 // ============================================================
@@ -499,12 +598,16 @@ async function eliminarComandaReal(idComanda, nroOrden) {
 async function registrarMetodoPago(orderId, metodo) {
     if (!metodo) return;
     try {
-        const { data: ordData, error: errRead } = await supabaseClient
+        let { data: ordData, error: errRead } = await supabaseClient
             .from('orders')
-            .select('total_amount, notes, payment_method')
+            .select('total_amount, notes, payment_method, service_period')
             .eq('id', orderId)
             .single();
-        if (errRead) throw errRead;
+        if (errRead?.code === '42703') {
+            const legacy = await supabaseClient.from('orders').select('total_amount, notes, payment_method').eq('id', orderId).single();
+            if (legacy.error) throw legacy.error;
+            ordData = { ...legacy.data, service_period: 'day' };
+        } else if (errRead) throw errRead;
 
         const monto = parseFloat(ordData.total_amount) || 0;
 
@@ -524,22 +627,22 @@ async function registrarMetodoPago(orderId, metodo) {
 
         const metodoAnterior = ordData.payment_method || _extraerMetodoDeNotes(ordData.notes || '');
         if (metodoAnterior && metodoAnterior !== metodo) {
-            const keyViejo  = `pm_${metodoAnterior}`;
+            const keyViejo  = _claveCajaPeriodo(`pm_${metodoAnterior}`, ordData.service_period || 'day');
             const acumViejo = parseFloat(sessionStorage.getItem(keyViejo) || '0');
             sessionStorage.setItem(keyViejo, String(Math.max(0, acumViejo - monto)));
         }
-        const keyPm = `pm_${metodo}`;
+        const keyPm = _claveCajaPeriodo(`pm_${metodo}`, ordData.service_period || 'day');
         if (metodoAnterior !== metodo) {
             const acum = parseFloat(sessionStorage.getItem(keyPm) || '0');
             sessionStorage.setItem(keyPm, String(acum + monto));
         }
 
-        totalEfectivo      = parseFloat(sessionStorage.getItem('pm_efectivo')      || '0');
-        totalTransferencia = parseFloat(sessionStorage.getItem('pm_transferencia') || '0');
-        totalFiado         = parseFloat(sessionStorage.getItem('pm_fiado')         || '0');
+        totalEfectivo      = parseFloat(sessionStorage.getItem(_claveCajaPeriodo('pm_efectivo'))      || '0');
+        totalTransferencia = parseFloat(sessionStorage.getItem(_claveCajaPeriodo('pm_transferencia')) || '0');
+        totalFiado         = parseFloat(sessionStorage.getItem(_claveCajaPeriodo('pm_fiado'))         || '0');
         renderizarTotales();
 
-        const label = { efectivo: 'Efectivo 💵', transferencia: 'Transferencia 📲', fiado: 'Fiado 🤝' };
+        const label = { efectivo: 'Efectivo ', transferencia: 'Transferencia ', fiado: 'Fiado ' };
         Toast.ok(`Pago registrado: ${label[metodo] || metodo}`);
 
         // Recargar historial de pedidos si el tab está abierto
@@ -576,9 +679,9 @@ function _actualizarBadgePago(orderId, metodo) {
 
 function _badgeMetodo(metodo) {
     const cfg = {
-        efectivo:      { bg: 'var(--olive-lt)',  color: 'var(--olive)', bd: 'var(--olive-bd)',     label: '💵 Efectivo'      },
-        transferencia: { bg: 'var(--blue-lt)',   color: 'var(--blue)',  bd: 'rgba(37,99,168,.28)', label: '📲 Transferencia' },
-        fiado:         { bg: 'var(--amber-lt)',  color: 'var(--amber)', bd: 'rgba(154,108,26,.28)',label: '🤝 Fiado'         },
+        efectivo:      { bg: 'var(--olive-lt)',  color: 'var(--olive)', bd: 'var(--olive-bd)',     label: 'Efectivo'      },
+        transferencia: { bg: 'var(--blue-lt)',   color: 'var(--blue)',  bd: 'rgba(37,99,168,.28)', label: 'Transferencia' },
+        fiado:         { bg: 'var(--amber-lt)',  color: 'var(--amber)', bd: 'rgba(154,108,26,.28)',label: 'Fiado'         },
     };
     const c = cfg[metodo] || cfg.efectivo;
     return `<span style="font-size:10px;font-weight:600;padding:3px 11px;border-radius:999px;
@@ -594,7 +697,7 @@ function registrarAperturaCaja() {
     const val = parseFloat(inp?.value?.replace(/[^0-9.]/g,'')) || 0;
     if (val <= 0) { Toast.error('Ingresa un monto válido para la base de caja.'); return; }
     baseInicial = val;
-    sessionStorage.setItem('base_caja_hoy', String(val));
+    sessionStorage.setItem(_claveCajaPeriodo('base_caja_hoy'), String(val));
     Toast.ok(`Base de caja registrada: ${formatCOP(val)}`);
     const panel = document.getElementById('panel-apertura-caja');
     if (panel) panel.style.display = 'none';
@@ -763,145 +866,16 @@ async function descontarInsumosPorOrden(orderId) {
             .eq('id', s.id);
     }
 
-    console.log(`[La 26] 📦 Inventario descontado automáticamente para orden ${orderId}`);
+    console.log(`[La 26] Inventario descontado automáticamente para orden ${orderId}`);
 }
 
 // ============================================================
-// MODAL FACTURA ELECTRÓNICA (DIAN)
-// ============================================================
-let _feOrdenId   = null;
-let _feOrdenNo   = null;
-let _feBaseTotal = 0;
-
-function abrirModalFacturaElectronica(orderId, ordenNo, totalBruto) {
-    _feOrdenId   = orderId;
-    _feOrdenNo   = ordenNo;
-    _feBaseTotal = parseFloat(totalBruto) || 0;
-
-    const baseGravable = _feBaseTotal / (1 + TASA_IMPOCONSUMO);
-    const impoconsumo  = _feBaseTotal - baseGravable;
-
-    const elOrdenNo  = document.getElementById('fe-orden-no');
-    const elSubtotal = document.getElementById('fe-subtotal');
-    const elIva      = document.getElementById('fe-iva');
-    const elTotal    = document.getElementById('fe-total');
-    if (elOrdenNo)  elOrdenNo.textContent  = ordenNo;
-    if (elSubtotal) elSubtotal.textContent = formatCOP(baseGravable);
-    if (elIva)      elIva.textContent      = formatCOP(impoconsumo);
-    if (elTotal)    elTotal.textContent    = formatCOP(_feBaseTotal);
-
-    const modal    = document.getElementById('modal-factura-dian');
-    const elNombre = document.getElementById('fe-nombre');
-    const elNit    = document.getElementById('fe-nit');
-    const elEmail  = document.getElementById('fe-email');
-    const elResult = document.getElementById('fe-resultado');
-    if (elNombre) elNombre.value = '';
-    if (elNit)    elNit.value    = '';
-    if (elEmail)  elEmail.value  = '';
-    if (elResult) elResult.style.display = 'none';
-    if (modal)    modal.style.display    = 'flex';
-}
-
-function cerrarModalFactura() {
-    const modal = document.getElementById('modal-factura-dian');
-    if (modal) modal.style.display = 'none';
-    _feOrdenId   = null;
-    _feOrdenNo   = null;
-    _feBaseTotal = 0;
-}
-
-function _generarHashCUFE(semilla) {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    const uuid  = crypto.randomUUID().replace(/-/g, '').toUpperCase();
-    const base  = btoa(semilla + uuid).replace(/[^A-Z0-9]/gi, '').toUpperCase();
-    return base.substring(0, 96).padEnd(96, chars[Math.floor(Math.random() * chars.length)]);
-}
-
-async function generarFacturaElectronica() {
-    const nombre = document.getElementById('fe-nombre')?.value.trim() || '';
-    const nit    = document.getElementById('fe-nit')?.value.trim()    || '';
-    const email  = document.getElementById('fe-email')?.value.trim()  || '';
-
-    if (!nombre || !nit || !email) {
-        Toast.error('Completa todos los campos del receptor antes de continuar.');
-        return;
-    }
-
-    const baseGravable = _feBaseTotal / (1 + TASA_IMPOCONSUMO);
-    const impoconsumo  = _feBaseTotal - baseGravable;
-    const fechaStr     = new Date().toISOString();
-    const cufe         = _generarHashCUFE(`${_feOrdenNo}${nit}${fechaStr}`);
-
-    const payload = {
-        tipo_documento:  '01',
-        descripcion:     'Factura Electrónica de Venta',
-        numero_factura:  _feOrdenNo,
-        fecha_emision:   fechaStr,
-        cufe,
-        estado_dian:     'Enviado — CUFE Generado',
-        emisor: {
-            nit:            '900.123.456-7',
-            razon_social:   'Restaurante la 26 SAS',
-            municipio:      'Bucaramanga',
-            departamento:   'Santander',
-            actividad_ciiu: '5611',
-        },
-        receptor: {
-            tipo_doc:   nit.includes('-') ? 'NIT' : 'CC',
-            numero_doc: nit,
-            nombre,
-            email,
-        },
-        tributos: {
-            base_gravable_cop:    Math.round(baseGravable),
-            impoconsumo_8pct_cop: Math.round(impoconsumo),
-            rete_ica_bga_6_9_mil: Math.round(baseGravable * TASA_RETE_ICA),
-            total_factura_cop:    Math.round(_feBaseTotal),
-        },
-        referencia_interna:    { order_id: _feOrdenId, order_number: _feOrdenNo },
-        proveedor_tecnologico: 'SIIGO S.A. — Habilitado DIAN Res. 000042 / 2020',
-    };
-
-    try {
-        await supabaseClient.from('invoice_records').insert([{
-            order_id:        _feOrdenId,
-            order_number:    _feOrdenNo,
-            receptor_nombre: nombre,
-            receptor_nit:    nit,
-            receptor_email:  email,
-            subtotal:        Math.round(baseGravable),
-            iva:             Math.round(impoconsumo),
-            total:           Math.round(_feBaseTotal),
-            cufe,
-            payload:         JSON.stringify(payload),
-            created_at:      fechaStr,
-        }]);
-    } catch (_) { /* tabla opcional */ }
-
-    const elResult = document.getElementById('fe-resultado');
-    if (elResult) {
-        elResult.style.display = 'block';
-        elResult.innerHTML = `
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-                <span style="font-size:18px;">✅</span>
-                <span style="font-size:13px;font-weight:700;color:var(--olive);">CUFE Generado — Enviado a DIAN</span>
-            </div>
-            <p style="font-size:11.5px;color:var(--text-2);line-height:1.7;">
-                <strong>CUFE:</strong> <span class="mono" style="word-break:break-all;font-size:10px;">${cufe}</span><br>
-                <strong>Receptor:</strong> ${nombre} — ${nit}<br>
-                <strong>Correo:</strong> ${email}<br>
-                <strong>Base Gravable:</strong> ${formatCOP(baseGravable)}<br>
-                <strong>Impoconsumo (8%):</strong> ${formatCOP(impoconsumo)}<br>
-                <strong>Total Factura:</strong> ${formatCOP(_feBaseTotal)}
-            </p>`;
-    }
-    console.log('✅ Payload DIAN generado:', payload);
-}
-
-// ============================================================
-// 3. MENÚ — EDITOR MODULAR CON CÓDIGO DE PRODUCTO
+// 3. MENÚ — EDITOR DEL CATÁLOGO POR NOMBRE
 // ============================================================
 let componenteFiltradoActual = 'todos';
+let _menuCategoriasAdmin = [];
+let _menuTipoPorCategoriaAdmin = new Map();
+let _periodoPlatoSeleccionadoManual = false;
 
 // 'activos' | 'inactivos' — solo relevante en admin
 let _vistaMenuAdmin = 'activos';
@@ -936,7 +910,7 @@ async function cargarSlotsMenuReal() {
     try {
         let query = supabaseClient
             .from('menu_items')
-            .select('id, name, description, price, item_type, is_active, portions_today, restaurant_id, category_id, created_at, image_url')
+            .select('id, name, description, price, item_type, is_active, portions_today, restaurant_id, category_id, created_at, image_url, menu_period')
             .eq('is_active', _vistaMenuAdmin === 'activos')
             .order('name', { ascending: true });
 
@@ -944,15 +918,31 @@ async function cargarSlotsMenuReal() {
             query = query.eq('item_type', componenteFiltradoActual);
         }
 
-        const { data: items, error } = await query;
+        let { data: items, error } = await query;
+        if (error?.code === '42703') {
+            let legacyQuery = supabaseClient.from('menu_items')
+                .select('id, name, description, price, item_type, is_active, portions_today, restaurant_id, category_id, created_at, image_url')
+                .eq('is_active', _vistaMenuAdmin === 'activos').order('name', { ascending: true });
+            if (componenteFiltradoActual !== 'todos') legacyQuery = legacyQuery.eq('item_type', componenteFiltradoActual);
+            ({ data: items, error } = await legacyQuery);
+            if (!error) items = (items || []).map(item => ({ ...item, menu_period: 'day' }));
+        }
         if (error) throw error;
 
+        const { data: categoriasMenu } = await supabaseClient.from('menu_categories').select('id,name');
+        _menuCategoriasAdmin = categoriasMenu || _menuCategoriasAdmin;
+
         contenedor.innerHTML = '';
+
+        const periodoActivo = _periodoServicioActivo();
+        items = (items || []).filter(item => periodoActivo === 'night'
+            ? ['night', 'both'].includes(item.menu_period)
+            : ['day', 'both', undefined, null].includes(item.menu_period));
 
         if (!items || items.length === 0) {
             contenedor.innerHTML = `
                 <p style="color:var(--text-3);font-size:12.5px;grid-column:span 3;text-align:center;padding:28px;">
-                    Sin platos en esta categoría.
+                    No hay productos disponibles para el servicio activo en esta categoría.
                 </p>`;
             return;
         }
@@ -966,28 +956,45 @@ async function cargarSlotsMenuReal() {
         });
 
         itemsOrdenados.forEach((item, animIdx) => {
-            const cfg            = MAPA_TIPO[item.item_type] || { label: item.item_type, icono: '🍽️', porciones: 20, badgeClass: '' };
+            const cfg            = MAPA_TIPO[item.item_type] || { label: item.item_type, icono: 'utensils', porciones: 20, badgeClass: '' };
+            const categoriaItem = _menuCategoriasAdmin.find(c => c.id === item.category_id);
+            const etiquetaCategoria = categoriaItem?.name || cfg.label;
             const nombreEscapado = (item.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            const codigo         = '—';
-            const rango          = { color: 'var(--text-3)' };
+            const periodoPlato = item.menu_period === 'night' ? 'Noche' : item.menu_period === 'both' ? 'Día y noche' : 'Día';
+            const categoriasDisponibles = [..._menuCategoriasAdmin];
+            if (item.category_id && !categoriasDisponibles.some(c => c.id === item.category_id)) {
+                categoriasDisponibles.unshift({ id: item.category_id, name: etiquetaCategoria });
+            }
+            const categoriaOptions = categoriasDisponibles.map(c =>
+                `<option value="${_htmlSeguroAdmin(c.id)}" ${c.id === item.category_id ? 'selected' : ''}>${_htmlSeguroAdmin(c.name)}</option>`
+            ).join('');
 
             contenedor.insertAdjacentHTML('beforeend', `
                 <div class="card menu-card" style="display:flex;flex-direction:column;gap:12px;animation-delay:${animIdx * 40}ms;">
                     <div style="display:flex;justify-content:space-between;align-items:flex-start;">
                         <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-                            <span style="font-size:11px;font-weight:700;color:${rango.color};background:rgba(0,0,0,.04);border:1.5px solid rgba(0,0,0,.07);border-radius:999px;padding:3px 9px;flex-shrink:0;" class="mono">#${codigo}</span>
-                            <span class="badge ${cfg.badgeClass}">${cfg.icono} ${cfg.label}</span>
+                            <select data-menu-category="${_htmlSeguroAdmin(item.id)}" data-current-type="${_htmlSeguroAdmin(item.item_type)}"
+                                aria-label="Categoría de ${_htmlSeguroAdmin(item.name)}"
+                                style="max-width:220px;border-radius:999px;padding:5px 10px;font-size:11px;font-weight:700;">
+                                ${item.category_id ? '' : '<option value="" selected>Seleccionar categoría…</option>'}
+                                ${categoriaOptions}
+                            </select>
+                            ${item.item_type === 'a_la_carte' ? `<span class="badge">${periodoPlato}</span>` : ''}
                         </div>
                         <button onclick="eliminarComponenteCatalogo('${item.id}','${nombreEscapado}')"
                             style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:15px;padding:0;flex-shrink:0;transition:color .2s;"
                             onmouseover="this.style.color='var(--red)'"
                             onmouseout="this.style.color='var(--text-3)'"
-                            title="Dar de baja">🗑️</button>
+                            title="Dar de baja"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button>
                     </div>
 
-                    <h4 style="font-size:13.5px;font-weight:600;color:var(--text-1);line-height:1.4;margin:0;">
-                        ${item.name}
-                    </h4>
+                    <div>
+                        <label style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;">Nombre del plato</label>
+                        <input type="text" value="${_htmlSeguroAdmin(item.name)}" maxlength="120"
+                            data-menu-name="${_htmlSeguroAdmin(item.id)}"
+                            aria-label="Nombre del plato"
+                            style="font-size:13.5px;font-weight:600;color:var(--text-1);text-transform:uppercase;">
+                    </div>
 
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:14px;padding:12px;">
                         <div>
@@ -997,28 +1004,27 @@ async function cargarSlotsMenuReal() {
                                 class="card-input" style="color:var(--olive);">
                         </div>
                         <div>
-                            <p style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Porciones hoy</p>
+                            <p style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Porciones</p>
                             <input type="number" value="${item.portions_today ?? cfg.porciones}"
                                 onchange="actualizarPorcionesHoy('${item.id}', this.value)"
                                 class="card-input" style="color:var(--amber);">
                         </div>
                     </div>
 
-                    ${item.item_type === 'a_la_carte' ? `
                     <div style="background:var(--surface-2);border:1.5px solid var(--border);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:10px;">
-                        <p style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin:0;">Descripción (carta)</p>
+                        <p style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin:0;">Descripción del plato</p>
                         <textarea rows="2"
                             placeholder="Descripción breve del plato…"
                             onchange="actualizarDescripcionPlato('${item.id}', this.value)"
-                            style="width:100%;resize:vertical;background:var(--surface-1);border:1.5px solid var(--border);border-radius:8px;color:var(--text-1);font-size:12.5px;padding:8px;font-family:'DM Sans',sans-serif;line-height:1.4;">${(item.description || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+                            style="width:100%;resize:vertical;background:var(--surface-1);border:1.5px solid var(--border);border-radius:8px;color:var(--text-1);font-size:12.5px;padding:8px;font-family:'DM Sans',sans-serif;line-height:1.4;">${_htmlSeguroAdmin(item.description)}</textarea>
                         <p style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin:0;">Imagen del plato</p>
-                        ${item.image_url ? `<img src="${item.image_url}" alt="${item.name}" style="width:100%;height:120px;object-fit:cover;border-radius:8px;border:1.5px solid var(--border);">` : ''}
+                        ${item.image_url ? `<img src="${_htmlSeguroAdmin(item.image_url)}" alt="${_htmlSeguroAdmin(item.name)}" style="width:100%;height:120px;object-fit:cover;border-radius:8px;border:1.5px solid var(--border);">` : ''}
                         <label style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:6px 14px;border-radius:999px;border:1.5px solid var(--border);background:var(--surface-1);color:var(--text-2);cursor:pointer;">
                             <i data-lucide="upload" style="width:13px;height:13px;"></i>
                             ${item.image_url ? 'Cambiar imagen' : 'Subir imagen'}
                             <input type="file" accept="image/*" style="display:none;" onchange="subirImagenPlato('${item.id}', this)">
                         </label>
-                    </div>` : ''}
+                    </div>
 
                     <div style="display:flex;align-items:center;justify-content:space-between;border-top:1.5px solid var(--border);padding-top:10px;">
                         ${_vistaMenuAdmin === 'inactivos'
@@ -1027,7 +1033,7 @@ async function cargarSlotsMenuReal() {
                                    style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:5px 13px;border-radius:999px;border:1.5px solid var(--olive-bd);background:var(--olive-lt);color:var(--olive);cursor:pointer;font-family:'DM Sans',sans-serif;">
                                    <i data-lucide="rotate-ccw" style="width:12px;height:12px;"></i> Reactivar
                                </button>`
-                            : `<span style="font-size:11.5px;color:var(--text-3);">¿Disponible hoy?</span>
+                            : `<span style="font-size:11.5px;color:var(--text-3);">¿Disponible?</span>
                                <button data-switch-id="${item.id}"
                                    onclick="alternarVisibilidadPlatoReal('${item.id}', ${item.is_active})"
                                    class="${item.is_active ? 'sw-on' : 'sw-off'}">
@@ -1036,6 +1042,13 @@ async function cargarSlotsMenuReal() {
                         }
                     </div>
                 </div>`);
+        });
+
+        contenedor.querySelectorAll('[data-menu-name]').forEach(input => {
+            input.addEventListener('change', () => actualizarNombrePlatoReal(input.dataset.menuName, input));
+        });
+        contenedor.querySelectorAll('[data-menu-category]').forEach(select => {
+            select.addEventListener('change', () => actualizarCategoriaPlatoReal(select.dataset.menuCategory, select));
         });
 
         // Re-inicializar iconos Lucide en las tarjetas generadas dinámicamente
@@ -1063,21 +1076,150 @@ function filtrarMenuComponente(cat) {
     cargarSlotsMenuReal();
 }
 
+// Categorías editables del catálogo: conservan la relación con todos sus platos.
+function _htmlSeguroAdmin(value) {
+    return String(value || '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+async function cargarCategoriasMenuAdmin() {
+    const { data, error } = await supabaseClient.from('menu_categories').select('id,name').order('name');
+    if (error) { console.warn('No se pudieron cargar categorías del menú:', error.message); return; }
+    _menuCategoriasAdmin = data || [];
+    const { data: itemsTipos } = await supabaseClient.from('menu_items').select('category_id,item_type');
+    _menuTipoPorCategoriaAdmin = new Map();
+    (itemsTipos || []).forEach(item => {
+        if (item.category_id && item.item_type && !_menuTipoPorCategoriaAdmin.has(item.category_id))
+            _menuTipoPorCategoriaAdmin.set(item.category_id, item.item_type);
+    });
+    const list = document.getElementById('menu-categorias-list');
+    const fixed = ['Proteína con Salsa', 'Principio / Acompañamiento', 'Bebida / Refresco', 'Plato a la Carta', 'Sopitas'];
+    if (list) {
+        const values = [...new Set([...fixed, ..._menuCategoriasAdmin.map(c => c.name).filter(Boolean)])];
+        list.innerHTML = values.map(name => `<option value="${_htmlSeguroAdmin(name)}"></option>`).join('');
+    }
+    const manager = document.getElementById('menu-categorias-gestion');
+    if (manager) {
+        manager.innerHTML = _menuCategoriasAdmin.map(c => `
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <input type="text" maxlength="60" value="${_htmlSeguroAdmin(c.name)}" aria-label="Nombre de categoría" data-menu-category-input="${c.id}" style="flex:1;min-width:200px;">
+                <button type="button" class="btn-ghost" data-menu-category-save="${c.id}" style="display:inline-flex;align-items:center;gap:5px;padding:7px 12px;"><i data-lucide="save" style="width:14px;height:14px;"></i> Guardar nombre</button>
+            </div>`).join('') || '<p style="font-size:12px;color:var(--text-3);">Aún no hay categorías creadas.</p>';
+        manager.querySelectorAll('[data-menu-category-save]').forEach(button => {
+            button.addEventListener('click', () => {
+                const id = button.dataset.menuCategorySave;
+                const input = manager.querySelector(`[data-menu-category-input="${id}"]`);
+                renombrarCategoriaMenuAdmin(id, input?.value || '');
+            });
+        });
+    }
+    if (window.lucide) lucide.createIcons();
+}
+
+async function _obtenerRestaurantIdMenuAdmin() {
+    const { data, error } = await supabaseClient.from('restaurants').select('id').limit(1).maybeSingle();
+    if (error) throw error;
+    if (data?.id) return data.id;
+    const created = await supabaseClient.from('restaurants').insert([{ name: 'Restaurante la 26', slug: 'restaurante-la-26' }]).select('id').single();
+    if (created.error) throw created.error;
+    return created.data.id;
+}
+
+async function crearCategoriaMenuAdmin(event) {
+    event?.preventDefault();
+    const input = document.getElementById('menu-categoria-nueva');
+    const name = input?.value.trim();
+    if (!name) { Toast.error('Escribe el nombre de la categoría.'); return; }
+    try {
+        const restaurant_id = await _obtenerRestaurantIdMenuAdmin();
+        const { error } = await supabaseClient.from('menu_categories').upsert(
+            [{ restaurant_id, name, slot_type: 'single', display_order: 0 }],
+            { onConflict: 'restaurant_id,name', ignoreDuplicates: true }
+        );
+        if (error) throw error;
+        input.value = '';
+        await cargarCategoriasMenuAdmin();
+        Toast.ok(`Categoría "${name}" lista para usar.`);
+    } catch (err) {
+        console.error('No se pudo crear categoría:', err);
+        Toast.error('No se pudo guardar la categoría.');
+    }
+}
+
+async function renombrarCategoriaMenuAdmin(id, name) {
+    name = name.trim();
+    if (!name) { Toast.error('El nombre de categoría no puede quedar vacío.'); return; }
+    try {
+        const { error } = await supabaseClient.from('menu_categories').update({ name }).eq('id', id);
+        if (error) throw error;
+        await cargarCategoriasMenuAdmin();
+        await cargarSlotsMenuReal();
+        Toast.ok('Categoría actualizada.');
+    } catch (err) {
+        console.error('No se pudo renombrar categoría:', err);
+        Toast.error('No se pudo cambiar el nombre. Verifica que no exista otra categoría igual.');
+    }
+}
+
 // ============================================================
 // REGISTRAR NUEVO PLATO
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
+    const tipoMenu = document.getElementById('menu-tipo');
+    const periodWrap = document.getElementById('menu-period-wrap');
+    const selectPeriod = document.getElementById('menu-periodo');
+    const nightDetails = document.getElementById('menu-night-details');
+    const syncPeriodVisibility = () => { if (periodWrap) periodWrap.style.display = 'block'; };
+    const syncNightDetails = () => {
+        if (!nightDetails || !selectPeriod) return;
+        nightDetails.style.display = ['night', 'both'].includes(selectPeriod.value) ? 'grid' : 'none';
+    };
+    tipoMenu?.addEventListener('change', syncPeriodVisibility);
+    selectPeriod?.addEventListener('change', () => { _periodoPlatoSeleccionadoManual = true; syncNightDetails(); });
+    syncPeriodVisibility();
+    syncNightDetails();
+    cargarPeriodoMenuActivo().catch(err => {
+        console.warn('No se pudo consultar el horario activo de la carta:', err);
+        let periodoGuardado = 'day';
+        try { periodoGuardado = localStorage.getItem('la26_active_menu_period') === 'night' ? 'night' : 'day'; } catch (_) {}
+        _renderPeriodoMenu(periodoGuardado);
+    });
+
+    cargarCategoriasMenuAdmin();
+    document.getElementById('form-menu-categoria')?.addEventListener('submit', crearCategoriaMenuAdmin);
+
     const formNuevoPlato = document.getElementById('form-nuevo-plato');
     if (formNuevoPlato) {
         formNuevoPlato.addEventListener('submit', async (e) => {
             e.preventDefault();
 
-            const product_code   = parseInt(document.getElementById('menu-codigo').value) || null;
             const name           = document.getElementById('menu-nombre').value.trim();
             const price          = parseFloat(document.getElementById('menu-precio').value);
-            const item_type      = document.getElementById('menu-tipo').value;
+            const componentLabel = document.getElementById('menu-tipo').value.trim();
+            const componentKey = componentLabel.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+            const tiposBase = {
+                'proteina con salsa': { type: 'executive_lunch', category: 'Proteína con Salsa' },
+                'principio / acompanamiento': { type: 'side', category: 'Principio' },
+                'principio': { type: 'side', category: 'Principio' },
+                'principios': { type: 'side', category: 'Principio' },
+                'bebida / refresco': { type: 'drink', category: 'Bebida' },
+                'bebida': { type: 'drink', category: 'Bebida' },
+                'plato a la carta': { type: 'a_la_carte', category: 'A la Carta' },
+                'a la carta': { type: 'a_la_carte', category: 'A la Carta' },
+                'sopitas': { type: 'dessert', category: 'Sopitas' },
+                'postre': { type: 'dessert', category: 'Sopitas' },
+            };
+            const tipoBase = tiposBase[componentKey];
+            const categoriaExistente = _menuCategoriasAdmin.find(c => c.name.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() === componentKey);
+            const item_type = tipoBase?.type || _menuTipoPorCategoriaAdmin.get(categoriaExistente?.id) || 'a_la_carte';
+            const menu_period    = document.getElementById('menu-periodo').value || _periodoServicioActivo();
             const portions_today = parseInt(document.getElementById('menu-porciones').value) || null;
+            const description = ['night', 'both'].includes(menu_period)
+                ? (document.getElementById('menu-descripcion')?.value.trim() || '')
+                : '';
+            const imageInput = document.getElementById('menu-imagen');
+            const imageFile = ['night', 'both'].includes(menu_period) ? imageInput?.files?.[0] : null;
 
+            if (!componentLabel) { Toast.error('Escribe o selecciona una categoría para el plato.'); return; }
             if (item_type === 'sauce') {
                 Toast.error('El tipo "sauce" no está disponible como tipo independiente.');
                 return;
@@ -1105,15 +1247,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     restaurantId = nuevoRest.id;
                 }
 
-                const mapaCategoria = {
-                    executive_lunch: 'Proteína con Salsa',
-                    protein:         'Proteína con Salsa',
-                    side:            'Principio',
-                    drink:           'Bebida',
-                    a_la_carte:      'A la Carta',
-                    soup:            'Sopa',
-                };
-                const nombreCategoria = mapaCategoria[item_type] || 'General';
+                const nombreCategoria = categoriaExistente?.name || tipoBase?.category || componentLabel;
 
                 await supabaseClient
                     .from('menu_categories')
@@ -1138,20 +1272,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     name,
                     price,
                     item_type,
+                    ...(description ? { description } : {}),
+                    menu_period,
                     is_active: true,
                 };
                 if (portions_today !== null) payload.portions_today = portions_today;
-                if (product_code) payload.product_code = product_code;
-
-                const { error: errItem } = await supabaseClient
+                const { data: insertedItems, error: errItem } = await supabaseClient
                     .from('menu_items')
-                    .insert([payload]);
+                    .insert([payload])
+                    .select('id');
 
                 if (errItem) {
-                    if (errItem.code === '42703' && payload.product_code) {
-                        delete payload.product_code;
-                        const { error: errRetry } = await supabaseClient
-                            .from('menu_items').insert([payload]);
+                    if (errItem.code === '42703' && menu_period !== 'day') {
+                        throw new Error('La base de datos aún no tiene el campo de horario. Aplica primero migracion_menu_dia_noche.sql.');
+                    }
+                    if (errItem.code === '42703') {
+                        delete payload.menu_period;
+                        const { data: retryItems, error: errRetry } = await supabaseClient
+                            .from('menu_items').insert([payload]).select('id');
+                        if (!errRetry && retryItems?.[0]?.id && imageFile) await subirImagenPlato(retryItems[0].id, { files: [imageFile] });
                         if (errRetry) {
                             if (errRetry.code === '23505') {
                                 Toast.error(`Ya existe un plato llamado "${name}" en el catálogo.`);
@@ -1167,10 +1306,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
-                document.getElementById('menu-codigo').value    = '';
+                const newItemId = insertedItems?.[0]?.id;
+                if (newItemId && imageFile) await subirImagenPlato(newItemId, { files: [imageFile] });
+                document.getElementById('menu-descripcion').value = '';
+                if (imageInput) imageInput.value = '';
                 document.getElementById('menu-nombre').value    = '';
                 document.getElementById('menu-precio').value    = '';
                 document.getElementById('menu-porciones').value = '';
+                document.getElementById('menu-periodo').value = _periodoServicioActivo();
+                syncNightDetails();
+                _periodoPlatoSeleccionadoManual = false;
                 Toast.ok(`"${name}" registrado en el catálogo correctamente.`);
                 cargarSlotsMenuReal();
 
@@ -1187,7 +1332,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ============================================================
 async function eliminarComponenteCatalogo(idItem, nombreItem) {
     if (!confirm(
-        `⚠️ ¿Dar de baja "${nombreItem}" del catálogo?\n\n` +
+        ` ¿Dar de baja "${nombreItem}" del catálogo?\n\n` +
         `Si el plato tiene ventas históricas se ocultará del menú pero ` +
         `su historial se conservará intacto.`
     )) return;
@@ -1260,8 +1405,76 @@ async function eliminarComponenteCatalogo(idItem, nombreItem) {
 }
 
 // ============================================================
-// ACTUALIZAR DESCRIPCIÓN (a_la_carte)
+// ACTUALIZAR DESCRIPCIÓN DEL PLATO
 // ============================================================
+function _normalizarCategoriaMenuAdmin(nombre) {
+    return String(nombre || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+}
+
+async function actualizarNombrePlatoReal(idPlato, input) {
+    const nombre = input?.value.trim().toLocaleUpperCase('es-CO') || '';
+    if (!nombre) {
+        Toast.error('El nombre del plato no puede quedar vacío.');
+        await cargarSlotsMenuReal();
+        return;
+    }
+    if (input) input.value = nombre;
+    try {
+        const { error } = await supabaseClient
+            .from('menu_items')
+            .update({ name: nombre })
+            .eq('id', idPlato);
+        if (error) throw error;
+        Toast.ok('Nombre actualizado en mayúsculas.');
+        await cargarSlotsMenuReal();
+    } catch (err) {
+        console.error('Error actualizando nombre del plato:', err);
+        Toast.error('No se pudo actualizar el nombre del plato.');
+        await cargarSlotsMenuReal();
+    }
+}
+
+async function actualizarCategoriaPlatoReal(idPlato, select) {
+    const categoryId = select?.value;
+    const categoria = _menuCategoriasAdmin.find(c => c.id === categoryId);
+    if (!categoria) {
+        Toast.error('Selecciona una categoría válida.');
+        await cargarSlotsMenuReal();
+        return;
+    }
+
+    const clave = _normalizarCategoriaMenuAdmin(categoria.name);
+    const tiposBase = {
+        'proteina con salsa': 'executive_lunch',
+        'principio / acompanamiento': 'side',
+        'principio': 'side',
+        'principios': 'side',
+        'bebida / refresco': 'drink',
+        'bebida': 'drink',
+        'plato a la carta': 'a_la_carte',
+        'a la carta': 'a_la_carte',
+        'sopitas': 'dessert',
+        'postre': 'dessert',
+    };
+    const itemType = tiposBase[clave]
+        || _menuTipoPorCategoriaAdmin.get(categoryId)
+        || select.dataset.currentType;
+
+    try {
+        const { error } = await supabaseClient
+            .from('menu_items')
+            .update({ category_id: categoryId, item_type: itemType })
+            .eq('id', idPlato);
+        if (error) throw error;
+        Toast.ok('Categoría del plato actualizada.');
+        await cargarSlotsMenuReal();
+    } catch (err) {
+        console.error('Error actualizando categoría del plato:', err);
+        Toast.error('No se pudo actualizar la categoría del plato.');
+        await cargarSlotsMenuReal();
+    }
+}
+
 async function actualizarDescripcionPlato(idPlato, descripcion) {
     try {
         const { error } = await supabaseClient
@@ -1277,7 +1490,7 @@ async function actualizarDescripcionPlato(idPlato, descripcion) {
 }
 
 // ============================================================
-// SUBIR IMAGEN (a_la_carte) → Supabase Storage bucket: menu-images
+// SUBIR IMAGEN DEL PLATO → Supabase Storage bucket: menu-images
 // ============================================================
 async function subirImagenPlato(idPlato, input) {
     const file = input.files && input.files[0];
@@ -1335,7 +1548,10 @@ function _actualizarSwitchDOM(idPlato, activo) {
     const btn = document.querySelector(`[data-switch-id="${idPlato}"]`);
     if (!btn) return;
     btn.className   = activo ? 'sw-on' : 'sw-off';
-    btn.textContent = activo ? '🟢 Activo' : '🔴 Agotado';
+    btn.innerHTML = activo
+        ? '<i data-lucide="circle-check" style="width:12px;height:12px;vertical-align:-2px;"></i> Activo'
+        : '<i data-lucide="circle-x" style="width:12px;height:12px;vertical-align:-2px;"></i> Agotado';
+    if (window.lucide) lucide.createIcons();
     btn.setAttribute('onclick', `alternarVisibilidadPlatoReal('${idPlato}', ${activo})`);
 }
 
@@ -1414,10 +1630,10 @@ async function cargarGastosReal() {
         // el Dashboard. Antes esta pestaña contaba el día completo mientras
         // el Dashboard contaba desde el último cierre: dos ventanas distintas
         // sobrescribiendo la misma variable globalEgresos.
-        const _ini2      = _resolverInicioDiaEfectivo(`${_yyyy2}-${_mm2}-${_dd2}T00:00:00-05:00`);
+        const _ini2      = _resolverInicioDiaEfectivo(`${_yyyy2}-${_mm2}-${_dd2}T00:00:00-05:00`, _periodoServicioActivo());
         const _fin2      = `${_yyyy2}-${_mm2}-${_dd2}T23:59:59-05:00`;
 
-        const { data: egresos, error } = await supabaseClient
+        let { data: egresos, error } = await supabaseClient
             .from('operating_expenses')
             .select('*')
             .gte('created_at', _ini2)
@@ -1426,7 +1642,8 @@ async function cargarGastosReal() {
 
         if (error) throw error;
 
-        globalEgresos = (egresos || []).reduce(
+        egresos = (egresos || []).filter(g => (g.service_period || 'day') === _periodoServicioActivo());
+        globalEgresos = egresos.reduce(
             (acc, g) => acc + (parseFloat(g.amount) || 0), 0
         );
 
@@ -1478,7 +1695,7 @@ async function cargarGastosReal() {
 // por error (monto equivocado, duplicado, prueba, etc.)
 // ============================================================
 async function eliminarGastoReal(idGasto, descripcion, monto) {
-    if (!confirm(`⚠️ ¿Eliminar el gasto "${descripcion}" por ${formatCOP(monto)}?\n\nEsta acción no se puede deshacer y ajustará los totales del día.`)) return;
+    if (!confirm(` ¿Eliminar el gasto "${descripcion}" por ${formatCOP(monto)}?\n\nEsta acción no se puede deshacer y ajustará los totales del día.`)) return;
     try {
         const { error } = await supabaseClient
             .from('operating_expenses')
@@ -1502,9 +1719,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const description  = document.getElementById('gasto-descripcion').value;
             const amount       = parseFloat(document.getElementById('gasto-monto').value);
             try {
-                const { error } = await supabaseClient
+                let { error } = await supabaseClient
                     .from('operating_expenses')
-                    .insert([{ expense_type, description, amount }]);
+                    .insert([{ expense_type, description, amount, service_period: _periodoServicioActivo() }]);
+                if (error?.code === '42703') {
+                    const legacy = await supabaseClient.from('operating_expenses').insert([{ expense_type, description, amount }]);
+                    error = legacy.error;
+                    if (!error) Toast.info('Gasto guardado. Aplica la migración para separarlo por servicio.');
+                }
                 if (error) throw error;
                 formGasto.reset();
                 Toast.ok(`Salida de ${formatCOP(amount)} registrada correctamente.`);
@@ -1553,7 +1775,7 @@ async function cargarInventarioReal() {
         stock.forEach(inv => {
             const cant = parseFloat(inv.current_stock);
             const alertaCell = cant <= 5
-                ? `<span style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;">${cant} ⚠️ Stock bajo</span>`
+                ? `<span style="background:var(--red-lt);border:1.5px solid var(--red-bd);color:var(--red);padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;">${cant}  Stock bajo</span>`
                 : `<span class="mono" style="font-size:13px;color:var(--text-1);font-weight:600;">${cant}</span>`;
             const nombreEscapado = (inv.item_name || '').replace(/'/g, "\\'");
 
@@ -1577,7 +1799,7 @@ async function cargarInventarioReal() {
                     </td>
                     <td style="text-align:right;">
                         <button onclick="eliminarInsumoReal('${inv.id}','${nombreEscapado}')" class="btn-danger">
-                            🗑️ Dar de baja
+                            <i data-lucide="trash-2" style="width:14px;height:14px;"></i> Dar de baja
                         </button>
                     </td>
                 </tr>`);
@@ -1603,7 +1825,7 @@ async function ajustarExistenciasFisicas(idInsumo, stockActual, delta) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    const basePersistida = parseFloat(sessionStorage.getItem('base_caja_hoy') || '0');
+    const basePersistida = parseFloat(sessionStorage.getItem(_claveCajaPeriodo('base_caja_hoy')) || '0');
     if (basePersistida > 0) {
         baseInicial = basePersistida;
         const panel = document.getElementById('panel-apertura-caja');
@@ -1641,7 +1863,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function eliminarInsumoReal(idInsumo, nombreInsumo) {
-    if (!confirm(`⚠️ ¿Dar de baja "${nombreInsumo}"?`)) return;
+    if (!confirm(` ¿Dar de baja "${nombreInsumo}"?`)) return;
     try {
         const { error } = await supabaseClient
             .from('inventory_supplies')
@@ -1701,6 +1923,7 @@ function cerrarModalCierre() {
 
 async function realizarCierre() {
     const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    const periodoServicio = _periodoServicioActivo();
 
     // [v3.7 · FIX-EGRESOS] Aviso de cierre duplicado: si ya existe un cierre
     // archivado con la fecha de hoy se pide confirmación explícita, para que
@@ -1710,9 +1933,10 @@ async function realizarCierre() {
         const { data: previos } = await supabaseClient
             .from('historial_cierres')
             .select('id')
-            .eq('fecha', hoy);
+            .eq('fecha', hoy)
+            .eq('service_period', periodoServicio);
         if (previos && previos.length > 0) {
-            const seguir = confirm(`⚠️ Ya existe un cierre archivado para ${hoy}.\n\n¿Seguro que quieres registrar OTRO cierre para la misma fecha?`);
+            const seguir = confirm(`Ya existe un cierre de servicio ${_etiquetaPeriodoServicio(periodoServicio)} para ${hoy}.\n\n¿Seguro que quieres registrar otro cierre de ese mismo servicio y fecha?`);
             if (!seguir) return;
         }
     } catch (_) { /* si la verificación falla, se continúa con el cierre normal */ }
@@ -1723,6 +1947,7 @@ async function realizarCierre() {
     const utilidadNeta = globalIngresos - globalEgresos - totalICA;
     const cierrePayload = {
         fecha:         hoy,
+        service_period: periodoServicio,
         ingresos:      Math.round(globalIngresos),
         egresos:       Math.round(globalEgresos),
         utilidad_neta: Math.round(utilidadNeta),
@@ -1739,8 +1964,17 @@ async function realizarCierre() {
         const { error } = await supabaseClient
             .from('historial_cierres')
             .insert([cierrePayload]);
-        if (error) throw error;
-        Toast.ok(`✅ Cierre del ${hoy} archivado en el calendario.`, 6000);
+        if (error?.code === '42703') {
+            if (periodoServicio === 'night') {
+                throw new Error('La base de datos no tiene la columna service_period; no se guardará el cierre nocturno como si fuera de Día. Aplica migracion_menu_dia_noche.sql.');
+            }
+            const legacyPayload = { ...cierrePayload };
+            delete legacyPayload.service_period;
+            const legacy = await supabaseClient.from('historial_cierres').insert([legacyPayload]);
+            if (legacy.error) throw legacy.error;
+            Toast.info('Cierre guardado. Aplica la migración para separar los servicios en el historial.');
+        } else if (error) throw error;
+        Toast.ok(`Cierre del servicio de ${_etiquetaPeriodoServicio(periodoServicio)} del ${hoy} archivado.`, 6000);
     } catch (err) {
         console.warn('historial_cierres no disponible — guardando localmente:', err.message);
         const histLocal = JSON.parse(localStorage.getItem('cierres_local') || '[]');
@@ -1753,10 +1987,11 @@ async function realizarCierre() {
     // [v3.4 · FIX-CIERRE] Persistir el corte en localStorage para que
     // sobreviva al cerrar/reabrir la app. Se borra el de sessionStorage
     // (versión vieja) para que no haya dos fuentes en conflicto.
-    localStorage.setItem('cierre_desde', ahoraCierre);
+    localStorage.setItem(`cierre_desde_${periodoServicio}`, ahoraCierre);
+    if (periodoServicio === 'day') localStorage.setItem('cierre_desde', ahoraCierre);
     sessionStorage.removeItem('cierre_desde');
 
-    ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(k));
+    ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(_claveCajaPeriodo(k, periodoServicio)));
     totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
     globalIngresos = 0; globalEgresos = 0;
     // Actualizar DOM inmediatamente sin esperar la query
@@ -1805,7 +2040,18 @@ async function realizarCierre() {
 //    día 1 los acumulados arrancan automáticamente en $0.
 //  - La tabla solo muestra los cierres del mes visible (recientes primero).
 //  - Módulo de estadísticas animado con Anime.js (contadores y barras).
-const _cierresState = { mes: '', meses: [], datos: [] };
+const _cierresState = { mes: '', meses: [], datos: [], servicio: 'all' };
+
+function _totalesCierres(cierres) {
+    return cierres.reduce((a, c) => ({
+        ing: a.ing + (Number(c.ingresos) || 0),
+        eg:  a.eg  + (Number(c.egresos) || 0),
+        ut:  a.ut  + (Number(c.utilidad_neta) || 0),
+        ef:  a.ef  + (Number(c.efectivo) || 0),
+        tr:  a.tr  + (Number(c.transferencia) || 0),
+        fi:  a.fi  + (Number(c.fiado) || 0),
+    }), { ing: 0, eg: 0, ut: 0, ef: 0, tr: 0, fi: 0 });
+}
 
 const _MESES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
                    'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -1883,16 +2129,31 @@ async function _sincronizarCierresLocales() {
         const { local, id, ...payload } = c;
         payload.fecha = _fechaCierreISO(payload.fecha);
         try {
-            // Evitar duplicados: ¿ya existe un cierre con misma fecha y mismo created_at?
+            // Evitar duplicados sin cruzar cierres de Día y Noche que tengan
+            // la misma fecha y marca de tiempo.
             let existe = false;
             if (payload.created_at) {
-                const { data: dup } = await supabaseClient
+                const periodo = payload.service_period || 'day';
+                let consultaDup = await supabaseClient
                     .from('historial_cierres')
                     .select('id')
                     .eq('fecha', payload.fecha)
                     .eq('created_at', payload.created_at)
-                    .maybeSingle();
-                existe = !!dup;
+                    .eq('service_period', periodo)
+                    .limit(1);
+                // En esquemas antiguos, solo un cierre de Día puede usar la
+                // búsqueda heredada. Un cierre de Noche sin columna de turno
+                // se conserva local para evitar archivarlo como si fuera Día.
+                if (consultaDup.error?.code === '42703' && periodo === 'day') {
+                    consultaDup = await supabaseClient
+                        .from('historial_cierres')
+                        .select('id')
+                        .eq('fecha', payload.fecha)
+                        .eq('created_at', payload.created_at)
+                        .limit(1);
+                }
+                if (consultaDup.error) throw consultaDup.error;
+                existe = (consultaDup.data || []).length > 0;
             }
             if (!existe) {
                 const { error } = await supabaseClient
@@ -1919,7 +2180,7 @@ async function cargarCalendarioCierres() {
     const statsEl = document.getElementById('estadisticas-mensuales');
     if (!tbody) return;
 
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-3);">Cargando historial…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text-3);">Cargando historial…</td></tr>`;
 
     // Paso 1: re-sincronizar cierres locales pendientes hacia Supabase.
     let localesPendientes = [];
@@ -1975,18 +2236,16 @@ async function cargarCalendarioCierres() {
         return String(b.created_at || '').localeCompare(String(a.created_at || ''));
     });
 
-    const cierres  = _cierresState.datos;
+    const cierresMes = _cierresState.datos;
+    const cierresDia = cierresMes.filter(c => (c.service_period || 'day') === 'day');
+    const cierresNoche = cierresMes.filter(c => c.service_period === 'night');
+    const cierres = _cierresState.servicio === 'all'
+        ? cierresMes
+        : cierresMes.filter(c => (c.service_period || 'day') === _cierresState.servicio);
     const labelMes = _labelMes(_cierresState.mes);
-
-    // Totales del MES visible — cada día 1 arrancan en $0 automáticamente
-    const tot = cierres.reduce((a, c) => ({
-        ing: a.ing + (c.ingresos || 0),
-        eg:  a.eg  + (c.egresos  || 0),
-        ut:  a.ut  + (c.utilidad_neta || 0),
-        ef:  a.ef  + (c.efectivo || 0),
-        tr:  a.tr  + (c.transferencia || 0),
-        fi:  a.fi  + (c.fiado || 0),
-    }), { ing: 0, eg: 0, ut: 0, ef: 0, tr: 0, fi: 0 });
+    const totDia = _totalesCierres(cierresDia);
+    const totNoche = _totalesCierres(cierresNoche);
+    const tot = _totalesCierres(cierres);
 
     // Paso 6: resumen — selector de mes + tarjetas del mes seleccionado.
     if (resumen) {
@@ -2000,57 +2259,105 @@ async function cargarCalendarioCierres() {
             `<option value="${m}" ${m === _cierresState.mes ? 'selected' : ''}>${_labelMes(m)}</option>`
         ).join('');
 
-        const tarjeta = (titulo, icono, id, color, bg, bd) => `
-            <div style="background:${bg};border:1.5px solid ${bd};border-radius:14px;padding:14px;text-align:center;">
-                <p style="font-size:10px;font-weight:700;color:${color};text-transform:uppercase;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:5px;">
-                    <span class="ic ic-sm"><i data-lucide="${icono}"></i></span> ${titulo}
-                </p>
-                <p id="${id}" style="font-size:18px;font-weight:800;color:${color};" class="mono">$ 0</p>
+        const botonServicio = (servicio, etiqueta, cantidad) => {
+            const activo = _cierresState.servicio === servicio;
+            return `<button type="button" onclick="_cambiarServicioCierres('${servicio}')"
+                aria-pressed="${activo}"
+                style="border:1.5px solid ${activo ? 'var(--olive)' : 'var(--border)'};border-radius:999px;padding:7px 14px;background:${activo ? 'var(--olive)' : 'var(--surface)'};color:${activo ? '#fff' : 'var(--text-2)'};font:600 12px 'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">
+                ${etiqueta} <span style="opacity:.78;">(${cantidad})</span>
+            </button>`;
+        };
+
+        const tarjeta = (titulo, valor, color, bg, bd) => `
+            <div style="background:${bg};border:1.5px solid ${bd};border-radius:14px;padding:12px;text-align:center;min-width:0;">
+                <p style="font-size:10px;font-weight:700;color:${color};text-transform:uppercase;margin-bottom:4px;">${titulo}</p>
+                <p style="font-size:17px;font-weight:800;color:${color};" class="mono">${formatCOP(valor)}</p>
             </div>`;
+
+        const bloqueTotales = (etiqueta, cantidad, valores) => `
+            <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;">
+                    <h3 style="font-size:12px;font-weight:700;color:var(--text-1);">Servicio ${etiqueta}</h3>
+                    <span style="font-size:10px;color:var(--text-3);">${cantidad} cierre${cantidad === 1 ? '' : 's'}</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;">
+                    ${tarjeta('Ingresos', valores.ing, 'var(--olive)', 'var(--olive-lt)', 'var(--olive-bd)')}
+                    ${tarjeta('Egresos', valores.eg, 'var(--red)', 'var(--red-lt)', 'var(--red-bd)')}
+                    ${tarjeta('Utilidad neta', valores.ut, 'var(--blue)', 'var(--blue-lt)', 'rgba(37,99,168,.25)')}
+                </div>
+            </div>`;
+
+        const resumenPorServicio = _cierresState.servicio === 'all'
+            ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%, 300px),1fr));gap:12px;">
+                    ${bloqueTotales('Día', cierresDia.length, totDia)}
+                    ${bloqueTotales('Noche', cierresNoche.length, totNoche)}
+               </div>`
+            : bloqueTotales(_cierresState.servicio === 'night' ? 'Noche' : 'Día', cierres.length, tot);
 
         resumen.innerHTML = `
             <div style="margin-bottom:18px;">
                 ${avisoError}
                 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
-                    <label style="font-size:12px;font-weight:600;color:var(--text-2);display:flex;align-items:center;gap:6px;">
-                        <span class="ic ic-sm"><i data-lucide="calendar"></i></span> Mes contable:
-                    </label>
-                    <select id="sel-mes-cierres" onchange="_cambiarMesCierres(this.value)"
-                        style="min-width:190px;border-radius:999px;padding:5px 16px;font-size:12.5px;height:36px;font-weight:600;color:var(--text-1);background:var(--surface-1);border:1.5px solid var(--border);cursor:pointer;font-family:'DM Sans',sans-serif;">
-                        ${opcionesMeses}
-                    </select>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <label style="font-size:12px;font-weight:600;color:var(--text-2);display:flex;align-items:center;gap:6px;margin:0;">
+                            <span class="ic ic-sm"><i data-lucide="calendar"></i></span> Mes contable:
+                        </label>
+                        <select id="sel-mes-cierres" onchange="_cambiarMesCierres(this.value)"
+                            style="min-width:190px;border-radius:999px;padding:5px 16px;font-size:12.5px;height:36px;font-weight:600;color:var(--text-1);background:var(--surface-1);border:1.5px solid var(--border);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                            ${opcionesMeses}
+                        </select>
+                    </div>
+                    <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;" role="group" aria-label="Filtrar cierres por servicio">
+                        ${botonServicio('day', 'Día', cierresDia.length)}
+                        ${botonServicio('night', 'Noche', cierresNoche.length)}
+                        ${botonServicio('all', 'Ambos turnos', cierresMes.length)}
+                    </div>
                     <div style="flex:1;"></div>
                     <span style="font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:5px;">
                         <span class="ic ic-sm"><i data-lucide="archive"></i></span>
                         ${cierres.length} cierre${cierres.length !== 1 ? 's' : ''} en ${labelMes}
                     </span>
                 </div>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;" class="tables-grid">
-                    ${tarjeta('Ingresos del Mes', 'trending-up',   'em-card-ing', 'var(--olive)', 'var(--olive-lt)', 'var(--olive-bd)')}
-                    ${tarjeta('Egresos del Mes',  'trending-down', 'em-card-eg',  'var(--red)',   'var(--red-lt)',   'var(--red-bd)')}
-                    ${tarjeta('Utilidad del Mes', 'wallet',        'em-card-ut',  'var(--blue)',  'var(--blue-lt)',  'rgba(37,99,168,.25)')}
-                </div>
+                ${resumenPorServicio}
             </div>`;
     }
 
     // Paso 7: módulo de estadísticas del mes.
-    if (statsEl) statsEl.innerHTML = _htmlEstadisticasMes(cierres, tot, labelMes);
+    if (statsEl) {
+        if (_cierresState.servicio === 'all') {
+            statsEl.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%, 520px),1fr));gap:18px;';
+            statsEl.innerHTML = _htmlEstadisticasMes(cierresDia, totDia, labelMes, 'Día', 'cierres-dia')
+                + _htmlEstadisticasMes(cierresNoche, totNoche, labelMes, 'Noche', 'cierres-noche');
+        } else {
+            statsEl.style.cssText = '';
+            statsEl.innerHTML = _htmlEstadisticasMes(cierres, tot, labelMes,
+                _cierresState.servicio === 'night' ? 'Noche' : 'Día', `cierres-${_cierresState.servicio}`);
+        }
+    }
 
     // Paso 8: tabla de ciclos contables del mes.
     if (cierres.length === 0) {
         tbody.innerHTML = errorSupabase
-            ? `<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--red);">Error al cargar cierres: ${errorSupabase.message || errorSupabase}</td></tr>`
-            : `<tr><td colspan="8" style="text-align:center;padding:28px;color:var(--text-3);">Sin cierres registrados en ${labelMes}.</td></tr>`;
+            ? `<tr><td colspan="9" style="text-align:center;padding:28px;color:var(--red);">Error al cargar cierres: ${errorSupabase.message || errorSupabase}</td></tr>`
+            : `<tr><td colspan="9" style="text-align:center;padding:28px;color:var(--text-3);">Sin cierres registrados en ${labelMes}.</td></tr>`;
     } else {
         const fragment = document.createDocumentFragment();
         cierres.forEach(c => {
             const utClass    = (c.utilidad_neta || 0) >= 0 ? 'color:var(--olive)' : 'color:var(--red)';
             const localBadge = c.local ? `<span style="font-size:9px;color:var(--amber);font-weight:700;"> (local)</span>` : '';
             const fechaTxt   = _fechaCierreISO(c.fecha);
+            const periodoCierre = c.service_period === 'night' ? 'night' : 'day';
+            const etiquetaServicio = _etiquetaPeriodoServicio(periodoCierre);
+            const estiloServicio = periodoCierre === 'night'
+                ? 'background:var(--blue-lt);color:var(--blue);border-color:rgba(37,99,168,.3);'
+                : 'background:var(--olive-lt);color:var(--olive);border-color:var(--olive-bd);';
+            const etiquetaTipoCierre = c.close_type === 'automatic' ? 'CIERRE AUTOMÁTICO' : 'CIERRE MANUAL';
+            const cierreTipo = `<span style="display:inline-block;margin-left:6px;font-size:9px;color:var(--text-3);font-weight:700;">· ${etiquetaTipoCierre}</span>`;
             const tr = document.createElement('tr');
-            tr.className = 'tbody-row';
+            tr.className = `tbody-row cierre-periodo-${periodoCierre}`;
             tr.innerHTML = `
                 <td class="mono" style="font-size:12.5px;font-weight:600;">${fechaTxt}${localBadge}</td>
+                <td><span class="badge" style="${estiloServicio}">${etiquetaServicio}</span>${cierreTipo}</td>
                 <td class="mono" style="text-align:right;color:var(--olive);font-weight:600;">${formatCOP(c.ingresos || 0)}</td>
                 <td class="mono" style="text-align:right;color:var(--red);">${formatCOP(c.egresos || 0)}</td>
                 <td class="mono" style="text-align:right;${utClass};font-weight:700;">${formatCOP(c.utilidad_neta || 0)}</td>
@@ -2058,7 +2365,7 @@ async function cargarCalendarioCierres() {
                 <td class="mono" style="text-align:right;font-size:11.5px;">${formatCOP(c.transferencia || 0)}</td>
                 <td class="mono" style="text-align:right;font-size:11.5px;color:var(--amber);">${formatCOP(c.fiado || 0)}</td>
                 <td style="text-align:center;">
-                    ${c.local ? '' : `<button onclick="eliminarCierre('${c.id}', '${fechaTxt}')" title="Eliminar registro"
+                    ${c.local ? '' : `<button onclick="eliminarCierre('${c.id}', '${fechaTxt}', '${periodoCierre}')" title="Eliminar cierre de ${etiquetaServicio}"
                         style="background:none;border:none;cursor:pointer;color:var(--red);padding:4px 8px;border-radius:6px;opacity:0.7;display:inline-flex;align-items:center;"
                         onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'"><i data-lucide="trash-2" style="width:16px;height:16px;"></i></button>`}
                 </td>`;
@@ -2080,17 +2387,23 @@ function _cambiarMesCierres(mes) {
     cargarCalendarioCierres();
 }
 
+function _cambiarServicioCierres(servicio) {
+    if (!['day', 'night', 'all'].includes(servicio)) return;
+    _cierresState.servicio = servicio;
+    cargarCalendarioCierres();
+}
+
 // ── Módulo de estadísticas mensuales ───────────────────────────
 // Construye el HTML: comparativo Ingresos vs Egresos (totales +
 // tendencia diaria con barras) y distribución de métodos de pago.
 // Los valores animables llevan data-atributos que _animarEstadisticasMes
 // usa como objetivo (las barras nacen en 0 y crecen a su valor real).
-function _htmlEstadisticasMes(cierres, tot, labelMes) {
+function _htmlEstadisticasMes(cierres, tot, labelMes, servicioLabel = '', idPrefix = 'cierres') {
     if (cierres.length === 0) {
         return `
         <div class="card" style="text-align:center;padding:32px;color:var(--text-3);font-size:12.5px;">
             <span class="ic ic-md" style="display:inline-flex;margin-bottom:6px;"><i data-lucide="bar-chart-3"></i></span>
-            <p>Sin datos para estadísticas en ${labelMes}.</p>
+            <p>Sin cierres de ${servicioLabel || 'este servicio'} para ${labelMes}.</p>
         </div>`;
     }
 
@@ -2099,8 +2412,8 @@ function _htmlEstadisticasMes(cierres, tot, labelMes) {
     cierres.forEach(c => {
         const f = _fechaCierreISO(c.fecha);
         if (!porDia[f]) porDia[f] = { ing: 0, eg: 0 };
-        porDia[f].ing += c.ingresos || 0;
-        porDia[f].eg  += c.egresos  || 0;
+        porDia[f].ing += Number(c.ingresos) || 0;
+        porDia[f].eg  += Number(c.egresos) || 0;
     });
     const dias   = Object.keys(porDia).sort();
     const maxDia = Math.max(1, ...dias.map(d => Math.max(porDia[d].ing, porDia[d].eg)));
@@ -2157,15 +2470,15 @@ function _htmlEstadisticasMes(cierres, tot, labelMes) {
     <div class="card">
         <h3 style="font-size:14px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:7px;margin-bottom:20px;">
             <span class="ic ic-md" style="color:var(--blue);"><i data-lucide="bar-chart-3"></i></span>
-            Estadísticas de ${labelMes}
+            Estadísticas ${servicioLabel ? `· Servicio ${servicioLabel} · ` : 'de '}${labelMes}
         </h3>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:28px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%, 300px),1fr));gap:28px;">
             <div>
                 <p style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
                     <span class="ic ic-sm"><i data-lucide="scale"></i></span> Ingresos vs Egresos
                 </p>
-                ${barraTotal('Ingresos', tot.ing, 'var(--olive)', 'em-total-ing')}
-                ${barraTotal('Egresos',  tot.eg,  'var(--red)',   'em-total-eg')}
+                ${barraTotal('Ingresos', tot.ing, 'var(--olive)', `${idPrefix}-total-ing`)}
+                ${barraTotal('Egresos',  tot.eg,  'var(--red)',   `${idPrefix}-total-eg`)}
                 <p style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin:18px 0 10px;display:flex;align-items:center;gap:6px;">
                     <span class="ic ic-sm"><i data-lucide="activity"></i></span> Tendencia diaria
                 </p>
@@ -2258,8 +2571,9 @@ function _animarEstadisticasMes(tot) {
     });
 }
 
-async function eliminarCierre(id, fecha) {
-    if (!confirm(`¿Eliminar el registro del ${fecha}? Esta acción no se puede deshacer.`)) return;
+async function eliminarCierre(id, fecha, periodo = 'day') {
+    const servicio = _etiquetaPeriodoServicio(periodo);
+    if (!confirm(`¿Eliminar el cierre de ${servicio} del ${fecha}? Esta acción no se puede deshacer.`)) return;
     try {
         const { error } = await supabaseClient.from('historial_cierres').delete().eq('id', id);
         if (error) throw error;
@@ -2275,14 +2589,13 @@ async function eliminarCierre(id, fecha) {
 // INICIALIZACIÓN PRINCIPAL
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
+    _iniciarActualizacionHistorialAlVolver();
     const elFecha = document.getElementById('fecha-actual');
     if (elFecha) {
         elFecha.textContent = new Date().toLocaleDateString('es-CO', {
             weekday: 'short', year: 'numeric', month: 'short', day: 'numeric'
         });
     }
-
-    setTimeout(() => cargarDashboardReal(), 50);
 
     (async () => {
         if (!window.La26Core) return;
@@ -2291,9 +2604,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const rId = rest?.id;
         if (!rId) return;
         La26Core.suscribirRealtime(rId);
-        La26Core.on('onOrderChange', () => {
+        La26Core.on('onOrderChange', (cambio = {}) => {
             const tabDash = document.getElementById('tab-dashboard');
             if (tabDash && tabDash.style.display !== 'none') setTimeout(() => cargarDashboardReal(), 400);
+
+            if (['insert', 'update', 'delete', 'item_insert', 'item_update'].includes(cambio.tipo)) {
+                const espera = cambio.tipo === 'insert' ? 1400 : 450;
+                _programarRecargaHistorialPedidosAutomatica(espera);
+            }
         });
         La26Core.on('onMenuItemChange', () => {
             const tabMenu = document.getElementById('tab-menu');
@@ -2310,6 +2628,228 @@ document.addEventListener('DOMContentLoaded', () => {
 // MÓDULO A: CONTROL DE ACCESO
 // ============================================================
 const SETTING_KEY = 'orders_enabled';
+const MENU_PERIOD_KEY = 'active_menu_period';
+const NIGHT_STARTED_KEY = 'night_service_started_at';
+let _nightCloseInProgress = false;
+let _nightCloseConfigurationError = false;
+let _nightServiceStartAt = '';
+
+async function _leerSettingSistema(key) {
+    const { data, error } = await supabaseClient.from('system_settings').select('value').eq('key', key).maybeSingle();
+    if (error) throw error;
+    return data?.value || '';
+}
+
+async function _asegurarInicioServicioNoche() {
+    if (_nightServiceStartAt && Number.isFinite(Date.parse(_nightServiceStartAt))) return _nightServiceStartAt;
+    _nightServiceStartAt = await _leerSettingSistema(NIGHT_STARTED_KEY);
+    if (_nightServiceStartAt && Number.isFinite(Date.parse(_nightServiceStartAt))) return _nightServiceStartAt;
+    // Compatibilidad con una noche que ya estaba activa al aplicar la migración:
+    // partir del primer movimiento nocturno conocido para conservarlo en el corte.
+    const [primerPedido, primerGasto] = await Promise.all([
+        supabaseClient.from('orders').select('created_at').eq('service_period', 'night').order('created_at', { ascending: true }).limit(1),
+        supabaseClient.from('operating_expenses').select('created_at').eq('service_period', 'night').order('created_at', { ascending: true }).limit(1)
+    ]);
+    if (primerPedido.error) throw primerPedido.error;
+    if (primerGasto.error) throw primerGasto.error;
+    const movimientos = [primerPedido.data?.[0]?.created_at, primerGasto.data?.[0]?.created_at]
+        .filter(value => value && Number.isFinite(Date.parse(value))).sort();
+    _nightServiceStartAt = movimientos[0] || new Date().toISOString();
+    const guardarInicio = await supabaseClient.from('system_settings')
+        .upsert([{ key: NIGHT_STARTED_KEY, value: _nightServiceStartAt }], { onConflict: 'key' });
+    if (guardarInicio.error) throw guardarInicio.error;
+    return _nightServiceStartAt;
+}
+
+function _fechaHoraBogota() {
+    const p = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).formatToParts(new Date()).reduce((o, x) => (o[x.type] = x.value, o), {});
+    return { fecha: `${p.year}-${p.month}-${p.day}`, hora: Number(p.hour), minuto: Number(p.minute) };
+}
+
+function _aplicarTemaServicio(periodo) {
+    const night = periodo === 'night';
+    document.body.classList.toggle('theme-night', night);
+    document.documentElement.style.colorScheme = night ? 'dark' : 'light';
+}
+
+async function cargarPeriodoMenuActivo() {
+    const { data, error } = await supabaseClient.from('system_settings').select('value').eq('key', MENU_PERIOD_KEY).maybeSingle();
+    if (error) throw error;
+    const periodo = data?.value === 'night' ? 'night' : 'day';
+    _renderPeriodoMenu(periodo);
+    if (periodo === 'night') await _asegurarInicioServicioNoche();
+    await Promise.all([cargarDashboardReal(), cargarHistorialPedidos(), cargarGastosReal(), cargarSlotsMenuReal()]);
+    if (periodo === 'night' && !window._nightCloseTimerStarted) {
+        window._nightCloseTimerStarted = true;
+        await _cerrarNocheSiVencida();
+        setInterval(_cerrarNocheSiVencida, 30000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) _cerrarNocheSiVencida(); });
+    }
+}
+
+function _renderPeriodoMenu(periodo) {
+    const night = periodo === 'night';
+    try { localStorage.setItem('la26_active_menu_period', night ? 'night' : 'day'); } catch (_) {}
+    _aplicarTemaServicio(periodo);
+    const dayBtn = document.getElementById('btn-menu-period-day');
+    const nightBtn = document.getElementById('btn-menu-period-night');
+    const desc = document.getElementById('menu-period-description');
+    dayBtn?.classList.toggle('filter-active', !night);
+    nightBtn?.classList.toggle('filter-active', night);
+    dayBtn?.setAttribute('aria-pressed', String(!night));
+    nightBtn?.setAttribute('aria-pressed', String(night));
+    if (desc) desc.textContent = 'El catálogo, los pedidos, los gastos y la caja siguen el filtro del servicio activo.';
+    window.menuPeriodActivo = night ? 'night' : 'day';
+    const selectorPlato = document.getElementById('menu-periodo');
+    if (selectorPlato && !_periodoPlatoSeleccionadoManual) selectorPlato.value = window.menuPeriodActivo;
+    const labelGastos = document.getElementById('label-gastos-servicio');
+    if (labelGastos) labelGastos.textContent = night ? 'Noche' : 'Día';
+    const basePersistida = parseFloat(sessionStorage.getItem(_claveCajaPeriodo('base_caja_hoy')) || '0');
+    baseInicial = basePersistida;
+    const panelApertura = document.getElementById('panel-apertura-caja');
+    if (panelApertura) panelApertura.style.display = basePersistida > 0 ? 'none' : '';
+}
+
+async function activarPeriodoMenu(periodo, opciones = {}) {
+    if (!['day', 'night'].includes(periodo)) return;
+    if (periodo === 'night') _nightCloseConfigurationError = false;
+    const anterior = _periodoServicioActivo();
+    const buttons = ['btn-menu-period-day', 'btn-menu-period-night'].map(id => document.getElementById(id)).filter(Boolean);
+    buttons.forEach(button => button.disabled = true);
+    _mostrarCargandoServicioAdmin(true);
+    _renderPeriodoMenu(periodo);
+    try {
+        if (anterior !== periodo) {
+            const inicioKey = periodo === 'night' ? NIGHT_STARTED_KEY : 'day_service_started_at';
+            const inicioValue = new Date().toISOString();
+            const inicioResult = await supabaseClient.from('system_settings')
+                .upsert([{ key: inicioKey, value: inicioValue }], { onConflict: 'key' });
+            if (inicioResult.error) throw inicioResult.error;
+            if (periodo === 'night') _nightServiceStartAt = inicioValue;
+        } else if (periodo === 'night') {
+            await _asegurarInicioServicioNoche();
+        }
+        const { error } = await supabaseClient.from('system_settings')
+            .upsert([{ key: MENU_PERIOD_KEY, value: periodo }], { onConflict: 'key' });
+        if (error) throw error;
+        _renderPeriodoMenu(periodo);
+        if (opciones.mostrarToast !== false) Toast.ok(`Servicio de ${periodo === 'night' ? 'noche' : 'día'} activado. Pedidos y reportes filtrados por este horario.`);
+        await Promise.all([cargarDashboardReal(), cargarHistorialPedidos(), cargarGastosReal(), cargarSlotsMenuReal()]);
+        if (document.getElementById('tab-calendario')?.style.display !== 'none') await cargarCalendarioCierres();
+        if (periodo === 'night' && !window._nightCloseTimerStarted) {
+            window._nightCloseTimerStarted = true;
+            await _cerrarNocheSiVencida();
+            setInterval(_cerrarNocheSiVencida, 30000);
+            document.addEventListener('visibilitychange', () => { if (!document.hidden) _cerrarNocheSiVencida(); });
+        }
+    } catch (err) {
+        console.error('Error al cambiar horario del menú:', err);
+        _renderPeriodoMenu(anterior);
+        Toast.error('No se pudo cambiar el menú activo. Revisa la conexión e inténtalo de nuevo.');
+        return false;
+    } finally {
+        _mostrarCargandoServicioAdmin(false);
+        buttons.forEach(button => button.disabled = false);
+    }
+    return true;
+}
+
+function _mostrarCargandoServicioAdmin(activo, mensaje = 'Actualizando el servicio') {
+    let overlay = document.getElementById('admin-service-loading');
+    if (!overlay && activo) {
+        overlay = document.createElement('div');
+        overlay.id = 'admin-service-loading';
+        overlay.className = 'admin-service-loading';
+        overlay.innerHTML = `<div class="admin-service-loading__panel" role="status" aria-live="polite">
+            <img src="favicon-la26.svg?v=5" alt="" class="admin-service-loading__logo">
+            <span class="admin-service-loading__spinner" aria-hidden="true"></span>
+            <strong class="admin-service-loading__message"></strong>
+            <small>Preparando la información de este turno</small>
+        </div>`;
+        document.body.appendChild(overlay);
+    }
+    if (!overlay) return;
+    overlay.querySelector('.admin-service-loading__message').textContent = mensaje;
+    overlay.hidden = !activo;
+    document.body.setAttribute('aria-busy', String(Boolean(activo)));
+}
+window._mostrarCargandoServicioAdmin = _mostrarCargandoServicioAdmin;
+
+async function _cerrarNocheSiVencida() {
+    if (_nightCloseInProgress || _nightCloseConfigurationError || _periodoServicioActivo() !== 'night') return;
+    const hora = _fechaHoraBogota();
+    if (hora.hora < 12) return;
+    _nightCloseInProgress = true;
+    try {
+        const { data: activo, error: errorActivo } = await supabaseClient.from('system_settings')
+            .select('value').eq('key', MENU_PERIOD_KEY).maybeSingle();
+        if (errorActivo) throw errorActivo;
+        if (activo?.value !== 'night') return;
+
+        const inicioServicioNoche = await _asegurarInicioServicioNoche();
+        const fechaInicioServicioNoche = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit'
+        }).format(new Date(inicioServicioNoche));
+        // No cerrar un servicio que se acaba de activar hoy. El corte de
+        // mediodía solo aplica a la noche que quedó abierta desde ayer.
+        if (fechaInicioServicioNoche >= hora.fecha) return;
+
+        // Antes de archivar se recalculan los datos del turno completo (incluida la noche anterior).
+        _renderPeriodoMenu('night');
+        await Promise.all([cargarDashboardReal(), cargarGastosReal()]);
+        const ingresos = Number(globalIngresos) || 0;
+        const egresos = Number(globalEgresos) || 0;
+        const provision = Math.max(0, ingresos - egresos) * TASA_RETE_ICA;
+        const cierre = {
+            fecha: hora.fecha, service_period: 'night', close_type: 'automatic',
+            ingresos: Math.round(ingresos), egresos: Math.round(egresos),
+            utilidad_neta: Math.round(ingresos - egresos - provision),
+            provision_ica: Math.round(provision), impoconsumo: Math.round(ingresos * TASA_IMPOCONSUMO),
+            efectivo: Math.round(Number(totalEfectivo) || 0),
+            transferencia: Math.round(Number(totalTransferencia) || 0),
+            fiado: Math.round(Number(totalFiado) || 0), base_caja: Math.round(Number(baseInicial) || 0),
+            created_at: new Date().toISOString()
+        };
+        const { error: errorCierre } = await supabaseClient.from('historial_cierres').insert([cierre]);
+        if (errorCierre?.code === '23505') {
+            // Índice único de la migración: varias pestañas no duplican el mismo cierre.
+            console.info('El cierre automático nocturno ya fue archivado.');
+        } else if (errorCierre) {
+            throw errorCierre;
+        }
+
+        const ahora = new Date().toISOString();
+        localStorage.setItem('cierre_desde_night', ahora);
+        localStorage.setItem('night_service_closed_at', ahora);
+        const { error: cambiarDia } = await supabaseClient.from('system_settings')
+            .upsert([{ key: MENU_PERIOD_KEY, value: 'day' }], { onConflict: 'key' });
+        if (cambiarDia) throw cambiarDia;
+        const nuevoInicioDia = await supabaseClient.from('system_settings')
+            .upsert([{ key: 'day_service_started_at', value: ahora }], { onConflict: 'key' });
+        if (nuevoInicioDia.error) console.warn('No se pudo guardar la apertura del día:', nuevoInicioDia.error);
+        _nightServiceStartAt = '';
+        ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(_claveCajaPeriodo(k, 'night')));
+        totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
+        _renderPeriodoMenu('day');
+        await Promise.all([cargarDashboardReal(), cargarHistorialPedidos(), cargarGastosReal(), cargarSlotsMenuReal()]);
+        if (document.getElementById('tab-calendario')?.style.display !== 'none') await cargarCalendarioCierres();
+        Toast.ok('El servicio de noche quedó archivado. Se activó el servicio de día.', 8000);
+    } catch (err) {
+        console.error('No se pudo completar el cierre automático nocturno:', err);
+        const codigoError = String(err?.code || '');
+        if (['42703', '42P01', 'PGRST204'].includes(codigoError)) {
+            _nightCloseConfigurationError = true;
+            Toast.error('Falta completar la migración nocturna en Supabase. Confirma migracion_menu_dia_noche.sql y ejecuta migracion_cierre_nocturno.sql; la noche seguirá activa hasta entonces.', 10000);
+        } else {
+            Toast.error(`No se pudo archivar el cierre nocturno (código ${codigoError || 'sin código'}). La noche sigue activa y se volverá a intentar.`, 8000);
+        }
+    } finally {
+        _nightCloseInProgress = false;
+    }
+}
 
 async function cargarEstadoSistema() {
     try {
@@ -2356,8 +2896,8 @@ async function toggleEstadoSistema() {
         if (error) throw error;
 
         const msg = nuevoEstado
-            ? '✅ Sistema habilitado: los meseros pueden tomar pedidos.'
-            : '🔒 Sistema bloqueado: los meseros verán aviso de "Fuera de servicio".';
+            ? 'Sistema habilitado: los meseros pueden tomar pedidos.'
+            : 'Sistema bloqueado: los meseros verán aviso de "Fuera de servicio".';
         Toast.ok(msg, 5000);
     } catch (err) {
         console.error('Error al persistir estado del sistema:', err);
@@ -2375,7 +2915,7 @@ function _renderToggleSistema(habilitado) {
 
     if (habilitado) {
         btn.className = 'sw-on';
-        btn.innerHTML = '🟢 Pedidos Habilitados';
+        btn.innerHTML = '<i data-lucide="circle-check" style="width:14px;height:14px;vertical-align:-2px;"></i> Pedidos Habilitados';
         if (estadoBadge) {
             estadoBadge.textContent = 'Operativo';
             estadoBadge.style.cssText = 'background:var(--olive-lt);color:var(--olive);border:1.5px solid var(--olive-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;';
@@ -2383,13 +2923,14 @@ function _renderToggleSistema(habilitado) {
         if (desc) desc.textContent = 'Los meseros pueden crear y registrar pedidos con normalidad.';
     } else {
         btn.className = 'sw-off';
-        btn.innerHTML = '🔴 Pedidos Bloqueados';
+        btn.innerHTML = '<i data-lucide="circle-x" style="width:14px;height:14px;vertical-align:-2px;"></i> Pedidos Bloqueados';
         if (estadoBadge) {
             estadoBadge.textContent = 'Fuera de Servicio';
             estadoBadge.style.cssText = 'background:var(--red-lt);color:var(--red);border:1.5px solid var(--red-bd);border-radius:999px;padding:3px 12px;font-size:11px;font-weight:700;';
         }
         if (desc) desc.textContent = 'Sistema cerrado. Los meseros recibirán aviso de "Sistema fuera de servicio" al intentar acceder.';
     }
+    if (window.lucide) lucide.createIcons();
 }
 
 // ============================================================
@@ -2454,7 +2995,7 @@ function _renderTablaRecetas() {
             <td style="font-size:12px;color:var(--text-3);">${r.description || '—'}</td>
             <td><div style="display:flex;flex-wrap:wrap;gap:4px;padding:4px 0;">${ings || '<span style="color:var(--text-3);font-size:11.5px;">Sin ingredientes</span>'}</div></td>
             <td style="text-align:center;">
-                <button onclick="eliminarReceta('${r.id}','${(r.name||'').replace(/'/g,"\\'")}') " class="btn-danger">🗑️ Eliminar</button>
+                <button onclick="eliminarReceta('${r.id}','${(r.name||'').replace(/'/g,"\\'")}') " class="btn-danger"><i data-lucide="trash-2" style="width:14px;height:14px;"></i> Eliminar</button>
             </td>
         </tr>`;
     }).join('');
@@ -2632,9 +3173,9 @@ function _renderResultadoCalculo() {
         const restante     = i.stockActual !== null ? Math.max(0, i.stockActual - _qpd3 * platosEstimados).toFixed(3) : '—';
         const stockLabel   = i.stockActual !== null
             ? `<span class="mono" style="font-size:12.5px;font-weight:600;">${i.stockActual} ${i.unit}</span>`
-            : `<span style="color:var(--amber);font-size:11.5px;font-weight:600;">⚠️ Sin link inventario</span>`;
+            : `<span style="color:var(--amber);font-size:11.5px;font-weight:600;"> Sin link inventario</span>`;
         const cuelloLabel  = cuello
-            ? `<span style="font-size:9.5px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.4px;">🔴 Cuello</span>` : '';
+            ? `<span style="font-size:9.5px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.4px;">Cuello</span>` : '';
 
         return `<tr style="border-bottom:1px solid var(--border);${cuello ? 'background:rgba(192,57,43,.04);' : ''}">
             <td style="padding:9px 12px;font-size:12.5px;font-weight:600;color:var(--text-1);">${i.supply_name} ${cuelloLabel}</td>
@@ -2662,7 +3203,7 @@ function _renderResultadoCalculo() {
             </div>
             ${platosEstimados > 0 ? `
             <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:14px;padding:14px 18px;">
-                <p style="font-size:11px;font-weight:700;color:var(--olive);margin-bottom:8px;">📋 Siguiente paso</p>
+                <p style="font-size:11px;font-weight:700;color:var(--olive);margin-bottom:8px;"><i data-lucide="list-checks" style="width:13px;height:13px;vertical-align:-2px;"></i> Siguiente paso</p>
                 <p style="font-size:12px;color:var(--text-2);line-height:1.6;">Ve a <strong>Control de Menú</strong> y pon<br><strong>${platosEstimados}</strong> en "Porciones del día".</p>
             </div>` : ''}
         </div>
@@ -2683,18 +3224,18 @@ function _renderResultadoCalculo() {
         </div>
         ${platosEstimados > 0 ? `
         <div style="background:var(--olive-lt);border:1.5px solid var(--olive-bd);border-radius:12px;padding:14px 16px;">
-            <p style="font-size:12px;font-weight:700;color:var(--olive);margin-bottom:10px;">📦 Descontar insumos al cerrar el día</p>
+            <p style="font-size:12px;font-weight:700;color:var(--olive);margin-bottom:10px;"> Descontar insumos al cerrar el día</p>
             <p style="font-size:11.5px;color:var(--text-2);margin-bottom:10px;">Ingresa cuántos platos se vendieron realmente.</p>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                 <label style="font-size:12.5px;font-weight:600;color:var(--text-2);margin:0;white-space:nowrap;">Platos vendidos:</label>
                 <input type="number" id="inp-platos-vendidos" value="${platosEstimados}" min="1" max="${platosEstimados}"
                     style="width:90px;font-size:14px;font-weight:700;text-align:center;border-radius:999px;padding:6px 12px;border:1.5px solid var(--olive-bd);">
-                <button onclick="descontarInsumos()" class="btn-olive">📦 Descontar del Inventario</button>
+                <button onclick="descontarInsumos()" class="btn-olive"> Descontar del Inventario</button>
                 <span style="font-size:11px;color:var(--text-3);">(máx. ${platosEstimados})</span>
             </div>
         </div>` : `
         <div style="background:var(--red-lt);border:1.5px solid var(--red-bd);border-radius:12px;padding:14px 16px;">
-            <p style="font-size:13px;font-weight:700;color:var(--red);">⚠️ Stock insuficiente para producir al menos un plato.</p>
+            <p style="font-size:13px;font-weight:700;color:var(--red);"> Stock insuficiente para producir al menos un plato.</p>
             <p style="font-size:12px;color:var(--text-2);margin-top:4px;">Revisa el insumo cuello de botella y repón stock.</p>
         </div>`}`;
 }
@@ -2722,7 +3263,7 @@ async function descontarInsumos() {
     }
 
     if (errores === 0) {
-        Toast.ok(`✅ ${platosVendidos} plato(s) descontados del inventario correctamente.`);
+        Toast.ok(`${platosVendidos} plato(s) descontados del inventario correctamente.`);
     } else {
         Toast.error(`${errores} insumo(s) no se actualizaron. Revisa la consola.`);
     }
@@ -2741,7 +3282,7 @@ async function descontarInsumos() {
 // ============================================================
 async function actualizarDashboard() {
     const btn = document.getElementById('btn-actualizar-dashboard');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Actualizando…'; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Actualizando…'; }
     try {
         await cargarDashboardReal();
         renderizarTotales();
@@ -2750,7 +3291,7 @@ async function actualizarDashboard() {
         console.error('[Admin] Error actualizando dashboard:', err);
         Toast.error('Error al actualizar. Revisa la consola.');
     } finally {
-        if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualizar'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Actualizar'; }
     }
 }
 
@@ -2806,7 +3347,7 @@ async function editarComandaAdmin(orderId, orderNo, totalBruto) {
             if (!nombre && (it.notes || '').includes('[nombre]'))
                 nombre = it.notes.split('[nombre]')[1].split('|')[0].trim();
             else if (!nombre && (it.notes || '').includes('[adicional]'))
-                nombre = '➕ ' + it.notes.split('[adicional]')[1].trim();
+                nombre = 'Adicional: ' + it.notes.split('[adicional]')[1].trim();
             return {
                 id:          it.id,
                 menuItemId:  it.menu_item_id,
@@ -3208,9 +3749,37 @@ async function reactivarProducto(idItem, nombreItem) {
 // ============================================================
 
 let _vistaHistorialPedidos = 'pendientes'; // 'pendientes' | 'pagados'
+let _historialPedidosFetchVersion = 0;
+let _busquedaMesaHistorial = '';
+let _pedidoSeleccionadoHistorial = null;
+let _historialPedidosAutoRefreshTimer = null;
+let _historialPedidosVisibilityHandlerStarted = false;
+
+function _historialPedidosEstaVisible() {
+    const tabPedidos = document.getElementById('tab-pedidos');
+    return !!tabPedidos && document.visibilityState !== 'hidden' && getComputedStyle(tabPedidos).display !== 'none';
+}
+
+function _programarRecargaHistorialPedidosAutomatica(espera = 450) {
+    if (!_historialPedidosEstaVisible()) return;
+    clearTimeout(_historialPedidosAutoRefreshTimer);
+    _historialPedidosAutoRefreshTimer = setTimeout(() => {
+        _historialPedidosAutoRefreshTimer = null;
+        if (_historialPedidosEstaVisible()) cargarHistorialPedidos();
+    }, espera);
+}
+
+function _iniciarActualizacionHistorialAlVolver() {
+    if (_historialPedidosVisibilityHandlerStarted) return;
+    _historialPedidosVisibilityHandlerStarted = true;
+    document.addEventListener('visibilitychange', () => {
+        if (_historialPedidosEstaVisible()) _programarRecargaHistorialPedidosAutomatica(100);
+    });
+}
 
 function filtrarHistorialPedidos(vista) {
     _vistaHistorialPedidos = vista;
+    _pedidoSeleccionadoHistorial = null;
     // Estilos botones filtro
     const btnP = document.getElementById('btn-hp-pendientes');
     const btnPg = document.getElementById('btn-hp-pagados');
@@ -3226,11 +3795,134 @@ function filtrarHistorialPedidos(vista) {
     cargarHistorialPedidos();
 }
 
+function _claveMesaHistorialAdmin(etiqueta) {
+    const limpia = String(etiqueta || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+    const soloNumero = limpia.replace(/^mesa\s*(?:n(?:umero)?\.?\s*)?#?\s*/, '');
+    if (/^\d+$/.test(soloNumero)) return `mesa-${parseInt(soloNumero, 10)}`;
+    const slug = limpia.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return `lugar-${slug || 'sin-asignar'}`;
+}
+
+function _normalizarTextoMesaHistorialAdmin(texto) {
+    return String(texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+}
+
+function _etiquetaVisibleMesaHistorialAdmin(etiqueta) {
+    const texto = String(etiqueta || '').trim();
+    if (!texto) return 'Mesa';
+    return /^mesa\b/i.test(texto) ? texto.replace(/^mesa\b/i, 'Mesa') : `Mesa ${texto}`;
+}
+
+function _resolverMesaPedidoHistorialAdmin(ord, tableMap) {
+    const notes = ord.notes || '';
+    const mesaMatch = notes.match(/\[MESA\]\s*Mesa:\s*([^|]+)/i);
+    const esParaLlevar = notes.includes('[PARA LLEVAR]');
+    const esDomicilio = notes.includes('[DOMICILIO]');
+    let etiqueta;
+    let tipo = 'mesa';
+
+    if (mesaMatch) etiqueta = mesaMatch[1].trim();
+    else if (esParaLlevar) { etiqueta = 'Para llevar'; tipo = 'llevar'; }
+    else if (esDomicilio) { etiqueta = 'Domicilio'; tipo = 'domicilio'; }
+    else if (ord.table_id && tableMap[ord.table_id]) etiqueta = tableMap[ord.table_id];
+    else if (ord.table_id) etiqueta = String(ord.table_id).slice(-4).toUpperCase();
+    else { etiqueta = 'P.L.'; tipo = 'entrega'; }
+
+    if (tipo === 'mesa') etiqueta = _etiquetaVisibleMesaHistorialAdmin(etiqueta);
+
+    return { etiqueta, tipo, clave: _claveMesaHistorialAdmin(etiqueta) };
+}
+
+function _renderFiltrosMesaHistorialAdmin(ordersConMesa) {
+    const contenedor = document.getElementById('filtros-mesa-historial');
+    if (!contenedor) return;
+
+    contenedor.innerHTML = `
+        <div id="mesas-historial-toolbar">
+            <div>
+                <p style="font-size:12px;font-weight:700;color:var(--text-1);margin:0;">Pedidos del turno</p>
+                <p style="font-size:10.5px;color:var(--text-3);margin:3px 0 0;">${ordersConMesa.length} ${ordersConMesa.length === 1 ? 'pedido' : 'pedidos'} · selecciona uno para ver sus detalles</p>
+            </div>
+            <input id="buscar-mesa-historial" type="search" value="${_htmlSeguroAdmin(_busquedaMesaHistorial)}"
+                placeholder="Buscar pedido, mesa o cliente…" aria-label="Buscar pedido, mesa o cliente">
+        </div>
+        <div id="pedidos-individuales-historial" role="region" aria-label="Pedidos individuales"></div>`;
+    if (!ordersConMesa.length) {
+        contenedor.querySelector('#buscar-mesa-historial')?.addEventListener('input', event => {
+            _busquedaMesaHistorial = event.currentTarget.value;
+        });
+    }
+}
+
+function filtrarPedidoHistorialAdmin(orderId) {
+    _pedidoSeleccionadoHistorial = String(orderId || '');
+    cargarHistorialPedidos();
+}
+
+function _renderPedidosIndividualesHistorialAdmin(orders) {
+    const contenedor = document.getElementById('pedidos-individuales-historial');
+    if (!contenedor) return;
+    if (!orders?.length) {
+        contenedor.innerHTML = '';
+        return;
+    }
+
+    const botonPedido = ord => {
+        const id = String(ord.id ?? '');
+        const identificador = String(ord._mesaFiltroEtiqueta || 'Pedido');
+        const cliente = _nombreCliente(ord) || 'Cliente sin registrar';
+        const tipo = ord._mesaFiltroTipo;
+        const tipoClase = tipo === 'domicilio' ? 'is-domicilio' : tipo === 'llevar' ? 'is-llevar' : '';
+        const seleccionado = String(_pedidoSeleccionadoHistorial || '') === id;
+        const terminos = _normalizarTextoMesaHistorialAdmin(`${identificador} ${cliente}`);
+        return `<button type="button" class="pedido-selector-btn ${tipoClase} ${seleccionado ? 'is-selected' : ''}"
+                data-pedido-filter="${_htmlSeguroAdmin(id)}" data-pedido-search="${_htmlSeguroAdmin(terminos)}"
+                aria-pressed="${seleccionado}" aria-label="Abrir ${_htmlSeguroAdmin(identificador)}, cliente ${_htmlSeguroAdmin(cliente)}">
+                <span class="pedido-selector-btn__numero">${_htmlSeguroAdmin(identificador)}</span>
+                <span class="pedido-selector-btn__cliente">${_htmlSeguroAdmin(cliente)}</span>
+                <span class="pedido-selector-btn__total">${_htmlSeguroAdmin(formatCOP(ord.total_amount))}</span>
+            </button>`;
+    };
+
+    contenedor.innerHTML = `
+        <div class="pedido-selector-grid">${orders.map(botonPedido).join('')}</div>
+        <p data-pedido-no-encontrado hidden style="margin:4px 0;color:var(--text-3);font-size:11px;">No hay pedidos que coincidan con la búsqueda.</p>`;
+
+    contenedor.querySelectorAll('[data-pedido-filter]').forEach(boton => {
+        boton.addEventListener('click', () => filtrarPedidoHistorialAdmin(boton.dataset.pedidoFilter));
+    });
+    const aplicarBusqueda = () => {
+        const texto = _normalizarTextoMesaHistorialAdmin(_busquedaMesaHistorial);
+        contenedor.querySelectorAll('[data-pedido-filter]').forEach(boton => {
+            boton.hidden = !!texto && !(boton.dataset.pedidoSearch || '').includes(texto);
+        });
+        const pedidosVisibles = contenedor.querySelectorAll('[data-pedido-filter]:not([hidden])').length;
+        const mensajeSinCoincidencias = contenedor.querySelector('[data-pedido-no-encontrado]');
+        if (mensajeSinCoincidencias) mensajeSinCoincidencias.hidden = !texto || pedidosVisibles > 0;
+        const pedidoActivo = [...contenedor.querySelectorAll('[data-pedido-filter]')]
+            .find(boton => boton.dataset.pedidoFilter === String(_pedidoSeleccionadoHistorial || ''));
+        if (pedidoActivo?.hidden) {
+            _pedidoSeleccionadoHistorial = null;
+            const gridDetalle = document.getElementById('grid-historial-pedidos');
+            if (gridDetalle) gridDetalle.innerHTML = `<p style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">Selecciona un pedido para ver su información completa.</p>`;
+        }
+    };
+    const buscador = document.getElementById('buscar-mesa-historial');
+    buscador?.addEventListener('input', () => {
+        _busquedaMesaHistorial = buscador.value;
+        aplicarBusqueda();
+    });
+    aplicarBusqueda();
+}
+
 async function cargarHistorialPedidos() {
+    const versionCarga = ++_historialPedidosFetchVersion;
     const grid = document.getElementById('grid-historial-pedidos');
     if (!grid) return;
 
-    grid.innerHTML = `<p style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">Cargando pedidos…</p>`;
+    if (grid.dataset.loaded !== 'true') {
+        grid.innerHTML = `<p style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">Cargando pedidos…</p>`;
+    }
 
     try {
         const _ahora     = new Date();
@@ -3246,53 +3938,85 @@ async function cargarHistorialPedidos() {
         const _inicioDia = `${_yyyy}-${_mm}-${_dd}T00:00:00-05:00`;
         const _finDia    = `${_yyyy}-${_mm}-${_dd}T23:59:59-05:00`;
         // [v3.4 · FIX-CIERRE] Corte persistente (localStorage), con piso por día
-        const _inicioDiaEfectivo = _resolverInicioDiaEfectivo(_inicioDia);
+        const _inicioDiaEfectivo = _resolverInicioDiaEfectivo(_inicioDia, _periodoServicioActivo());
 
         // [v3.6 · FIX-PEDIDOS] SIN filtro de status en la consulta (igual que el
         // Dashboard). Antes el .in('status', [...]) dejaba por fuera pedidos con
         // estados no listados y la pantalla salía vacía. Los cancelados se
         // descartan en memoria (no en la query, porque 'canceled' no existe en
         // el enum de esta BD y daría error 400).
-        const { data: ordersRaw, error } = await supabaseClient
+        const periodoServicio = _periodoServicioActivo();
+        let { data: ordersRaw, error } = await supabaseClient
             .from('orders')
-            .select(`id, order_number, customer_name, total_amount, status, notes, payment_method, table_id,
+            .select(`id, order_number, customer_name, total_amount, status, notes, payment_method, service_period, table_id,
                      order_items ( quantity, notes, unit_price )`)
             .gte('created_at', _inicioDiaEfectivo)
             .lte('created_at', _finDia)
             .order('created_at', { ascending: false });
+        if (error?.code === '42703') {
+            const legacy = await supabaseClient.from('orders')
+                .select(`id, order_number, customer_name, total_amount, status, notes, payment_method, table_id,
+                         order_items ( quantity, notes, unit_price )`)
+                .gte('created_at', _inicioDiaEfectivo).lte('created_at', _finDia)
+                .order('created_at', { ascending: false });
+            ordersRaw = (legacy.data || []).map(order => ({ ...order, service_period: 'day' }));
+            error = legacy.error;
+        }
         if (error) throw error;
+        if (versionCarga !== _historialPedidosFetchVersion) return;
 
         const _estaPagado  = (o) => !!(o.payment_method || _extraerMetodoDeNotes(o.notes || ''));
         const _noCancelado = (ordersRaw || []).filter(o =>
-            o.status !== 'canceled' && o.status !== 'cancelled'
+            o.status !== 'canceled' && o.status !== 'cancelled' && (o.service_period || 'day') === periodoServicio
         );
-        const orders = _noCancelado.filter(o =>
+        const ordersVista = _noCancelado.filter(o =>
             _vistaHistorialPedidos === 'pagados' ? _estaPagado(o) : !_estaPagado(o)
         );
 
         const tableMap = await _buildTableMap();
+        if (versionCarga !== _historialPedidosFetchVersion) return;
+        grid.dataset.loaded = 'true';
+        const ordersConMesa = ordersVista.map(ord => {
+            const mesa = _resolverMesaPedidoHistorialAdmin(ord, tableMap);
+            return {
+                ...ord,
+                _mesaFiltroClave: mesa.clave,
+                _mesaFiltroEtiqueta: mesa.etiqueta,
+                _mesaFiltroTipo: mesa.tipo
+            };
+        });
+        _renderFiltrosMesaHistorialAdmin(ordersConMesa);
+        const ordersGrupo = ordersConMesa;
         grid.innerHTML = '';
 
-        if (!orders || orders.length === 0) {
+        if (!ordersGrupo || ordersGrupo.length === 0) {
+            _pedidoSeleccionadoHistorial = null;
+            _renderPedidosIndividualesHistorialAdmin([]);
+            const mensajeVacio = `Sin pedidos ${_vistaHistorialPedidos === 'pagados' ? 'pagados' : 'pendientes'} hoy.`;
             grid.innerHTML = `<p style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">
-                Sin pedidos ${_vistaHistorialPedidos === 'pagados' ? 'pagados' : 'pendientes'} hoy.</p>`;
+                ${mensajeVacio}</p>`;
             return;
         }
 
-        orders.forEach(ord => {
-            const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
+        _renderPedidosIndividualesHistorialAdmin(ordersGrupo);
+        let ordenSeleccionada = _pedidoSeleccionadoHistorial
+            ? ordersGrupo.find(ord => String(ord.id) === String(_pedidoSeleccionadoHistorial))
+            : null;
+        if (_pedidoSeleccionadoHistorial && !ordenSeleccionada) _pedidoSeleccionadoHistorial = null;
 
-            // Resolver mesa
-            const mesaMatch = (ord.notes || '').match(/\[MESA\]\s*Mesa:\s*([^|]+)/i);
+        if (!ordenSeleccionada) {
+            grid.innerHTML = `<p style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">
+                Selecciona un pedido para ver su información completa.</p>`;
+            return;
+        }
+
+        const orders = [ordenSeleccionada];
+        orders.forEach(ord => {
+
+            const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
+            const mesaLabel = ord._mesaFiltroEtiqueta;
             const esPL  = (ord.notes || '').includes('[PARA LLEVAR]');
             const esDom = (ord.notes || '').includes('[DOMICILIO]');
-            let mesaLabel;
-            if (mesaMatch)                           mesaLabel = mesaMatch[1].trim();
-            else if (esPL)                           mesaLabel = 'Para Llevar';
-            else if (esDom)                          mesaLabel = 'Domicilio';
-            else if (ord.table_id && tableMap[ord.table_id]) mesaLabel = tableMap[ord.table_id];
-            else if (ord.table_id)                   mesaLabel = String(ord.table_id).slice(-4).toUpperCase();
-            else                                     mesaLabel = 'P.L.';
 
             // Resumen de items
             const itemsResumen = (ord.order_items || []).map(it => {
@@ -3300,7 +4024,7 @@ async function cargarHistorialPedidos() {
                 if (it.notes && it.notes.includes('[nombre]'))
                     nombre = it.notes.split('[nombre]')[1].split('|')[0].trim();
                 else if (it.notes && it.notes.includes('[adicional]'))
-                    nombre = '➕ ' + it.notes.split('[adicional]')[1].trim();
+                    nombre = 'Adicional: ' + it.notes.split('[adicional]')[1].trim();
                 else if (it.product_name)
                     nombre = it.product_name;
                 return `${it.quantity}× ${nombre}`;
@@ -3325,39 +4049,44 @@ async function cargarHistorialPedidos() {
                 metodoCelda = `
                     <select onchange="registrarMetodoPago('${ord.id}', this.value)"
                         style="font-size:11px;padding:4px 10px;border-radius:8px;height:32px;width:100%;cursor:pointer;background:var(--amber-lt);border:1.5px solid rgba(154,108,26,.28);color:var(--amber);font-family:'DM Sans',sans-serif;">
-                        <option value="">💳 Registrar pago…</option>
-                        <option value="efectivo">💵 Efectivo</option>
-                        <option value="transferencia">📲 Transferencia</option>
-                        <option value="fiado">🤝 Fiado</option>
+                        <option value="">Registrar pago…</option>
+                        <option value="efectivo">Efectivo</option>
+                        <option value="transferencia">Transferencia</option>
+                        <option value="fiado">Fiado</option>
                     </select>`;
             }
 
             const esLlevarAdmin = esPL || esDom;
-            const styleCardAdmin = esLlevarAdmin
-                ? 'display:flex;flex-direction:column;gap:12px;border-radius:14px;background:#fef08a;border:2px solid #eab308;box-shadow:0 2px 8px rgba(234,179,8,0.35),0 6px 20px rgba(234,179,8,0.20);'
-                : 'display:flex;flex-direction:column;gap:12px;border-radius:14px;';
+            const colorModalidadAdmin = esDom ? 'var(--blue)' : esPL ? 'var(--amber)' : 'var(--text-3)';
+            const colorIdentificadorAdmin = esDom ? 'var(--blue)' : esPL ? 'var(--amber)' : 'var(--olive)';
+            const claseCardEntregaAdmin = esPL ? ' pedido-llevar-historial' : esDom ? ' pedido-domicilio-historial' : '';
+            const styleCardAdmin = esPL
+                ? 'display:flex;flex-direction:column;gap:12px;border-radius:14px;background:var(--amber-lt);border:1.5px solid rgba(154,108,26,.42);box-shadow:inset 4px 0 0 var(--amber),0 4px 14px rgba(154,108,26,.08);'
+                : esDom
+                    ? 'display:flex;flex-direction:column;gap:12px;border-radius:14px;background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.38);box-shadow:inset 4px 0 0 var(--blue),0 4px 14px rgba(37,99,168,.08);'
+                    : 'display:flex;flex-direction:column;gap:12px;border-radius:14px;';
             grid.insertAdjacentHTML('beforeend', `
-                <div class="card" style="${styleCardAdmin}">
+                <div class="card${claseCardEntregaAdmin}" style="${styleCardAdmin}">
                     <!-- Cabecera -->
                     <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <span class="mono" style="font-size:13px;font-weight:700;color:var(--olive);">${ord.order_number}</span>
+                        <span class="mono" style="font-size:13px;font-weight:700;color:${colorIdentificadorAdmin};">${_htmlSeguroAdmin(mesaLabel)}</span>
                         <span style="font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;
                             background:${_vistaHistorialPedidos === 'pagados' ? 'var(--olive-lt)' : 'var(--amber-lt)'};
                             color:${_vistaHistorialPedidos === 'pagados' ? 'var(--olive)' : 'var(--amber)'};
                             border:1.5px solid ${_vistaHistorialPedidos === 'pagados' ? 'var(--olive-bd)' : 'rgba(154,108,26,.28)'};">
-                            ${_vistaHistorialPedidos === 'pagados' ? '✅ Pagado' : '⏳ Pendiente'}
+                            ${_vistaHistorialPedidos === 'pagados' ? '<i data-lucide="circle-check" style="width:12px;height:12px;vertical-align:-2px;"></i> Pagado' : '<i data-lucide="clock-3" style="width:12px;height:12px;vertical-align:-2px;"></i> Pendiente'}
                         </span>
                     </div>
 
                     <!-- Info -->
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;">
                         <div>
-                            <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">Mesa</p>
+                            <p style="font-size:10px;font-weight:700;color:${esLlevarAdmin ? colorModalidadAdmin : 'var(--text-3)'};text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">${esLlevarAdmin ? 'Modalidad' : 'Mesa'}</p>
                             <p style="font-size:13px;font-weight:600;color:var(--text-1);">${mesaLabel}</p>
                         </div>
                         <div>
-                            <p style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">Cliente</p>
-                            <p style="font-size:12px;font-weight:500;color:var(--text-2);">${_nombreCliente(ord)}</p>
+                            <p style="font-size:10px;font-weight:700;color:${esLlevarAdmin ? colorModalidadAdmin : 'var(--text-3)'};text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">${esLlevarAdmin ? 'Pedido para' : 'Cliente'}</p>
+                            <p style="font-size:12px;font-weight:${esLlevarAdmin ? '700' : '500'};color:${esLlevarAdmin ? colorModalidadAdmin : 'var(--text-2)'};">${_htmlSeguroAdmin(_nombreCliente(ord))}</p>
                         </div>
                     </div>
 
@@ -3374,27 +4103,23 @@ async function cargarHistorialPedidos() {
                     </div>
 
                     <!-- Acciones -->
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 42px;gap:6px;width:100%;min-width:0;align-items:stretch;">
                         <button onclick="exportarReciboPDF('${ord.id}')"
-                            style="flex:1;min-width:60px;background:var(--surface-2);border:1.5px solid var(--border);color:var(--text-2);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
-                            📄 PDF
-                        </button>
-                        <button onclick="abrirModalFacturaElectronica('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
-                            style="flex:1;min-width:60px;background:var(--olive-lt);border:1.5px solid var(--olive-bd);color:var(--olive);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
-                            🧾 DIAN
+                            style="width:100%;min-width:0;min-height:42px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;background:var(--surface-2);border:1.5px solid var(--border);color:var(--text-2);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                            <i data-lucide="file-down" style="width:13px;height:13px;flex:0 0 13px;"></i> PDF
                         </button>
                         <button onclick="editarComandaAdmin('${ord.id}', '${ord.order_number}', ${ord.total_amount})"
-                            style="flex:1;min-width:60px;background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.28);color:var(--blue);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
-                            ✏️ Editar
+                            style="width:100%;min-width:0;min-height:42px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.28);color:var(--blue);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                            <i data-lucide="pencil" style="width:13px;height:13px;flex:0 0 13px;"></i> Editar
                         </button>
                         ${metodo ? `<button onclick="revertirPagoOrden('${ord.id}')"
-                            style="flex:1;min-width:60px;background:var(--amber-lt);border:1.5px solid rgba(154,108,26,.28);color:var(--amber);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;"
+                            style="grid-column:1/3;width:100%;min-width:0;min-height:38px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--amber-lt);border:1.5px solid rgba(154,108,26,.28);color:var(--amber);border-radius:8px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;"
                             title="Quitar el pago y devolver el pedido a Por cobrar">
-                            ↩️ Por cobrar
+                            <i data-lucide="undo-2" style="width:13px;height:13px;vertical-align:-2px;"></i> Por cobrar
                         </button>` : ''}
                         <button onclick="eliminarComandaReal('${ord.id}', '${ord.order_number}')"
-                            style="background:var(--red-lt,#fff0f0);border:1.5px solid rgba(185,28,28,.22);color:var(--red);border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;">
-                            🗑️
+                            style="grid-column:3;width:42px;min-width:0;min-height:42px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;background:var(--red-lt,#fff0f0);border:1.5px solid rgba(185,28,28,.22);color:var(--red);border-radius:8px;padding:5px;font-size:12px;cursor:pointer;">
+                            <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
                         </button>
                     </div>
                 </div>`);
@@ -3403,6 +4128,7 @@ async function cargarHistorialPedidos() {
         if (window.lucide) lucide.createIcons();
 
     } catch (err) {
+        if (versionCarga !== _historialPedidosFetchVersion) return;
         console.error('[La 26] Error cargando historial pedidos:', err);
         grid.innerHTML = `<p style="color:var(--red);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">Error al cargar los pedidos. Revisa la consola.</p>`;
     }
@@ -3413,7 +4139,7 @@ async function cargarHistorialPedidos() {
 // ============================================================
 async function cambiarMetodoPago(orderId) {
     const metodos = ['efectivo', 'transferencia', 'fiado'];
-    const labels  = { efectivo: '💵 Efectivo', transferencia: '📲 Transferencia', fiado: '🤝 Fiado' };
+    const labels  = { efectivo: 'Efectivo', transferencia: 'Transferencia', fiado: 'Fiado' };
 
     // Mini-modal inline — confirmar nuevo método
     const elegido = await new Promise(resolve => {
@@ -3443,31 +4169,35 @@ async function cambiarMetodoPago(orderId) {
     if (!elegido) return;
 
     try {
-        const { data: ordData, error: errRead } = await supabaseClient
+        let { data: ordData, error: errRead } = await supabaseClient
             .from('orders')
-            .select('total_amount, notes, payment_method')
+            .select('total_amount, notes, payment_method, service_period')
             .eq('id', orderId)
             .single();
-        if (errRead) throw errRead;
+        if (errRead?.code === '42703') {
+            const legacy = await supabaseClient.from('orders').select('total_amount, notes, payment_method').eq('id', orderId).single();
+            if (legacy.error) throw legacy.error;
+            ordData = { ...legacy.data, service_period: 'day' };
+        } else if (errRead) throw errRead;
 
         const monto = parseFloat(ordData.total_amount) || 0;
         const metodoAnterior = ordData.payment_method || _extraerMetodoDeNotes(ordData.notes || '');
 
         // Ajustar sessionStorage
         if (metodoAnterior && metodoAnterior !== elegido) {
-            const keyViejo  = `pm_${metodoAnterior}`;
+            const keyViejo  = _claveCajaPeriodo(`pm_${metodoAnterior}`, ordData.service_period || 'day');
             const acumViejo = parseFloat(sessionStorage.getItem(keyViejo) || '0');
             sessionStorage.setItem(keyViejo, String(Math.max(0, acumViejo - monto)));
         }
         if (metodoAnterior !== elegido) {
-            const keyNuevo = `pm_${elegido}`;
+            const keyNuevo = _claveCajaPeriodo(`pm_${elegido}`, ordData.service_period || 'day');
             const acumNuevo = parseFloat(sessionStorage.getItem(keyNuevo) || '0');
             sessionStorage.setItem(keyNuevo, String(acumNuevo + monto));
         }
 
-        totalEfectivo      = parseFloat(sessionStorage.getItem('pm_efectivo')      || '0');
-        totalTransferencia = parseFloat(sessionStorage.getItem('pm_transferencia') || '0');
-        totalFiado         = parseFloat(sessionStorage.getItem('pm_fiado')         || '0');
+        totalEfectivo      = parseFloat(sessionStorage.getItem(_claveCajaPeriodo('pm_efectivo'))      || '0');
+        totalTransferencia = parseFloat(sessionStorage.getItem(_claveCajaPeriodo('pm_transferencia')) || '0');
+        totalFiado         = parseFloat(sessionStorage.getItem(_claveCajaPeriodo('pm_fiado'))         || '0');
         renderizarTotales();
 
         const notesBase  = (ordData.notes || '').replace(/\|\[pago\][^|]*/g, '').trimEnd();
@@ -3502,15 +4232,80 @@ async function cambiarMetodoPago(orderId) {
 // cocina (un pedido para llevar pagado de una vez sigue en cocina
 // hasta que se despache).
 // ============================================================
+function confirmarRevertirPagoSistema() {
+    return new Promise(resolve => {
+        const focoAnterior = document.activeElement;
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.setAttribute('role', 'alertdialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-labelledby', 'confirmar-revertir-pago-titulo');
+        overlay.setAttribute('aria-describedby', 'confirmar-revertir-pago-texto');
+        overlay.innerHTML = `
+            <div class="modal-box" style="max-width:440px;padding:0;overflow:hidden;">
+                <div style="display:flex;align-items:flex-start;gap:13px;padding:22px 24px 16px;">
+                    <span style="display:grid;place-items:center;width:40px;height:40px;flex:none;border-radius:12px;background:var(--amber-lt);color:var(--amber);">
+                        <i data-lucide="undo-2" style="width:19px;height:19px;"></i>
+                    </span>
+                    <div>
+                        <h2 id="confirmar-revertir-pago-titulo" style="margin:0 0 7px;font-size:16px;font-weight:700;color:var(--text-1);">Devolver pedido a Por cobrar</h2>
+                        <p id="confirmar-revertir-pago-texto" style="margin:0;font-size:13px;line-height:1.55;color:var(--text-2);">
+                            ¿Seguro que deseas devolver este pedido?<br>
+                            Se quitará el método de pago registrado.
+                        </p>
+                    </div>
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:9px;padding:14px 24px 20px;border-top:1px solid var(--border);background:var(--surface-2);">
+                    <button type="button" data-action="cancel" class="btn-ghost">Cancelar</button>
+                    <button type="button" data-action="confirm"
+                        style="display:inline-flex;align-items:center;gap:7px;padding:8px 15px;border:1.5px solid var(--amber);border-radius:9px;background:var(--amber);color:#fff;font:600 12px 'DM Sans',sans-serif;cursor:pointer;">
+                        <i data-lucide="undo-2" style="width:13px;height:13px;"></i> Devolver a Por cobrar
+                    </button>
+                </div>
+            </div>`;
+
+        let terminado = false;
+        const cerrar = confirmado => {
+            if (terminado) return;
+            terminado = true;
+            document.removeEventListener('keydown', manejarTecla);
+            overlay.remove();
+            resolve(confirmado);
+            if (focoAnterior?.isConnected) focoAnterior.focus({ preventScroll: true });
+        };
+        const manejarTecla = event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                cerrar(false);
+            }
+        };
+
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) cerrar(false);
+        });
+        overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => cerrar(false));
+        overlay.querySelector('[data-action="confirm"]').addEventListener('click', () => cerrar(true));
+        document.addEventListener('keydown', manejarTecla);
+        document.body.appendChild(overlay);
+        if (window.lucide) lucide.createIcons();
+        overlay.querySelector('[data-action="cancel"]').focus();
+    });
+}
+
 async function revertirPagoOrden(orderId) {
-    if (!confirm('¿Devolver este pedido a "Por cobrar"?\nSe quitará el método de pago registrado.')) return;
+    const confirmado = await confirmarRevertirPagoSistema();
+    if (!confirmado) return;
     try {
-        const { data: ordData, error: errRead } = await supabaseClient
+        let { data: ordData, error: errRead } = await supabaseClient
             .from('orders')
-            .select('total_amount, notes, payment_method')
+            .select('total_amount, notes, payment_method, service_period')
             .eq('id', orderId)
             .single();
-        if (errRead) throw errRead;
+        if (errRead?.code === '42703') {
+            const legacy = await supabaseClient.from('orders').select('total_amount, notes, payment_method').eq('id', orderId).single();
+            if (legacy.error) throw legacy.error;
+            ordData = { ...legacy.data, service_period: 'day' };
+        } else if (errRead) throw errRead;
 
         const monto        = parseFloat(ordData.total_amount) || 0;
         const metodoAnt    = ordData.payment_method || _extraerMetodoDeNotes(ordData.notes || '');
@@ -3524,12 +4319,12 @@ async function revertirPagoOrden(orderId) {
 
         // Restar del acumulado del método anterior
         if (metodoAnt) {
-            const key  = `pm_${metodoAnt}`;
+            const key  = _claveCajaPeriodo(`pm_${metodoAnt}`, ordData.service_period || 'day');
             const acum = parseFloat(sessionStorage.getItem(key) || '0');
             sessionStorage.setItem(key, String(Math.max(0, acum - monto)));
-            totalEfectivo      = parseFloat(sessionStorage.getItem('pm_efectivo')      || '0');
-            totalTransferencia = parseFloat(sessionStorage.getItem('pm_transferencia') || '0');
-            totalFiado         = parseFloat(sessionStorage.getItem('pm_fiado')         || '0');
+            totalEfectivo      = parseFloat(sessionStorage.getItem(_claveCajaPeriodo('pm_efectivo'))      || '0');
+            totalTransferencia = parseFloat(sessionStorage.getItem(_claveCajaPeriodo('pm_transferencia')) || '0');
+            totalFiado         = parseFloat(sessionStorage.getItem(_claveCajaPeriodo('pm_fiado'))         || '0');
             renderizarTotales();
         }
 

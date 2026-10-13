@@ -96,6 +96,26 @@ const RESTAURANT_SLUG   = "restaurante-la-26";
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Mantener la carta y su apariencia sincronizadas con el mismo servicio.
+// El último valor local evita que una recarga muestre el tema de día mientras
+// termina la consulta del servicio activo en Supabase.
+const SERVICE_PERIOD_STORAGE_KEY = 'la26_active_menu_period';
+function _aplicarTemaServicio(periodo) {
+    const activo = periodo === 'night' ? 'night' : 'day';
+    window.menuPeriodActivo = activo;
+    try { localStorage.setItem(SERVICE_PERIOD_STORAGE_KEY, activo); } catch (_) {}
+    document.body.classList.toggle('theme-night', activo === 'night');
+    document.documentElement.style.colorScheme = activo === 'night' ? 'dark' : 'light';
+    return activo;
+}
+
+try {
+    const periodoGuardado = localStorage.getItem(SERVICE_PERIOD_STORAGE_KEY);
+    if (periodoGuardado === 'day' || periodoGuardado === 'night') {
+        _aplicarTemaServicio(periodoGuardado);
+    }
+} catch (_) {}
+
 // ============================================================
 // CATEGORÍAS DE MENÚ
 // ============================================================
@@ -300,6 +320,7 @@ const Sesion = {
         const n = (nombre || '').trim();
         if (!n) return false;
         sessionStorage.setItem(this.KEY, n);
+        window.dispatchEvent(new Event('la26:session-changed'));
         return true;
     },
 
@@ -629,28 +650,61 @@ async function _resolverTableId(modalidad, mesa) {
 // ============================================================
 // MENÚ
 // ============================================================
+let _menuLoadVersion = 0;
 const Menu = {
     async cargar() {
+        const loadVersion = ++_menuLoadVersion;
         _mostrarEstado('loader');
         if (!State.restaurantId) await _resolverRestaurant();
+        if (loadVersion !== _menuLoadVersion) return;
         if (!State.restaurantId) {
             _mostrarEstado('error', 'No se pudo identificar el restaurante.');
             return;
         }
+        _suscribirRealtimeMenu();
         try {
+            const { data: periodoData, error: periodoError } = await db.from('system_settings')
+                .select('value').eq('key', 'active_menu_period').maybeSingle();
+            if (loadVersion !== _menuLoadVersion) return;
+            if (periodoError) throw periodoError;
+            const periodoActivo = _aplicarTemaServicio(periodoData?.value === 'night' ? 'night' : 'day');
+            const subtitulo = document.getElementById('header-subtitle');
+            if (subtitulo) subtitulo.textContent = `Carta de ${periodoActivo === 'night' ? 'la noche' : 'día'}`;
+
             const { data: dataRaw, error } = await db
                 .from('menu_items')
-                .select('id, name, price, item_type, is_active, description, portions_today')
+                .select('id, name, price, item_type, is_active, portions_today, menu_period, image_url')
                 .eq('restaurant_id', State.restaurantId)
                 .eq('is_active', true)
                 .order('item_type', { ascending: true })
                 .order('name',      { ascending: true });
+            if (loadVersion !== _menuLoadVersion) return;
+
+            let itemsPorHorario = dataRaw;
+            if (error?.code === '42703') {
+                if (periodoActivo === 'night') throw new Error('La carta nocturna requiere aplicar migracion_menu_dia_noche.sql.');
+                const legacy = await db.from('menu_items')
+                    .select('id, name, price, item_type, is_active, portions_today, image_url')
+                    .eq('restaurant_id', State.restaurantId).eq('is_active', true)
+                    .order('item_type', { ascending: true }).order('name', { ascending: true });
+                if (legacy.error) throw legacy.error;
+                itemsPorHorario = legacy.data;
+            } else if (error) throw error;
 
             const TIPOS_ACEPTADOS = [...ITEM_TYPES_VALIDOS, 'protein'];
-            const data = dataRaw ? dataRaw.filter(i => TIPOS_ACEPTADOS.includes(i.item_type)) : dataRaw;
+            const data = itemsPorHorario ? itemsPorHorario.filter(i =>
+                TIPOS_ACEPTADOS.includes(i.item_type) &&
+                (periodoActivo === 'night' ? ['night', 'both'].includes(i.menu_period) : ['day', 'both', undefined, null].includes(i.menu_period))
+            ) : itemsPorHorario;
 
-            if (error) throw error;
-            if (!data || data.length === 0) { _activarModoDemo(); return; }
+            if (!data || data.length === 0) {
+                if (periodoActivo === 'night') {
+                    _mostrarEstado('error', 'No hay platos activos para el menú de noche. Configura platos nocturnos en Administración.');
+                    return;
+                }
+                _activarModoDemo();
+                return;
+            }
 
             State.slots = data.map(item => {
                 const tienePortions = item.portions_today !== null && item.portions_today !== undefined;
@@ -659,7 +713,7 @@ const Menu = {
                 return {
                     id: item.id, menuItemId: item.id,
                     nombre: item.name, precio: Number(item.price) || 0,
-                    descripcion: item.description || '',
+                    imagen: item.image_url || '',
                     itemType: CATEGORIAS[item.item_type] ? item.item_type : 'a_la_carte',
                     porciones, disponible,
                     // [FIX-PORCIONES] Guardar si tiene control real de porciones
@@ -669,8 +723,12 @@ const Menu = {
 
             _renderizarMenu();
             _mostrarEstado('menu');
-            _suscribirRealtimeMenu();
         } catch (err) {
+            if (loadVersion !== _menuLoadVersion) return;
+            const periodoGuardado = (() => {
+                try { return localStorage.getItem(SERVICE_PERIOD_STORAGE_KEY); } catch (_) { return ''; }
+            })();
+            _aplicarTemaServicio(window.menuPeriodActivo === 'night' || periodoGuardado === 'night' ? 'night' : 'day');
             _mostrarEstado('error', `No se pudo cargar la carta: ${err.message || 'error de red'}`);
         }
     },
@@ -805,13 +863,20 @@ function _crearTarjeta(slot) {
 
     const card = document.createElement('div');
     card.id        = `tarjeta-${slot.id}`;
-    card.className = `plate-card${!disponible ? ' agotado' : ''} fade-up`;
+    const esNoche = window.menuPeriodActivo === 'night';
+    const imagenHTML = esNoche && slot.imagen
+        ? `<img class="plate-image" src="${slot.imagen}" alt="${slot.nombre}" loading="lazy">`
+        : (esNoche ? '<div class="plate-image-placeholder" aria-hidden="true"><i data-lucide="utensils"></i></div>' : '');
+    const precioNocheHTML = esNoche && slot.precio > 0
+        ? `<span class="plate-price"><i data-lucide="banknote" aria-hidden="true"></i>${formatCOP(slot.precio)}</span>`
+        : precioHTML;
+    card.className = `plate-card${esNoche ? ' night-card' : ''}${!disponible ? ' agotado' : ''} fade-up`;
     card.innerHTML = `
+        ${imagenHTML}
         <div class="plate-info">
             <p class="plate-name">${slot.nombre}</p>
-            ${slot.descripcion ? `<p class="plate-desc">${slot.descripcion}</p>` : ''}
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px;">
-                ${precioHTML}${badgeHTML}
+                ${precioNocheHTML}${badgeHTML}
             </div>
         </div>
         <div style="flex-shrink:0;">${ctrlHTML}</div>`;
@@ -946,7 +1011,7 @@ const Cart = {
                             </div>
                         </div>
                         <div style="display:flex;align-items:center;gap:10px;">
-                            ${prot.precio > 0 ? `<span style="font-family:'Cormorant Garamond',serif;font-size:1.2rem;font-weight:600;color:var(--oliva);">${formatCOP(prot.precio)}</span>` : ''}
+                            ${prot.precio > 0 ? `<span style="font-family:'DM Sans',sans-serif;font-size:1.2rem;font-weight:600;color:var(--oliva);">${formatCOP(prot.precio)}</span>` : ''}
                             <button onclick="Platos.quitarPorUid('${p.uid}')" aria-label="Quitar"
                                 style="width:30px;height:30px;border-radius:50%;background:rgba(184,50,50,0.10);color:#b83232;border:1px solid rgba(184,50,50,0.20);font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;">×</button>
                         </div>
@@ -1247,6 +1312,16 @@ const Order = {
             if (!State.restaurantId) await _resolverRestaurant();
             if (!State.restaurantId) throw new Error('No se pudo identificar el restaurante.');
 
+            const { data: servicioActual, error: errorServicio } = await db.from('system_settings')
+                .select('value').eq('key', 'active_menu_period').maybeSingle();
+            if (errorServicio) throw errorServicio;
+            const periodoActual = servicioActual?.value === 'night' ? 'night' : 'day';
+            if (periodoActual !== (window.menuPeriodActivo || 'day')) {
+                window.menuPeriodActivo = periodoActual;
+                await Menu.cargar();
+                throw new Error(`El administrador cambió el servicio a ${periodoActual === 'night' ? 'noche' : 'día'}. Revisa los platos antes de enviar el pedido.`);
+            }
+
             const tableId = await _resolverTableId(modalidad, mesa);
             let tableIdFinal = tableId;
             if (!tableIdFinal) {
@@ -1269,15 +1344,31 @@ const Order = {
             const numeroOrden = await _generarNumeroOrden(modalidad);
             const total       = calcularTotal();
 
-            const { data: orden, error: errOrd } = await db.from('orders').insert([{
+            const periodoServicio = periodoActual;
+            let { data: orden, error: errOrd } = await db.from('orders').insert([{
                 restaurant_id: State.restaurantId,
                 table_id:      tableIdFinal,
                 order_number:  numeroOrden,
                 status:        'pending',
                 customer_name: nombre || null,
                 total_amount:  total,
+                service_period: periodoServicio,
                 notes:         notaCocina || null,
             }]).select('id').single();
+            if (errOrd?.code === '42703') {
+                const legacy = await db.from('orders').insert([{
+                    restaurant_id: State.restaurantId,
+                    table_id: tableIdFinal,
+                    order_number: numeroOrden,
+                    status: 'pending',
+                    customer_name: nombre || null,
+                    total_amount: total,
+                    notes: notaCocina || null,
+                }]).select('id').single();
+                orden = legacy.data;
+                errOrd = legacy.error;
+                if (!errOrd) Toast.info('Pedido guardado. Aplica la migración de servicios para separarlo entre día y noche.');
+            }
             if (errOrd) throw errOrd;
 
             const { data: todosItems } = await db.from('menu_items').select('id,name,item_type')
@@ -1440,6 +1531,21 @@ function _suscribirRealtimeMenu() {
             () => Menu.cargar())
         .on('postgres_changes',{ event:'DELETE', schema:'public', table:'menu_items' },
             () => Menu.cargar())
+        .on('postgres_changes',{ event:'*', schema:'public', table:'system_settings', filter:'key=eq.active_menu_period' },
+            (payload) => {
+                const periodo = payload.new?.value === 'night' ? 'night' : 'day';
+                _aplicarTemaServicio(periodo);
+                const subtitulo = document.getElementById('header-subtitle');
+                const nombreVista = document.getElementById('tab-historial')?.classList.contains('active') ? 'Historial' : 'Carta';
+                if (subtitulo) subtitulo.textContent = `${nombreVista} ${periodo === 'night' ? 'nocturno' : 'diurno'}`;
+                Menu.cargar();
+                if (HistState.cargando) {
+                    HistState.periodoPendiente = true;
+                } else if (HistState.cargado) {
+                    HistState.cargado = false;
+                    Hist.cargar();
+                }
+            })
         .subscribe();
 }
 
@@ -1456,6 +1562,7 @@ function _actualizarSlotDesdeRealtime(item) {
         ...State.slots[idx],
         nombre:    item.name,
         precio:    Number(item.price) || 0,
+        imagen:    item.image_url || State.slots[idx].imagen || '',
         porciones,
         disponible,
         tieneControlPorciones: tienePortions,
@@ -1488,8 +1595,10 @@ function _actualizarSlotDesdeRealtime(item) {
 const HistState = {
     pedidos:         [],
     filtro:          'todos',
+    periodo:         'day',
     cargado:         false,
-    cargando:        false,   // <-- agregar esta línea
+    cargando:        false,
+    periodoPendiente: false,
     realtimeChannel: null,
 };
 
@@ -1546,24 +1655,35 @@ const Hist = {
         try {
             const hoy = todayISO();
             const manana = new Date(new Date(`${hoy}T05:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10);
-            const { data: ordenes, error } = await db
-                .from('orders')
-                .select(`
+            const periodoActivo = window.menuPeriodActivo === 'night' ? 'night' : 'day';
+            const cargarOrdenes = (incluirServicio) => {
+                let consulta = db.from('orders').select(`
                     id, order_number, status, customer_name,
-                    total_amount, notes, created_at,
+                    total_amount, notes, created_at${incluirServicio ? ', service_period' : ''},
                     order_items (
                         id, quantity, unit_price, notes, item_status,
                         menu_items ( name )
                     )
                 `)
-                .eq('restaurant_id', State.restaurantId)
-                .gte('created_at', `${hoy}T05:00:00Z`)
-                .lt('created_at', `${manana}T05:00:00Z`)
-                .order('created_at', { ascending: false });
+                    .eq('restaurant_id', State.restaurantId)
+                    .gte('created_at', `${hoy}T05:00:00Z`)
+                    .lt('created_at', `${manana}T05:00:00Z`);
+                if (incluirServicio) consulta = consulta.eq('service_period', periodoActivo);
+                return consulta.order('created_at', { ascending: false });
+            };
 
-            if (error) throw error;
+            let resultado = await cargarOrdenes(true);
+            // En bases anteriores a la migración, los pedidos se consideran de día.
+            if (resultado.error?.code === '42703') {
+                resultado = await cargarOrdenes(false);
+                if (!resultado.error) resultado.data = periodoActivo === 'day'
+                    ? (resultado.data || []).map(p => ({ ...p, service_period: 'day' }))
+                    : [];
+            }
+            if (resultado.error) throw resultado.error;
 
-            HistState.pedidos = ordenes || [];
+            HistState.periodo = periodoActivo;
+            HistState.pedidos = resultado.data || [];
 
             HistState.cargado = true;
             this._render();
@@ -1573,6 +1693,11 @@ const Hist = {
             _histSetError(`No se pudo cargar el historial: ${err.message}`);
         } finally {
             HistState.cargando = false;   // liberar semáforo siempre
+            if (HistState.periodoPendiente) {
+                HistState.periodoPendiente = false;
+                HistState.cargado = false;
+                setTimeout(() => Hist.cargar(), 0);
+            }
         }
     },
 
@@ -2418,7 +2543,7 @@ function _mostrarPantallaFueraDeServicio() {
         loader.innerHTML = `
             <div style="text-align:center;padding:40px 20px;max-width:300px;">
                 <div style="margin-bottom:20px;display:flex;justify-content:center;"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#d94e0f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
-                <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.8rem;
+                <h2 style="font-family:'DM Sans',sans-serif;font-size:1.8rem;
                            font-weight:400;color:var(--ink);margin-bottom:12px;line-height:1.2;">
                     Sistema fuera<br>de servicio
                 </h2>

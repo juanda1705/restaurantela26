@@ -36,13 +36,24 @@ const SUPABASE_ANON_KEY = "sb_publishable_ESxhljLgqWkGvrnKhvbeEg_iBqaGciv";
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const _supabase = supabaseClient;
 
+async function aplicarTemaServicioCompartido() {
+    try {
+        const { data } = await supabaseClient.from('system_settings').select('value')
+            .eq('key', 'active_menu_period').maybeSingle();
+        const night = data?.value === 'night';
+        window.menuPeriodActivo = night ? 'night' : 'day';
+        document.body.classList.toggle('theme-night', night);
+        document.documentElement.style.colorScheme = night ? 'dark' : 'light';
+    } catch (err) { console.warn('No se pudo consultar el tema del servicio activo:', err); }
+}
+
 const RESTAURANT_SLUG = "restaurante-la-26";
 let _restaurantId = null;
 
 const LA26_USERS = {
-    'admin':   { password: 'admin26',   role: 'admin',   label: 'Administrador', emoji: '👑' },
-    'cocina':  { password: 'cocina26',  role: 'cocina',  label: 'Cocina',        emoji: '🍳' },
-    'cliente': { password: 'cliente26', role: 'cliente', label: 'Cliente',       emoji: '👤' },
+    'admin':   { password: 'admin26',   role: 'admin',   label: 'Administrador' },
+    'cocina':  { password: 'cocina26',  role: 'cocina',  label: 'Cocina' },
+    'cliente': { password: 'cliente26', role: 'cliente', label: 'Mesero' },
 };
 
 let _currentRole     = null;
@@ -51,6 +62,9 @@ let _allOrders       = [];
 let _activeFilter    = 'all';
 let _realtimeChannel = null;
 let _timerInterval   = null;
+let _cargaPedidosEnCurso = false;
+let _recargaPedidosPendiente = false;
+let _cocinaVisibilityHandlerIniciado = false;
 let _audioCtx        = null;
 
 // ============================================================
@@ -89,25 +103,29 @@ window.La26 = {
         }
 
         if (btnEl) btnEl.disabled = true;
-        if (btnText) btnText.textContent = 'Verificando…';
+        if (btnText) btnText.textContent = 'Preparando…';
+        _mostrarTransicionAcceso(userData, userInput);
 
         setTimeout(() => {
             _currentRole = userData.role;
             _currentUser = userInput;
             sessionStorage.setItem('user_role', _currentRole);
             sessionStorage.setItem('user_name', _currentUser);
+            window.dispatchEvent(new Event('la26:session-changed'));
             _iniciarApp();
-        }, 600);
+        }, 1900);
     },
 
     cerrarSesion() {
         if (_realtimeChannel) { supabaseClient.removeChannel(_realtimeChannel); _realtimeChannel = null; }
         if (_timerInterval)   { clearInterval(_timerInterval); _timerInterval = null; }
+        _recargaPedidosPendiente = false;
 
         sessionStorage.removeItem('user_role');
         sessionStorage.removeItem('user_name');
         sessionStorage.removeItem('mesa_id');
         sessionStorage.removeItem('mesa_nombre');
+        window.dispatchEvent(new Event('la26:session-changed'));
         _currentRole = null; _currentUser = null; _allOrders = [];
 
         const userEl = document.getElementById('login-user');
@@ -129,23 +147,35 @@ window.La26 = {
         document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
         if (btn) btn.classList.add('active');
         if (destino === 'admin')        window.location.href = 'admin.html';
-        else if (destino === 'cliente') window.location.href = 'index-cliente.html';
-        else _mostrarToast('📍 Vista de Cocina', 'info');
+        else if (destino === 'cliente') window.location.href = 'carta.html';
+        else _mostrarToast('Vista de cocina', 'info');
     },
 
-    async cargarPedidos() {
+    async cargarPedidos({ silenciosa = false } = {}) {
         const grid = document.getElementById('contenedor-pedidos');
         if (!grid) return;
+        if (_cargaPedidosEnCurso) {
+            _recargaPedidosPendiente = true;
+            return;
+        }
+        _cargaPedidosEnCurso = true;
 
-        grid.innerHTML = `
+        if (!silenciosa) grid.innerHTML = `
             <div class="loading-state">
                 <div class="spinner"></div>
                 <span>Cargando comandas…</span>
             </div>`;
 
         try {
+            try {
+                const { data: servicio } = await supabaseClient.from('system_settings')
+                    .select('value').eq('key', 'active_menu_period').maybeSingle();
+                window.menuPeriodActivo = servicio?.value === 'night' ? 'night' : 'day';
+            } catch (errorServicio) {
+                console.warn('[La 26] No se pudo leer el servicio; se conserva el último filtro:', errorServicio);
+            }
             // Capa 1: query principal con join anidado
-            const { data: orders, error } = await supabaseClient
+            const consultaPedidos = (incluirServicio) => supabaseClient
                 .from('orders')
                 .select(`
                     id,
@@ -155,6 +185,7 @@ window.La26 = {
                     total_amount,
                     created_at,
                     notes,
+                    ${incluirServicio ? 'service_period,' : ''}
                     tables!left ( number, label ),
                     order_items (
                         id,
@@ -169,6 +200,14 @@ window.La26 = {
                 `)
                 .in('status', ['pending', 'confirmed', 'in_kitchen'])
                 .order('created_at', { ascending: true });
+
+            let { data: orders, error } = await consultaPedidos(true);
+            if (error?.code === '42703') {
+                const legacy = await consultaPedidos(false);
+                orders = legacy.data;
+                error = legacy.error;
+                if (!error) orders = (orders || []).map(order => ({ ...order, service_period: 'day' }));
+            }
 
             if (error) throw error;
 
@@ -200,8 +239,10 @@ window.La26 = {
                 }
             }
 
-            _allOrders = orders || [];
+            const servicioVisible = window.menuPeriodActivo === 'night' ? 'night' : 'day';
+            _allOrders = (orders || []).filter(order => (order.service_period || 'day') === servicioVisible);
             _actualizarContadores();
+            _cargarContadorEntregados();
             _renderizarPedidos();
 
             const ahora   = new Date();
@@ -211,16 +252,26 @@ window.La26 = {
 
         } catch (err) {
             console.error('[La 26] Error cargando pedidos:', err);
+            if (silenciosa) return;
             grid.innerHTML = `
                 <div class="empty-state">
-                    <div class="empty-icon">⚠️</div>
+                    <div class="empty-icon"><i data-lucide="triangle-alert"></i></div>
                     <div class="empty-title">Error de conexión</div>
-                    <div class="empty-sub">${err.message}<br><br>
+                        <div class="empty-sub">${err.message}<br><br>
                         <button onclick="La26.cargarPedidos()" style="font-size:13px;color:var(--oliva);text-decoration:underline;background:none;border:none;cursor:pointer;">
                             Reintentar
                         </button>
                     </div>
                 </div>`;
+            if (window.lucide) lucide.createIcons({ nodes:[grid] });
+        } finally {
+            _cargaPedidosEnCurso = false;
+            if (_recargaPedidosPendiente) {
+                _recargaPedidosPendiente = false;
+                if (_currentRole === 'cocina') {
+                    setTimeout(() => La26.cargarPedidos({ silenciosa: true }), 250);
+                }
+            }
         }
     },
 
@@ -286,13 +337,13 @@ window.La26 = {
                 if (notifErr) {
                     console.error('[Notif] ❌ Error al insertar notificación:', notifErr);
                 } else {
-                    console.log('[Notif] ✅ Notificación insertada:', notifData);
+                    console.log('[Notif] Notificación insertada:', notifData);
                 }
             }
         } catch(e) { console.error('[Notif] ❌ Excepción al notificar mesero:', e); }
         // ────────────────────────────────────────────────────
 
-        _mostrarToast('✅ Pedido despachado correctamente', 'success');
+        _mostrarToast('Pedido despachado correctamente', 'success');
         setTimeout(() => La26.cargarPedidos(), 800);
     },
 };
@@ -306,58 +357,82 @@ function cargarPedidos()                      { return La26.cargarPedidos(); }
 // FUNCIONES PRIVADAS
 // ============================================================
 
+function _mostrarTransicionAcceso(userData, userName) {
+    const overlay = document.getElementById('auth-transition');
+    const title = document.getElementById('auth-transition-title');
+    const detail = document.getElementById('auth-transition-detail');
+    if (!overlay) return;
+    if (title) title.textContent = `Entrando como ${userData.label || userName}`;
+    if (detail) {
+        if (userData.role === 'cliente') detail.textContent = 'Preparando el espacio de pedidos del mesero.';
+        else if (userData.role === 'admin') detail.textContent = `Preparando el panel de administración, ${userName}.`;
+        else detail.textContent = `Hola, ${userName}. Estamos preparando tu espacio de trabajo.`;
+    }
+    overlay.hidden = false;
+    requestAnimationFrame(() => overlay.classList.add('is-visible'));
+}
+
+function _ocultarTransicionAcceso() {
+    const overlay = document.getElementById('auth-transition');
+    if (!overlay) return;
+    overlay.classList.remove('is-visible');
+    setTimeout(() => { overlay.hidden = true; }, 300);
+}
 function _mostrarLogin() {
     const scLogin   = document.getElementById('screen-login');
     const scCocina  = document.getElementById('screen-cocina');
     const navAdmin  = document.getElementById('nav-admin');
     const barCocina = document.getElementById('bar-cocina');
 
-    if (scLogin)   scLogin.style.display = 'flex';
+    // Respeta la composición CSS de dos columnas en escritorio y una en móvil.
+    if (scLogin)   scLogin.style.display = 'grid';
     if (scCocina)  scCocina.classList.remove('visible');
     if (navAdmin)  navAdmin.classList.remove('visible');
     if (barCocina) barCocina.classList.remove('visible');
     document.body.className = '';
 
-    setTimeout(() => document.getElementById('login-user')?.focus(), 300);
 }
 
 function _iniciarApp() {
     const scLogin = document.getElementById('screen-login');
+
+    if (_currentRole === 'admin') {
+        // La sesión ya está guardada; abre directamente el panel administrativo.
+        setTimeout(() => { window.location.href = 'admin.html'; }, 320);
+        return;
+    }
+
+    if (_currentRole === 'cocina') _ocultarTransicionAcceso();
     if (scLogin) scLogin.style.display = 'none';
     document.body.className = `role-${_currentRole}`;
 
     const userData = LA26_USERS[_currentUser] || {};
     const navEmoji    = document.getElementById('nav-emoji');
     const navUsername = document.getElementById('nav-username');
-    if (navEmoji)    navEmoji.textContent    = userData.emoji || '';
+    if (navEmoji)    navEmoji.replaceChildren();
     if (navUsername) navUsername.textContent = _currentUser;
 
-    if (_currentRole === 'admin') {
-        document.getElementById('nav-admin')?.classList.add('visible');
-        _mostrarCocina();
-    } else if (_currentRole === 'cocina') {
+    if (_currentRole === 'cocina') {
         _mostrarCocina();
     } else if (_currentRole === 'cliente') {
-        _mostrarMsgLogin('Bienvenido. Redirigiendo…', 'success');
-        if (scLogin) scLogin.style.display = 'flex';
-        setTimeout(() => {
-            window.location.href = `menu.html?usuario=${encodeURIComponent(_currentUser)}`;
-        }, 900);
+        // Esta cuenta interna abre el flujo de pedidos del mesero; carta.html es solo pública/QR.
+        window.location.href = 'menu.html';
+        return;
     }
 }
-
 function _mostrarCocina() {
     document.getElementById('screen-cocina')?.classList.add('visible');
     document.getElementById('bar-cocina')?.classList.add('visible');
 
     const barLabel = document.getElementById('bar-user-label');
     const userData = LA26_USERS[_currentUser] || {};
-    if (barLabel) barLabel.textContent = `${userData.emoji || ''} ${userData.label || ''}`;
+    if (barLabel) barLabel.textContent = userData.label || '';
 
     _inyectarBottomNav();
 
     La26.cargarPedidos();
     _activarRealtime();
+    _actualizarAlVolverACocina();
     _iniciarTimers();
     CocinaHist._programarReset();
 }
@@ -411,36 +486,40 @@ function _inyectarBottomNav() {
         }
         .bnav-cocina-item:active { opacity: .7; }
         .bnav-cocina-icon { font-size: 20px; line-height: 1; }
+        .bnav-cocina-icon svg { width:19px; height:19px; stroke-width:1.8; }
         .bnav-cocina-label { font-size: 9.5px; font-weight: 600; letter-spacing: .2px; white-space: nowrap; }
+        body.theme-night #bottom-nav-cocina { background:#202923 !important; border-color:#35443a !important; box-shadow:0 -6px 22px rgba(0,0,0,.24) !important; }
+        body.theme-night #bottom-nav-cocina .bnav-cocina-item { color:#bfc9c0 !important; }
     `;
     document.head.appendChild(styleEl);
 
     nav.innerHTML = `
-        <button class="bnav-cocina-item" onclick="La26.cargarPedidos()" aria-label="Actualizar">
-            <span class="bnav-cocina-icon">🔄</span>
+        <button class="bnav-cocina-item" onclick="_actualizarCocinaVisible()" aria-label="Actualizar">
+            <span class="bnav-cocina-icon"><i data-lucide="refresh-cw"></i></span>
             <span class="bnav-cocina-label">Actualizar</span>
         </button>
         <button class="bnav-cocina-item" onclick="La26.setFilter('all', null)" aria-label="Todos">
-            <span class="bnav-cocina-icon">🍽️</span>
+            <span class="bnav-cocina-icon"><i data-lucide="layout-grid"></i></span>
             <span class="bnav-cocina-label">Todos</span>
         </button>
         <button class="bnav-cocina-item" onclick="La26.setFilter('pending', null)" aria-label="Pendientes">
-            <span class="bnav-cocina-icon">⏳</span>
+            <span class="bnav-cocina-icon"><i data-lucide="clock-3"></i></span>
             <span class="bnav-cocina-label">Pendientes</span>
         </button>
         <button class="bnav-cocina-item" onclick="La26.cerrarSesion()" aria-label="Salir">
-            <span class="bnav-cocina-icon">🚪</span>
+            <span class="bnav-cocina-icon"><i data-lucide="log-out"></i></span>
             <span class="bnav-cocina-label">Salir</span>
         </button>
         ${esAdmin ? `
         <a class="bnav-cocina-item" href="admin.html" aria-label="Panel Admin"
            style="color:#4a6741;">
-            <span class="bnav-cocina-icon">📊</span>
+            <span class="bnav-cocina-icon"><i data-lucide="bar-chart-2"></i></span>
             <span class="bnav-cocina-label" style="color:#4a6741;font-weight:700;">Admin</span>
         </a>` : ''}
     `;
 
     document.body.appendChild(nav);
+    if (window.lucide) lucide.createIcons({ nodes:[nav] });
 }
 
 // ── Realtime ──────────────────────────────────────────────
@@ -448,9 +527,13 @@ function _activarRealtime() {
     if (_realtimeChannel) supabaseClient.removeChannel(_realtimeChannel);
 
     let debounceTimer = null;
-    const recargar = (ms = 400) => {
+    const recargar = (ms = 150) => {
         clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => La26.cargarPedidos(), ms);
+        debounceTimer = setTimeout(() => {
+            if (_currentRole === 'cocina' && document.visibilityState !== 'hidden') {
+                La26.cargarPedidos({ silenciosa: true });
+            }
+        }, ms);
     };
 
     _realtimeChannel = supabaseClient
@@ -459,14 +542,14 @@ function _activarRealtime() {
             (payload) => {
                 console.info('[La 26] 📦 Nuevo pedido:', payload.new?.order_number || payload.new?.id);
                 _dispararAlerta(payload.new);
-                recargar(1500);
+                recargar(100);
             })
         .on('postgres_changes', { event:'UPDATE', schema:'public', table:'orders' },
-            () => { console.info('[La 26] 🔄 Pedido actualizado'); recargar(300); })
+            () => { console.info('[La 26] Pedido actualizado'); recargar(100); })
         .on('postgres_changes', { event:'INSERT', schema:'public', table:'order_items' },
             (payload) => {
-                console.info('[La 26] 🍽️ Nuevo ítem recibido, recargando comanda…');
-                recargar(1200);
+                console.info('[La 26] Nuevo ítem recibido, recargando comanda…');
+                recargar(180);
             })
         .subscribe((status) => {
             console.info('[La 26] Canal RT:', status);
@@ -475,13 +558,25 @@ function _activarRealtime() {
         });
 }
 
+// La cocina refresca al recibir cambios en Supabase y al volver a la pestaña;
+// no usa sondeos periódicos que muevan o repinten la pantalla cada pocos segundos.
+function _actualizarAlVolverACocina() {
+    if (_cocinaVisibilityHandlerIniciado) return;
+    _cocinaVisibilityHandlerIniciado = true;
+    document.addEventListener('visibilitychange', () => {
+        if (_currentRole === 'cocina' && document.visibilityState === 'visible') {
+            La26.cargarPedidos({ silenciosa: true });
+        }
+    });
+}
+
 function _dispararAlerta(pedido) {
     // [FIX-MESA v3.3] Leer mesa desde notes del pedido, no desde join
     const notasOrden = pedido?.notes || '';
     const mesaDesdeNotes = _extraerMesaDesdeNotes(notasOrden);
     const mesa = mesaDesdeNotes || pedido?.table_id || 'nueva mesa';
 
-    _mostrarToast(`🛎️ Nuevo pedido — ${mesa}`, 'new');
+    _mostrarToast(`Nuevo pedido — ${mesa}`, 'new');
 
     const banner    = document.getElementById('new-order-banner');
     const bannerTxt = document.getElementById('banner-text');
@@ -519,9 +614,10 @@ function _mostrarToast(mensaje, tipo = 'info') {
     if (tipo === 'new')     toast.style.borderLeftColor = '#4ade80';
     if (tipo === 'error')   toast.style.borderLeftColor = '#ef4444';
     if (tipo === 'success') toast.style.borderLeftColor = '#22c55e';
-    const iconos = { new:'🛎️', info:'ℹ️', success:'✅', warning:'⚠️', error:'❌' };
-    toast.innerHTML = `<span>${iconos[tipo]||'ℹ️'}</span><span>${_esc(mensaje)}</span>`;
+    const iconos = { new:'bell-ring', info:'info', success:'circle-check', warning:'triangle-alert', error:'circle-x' };
+    toast.innerHTML = `<span class="toast-icon"><i data-lucide="${iconos[tipo]||'info'}"></i></span><span>${_esc(mensaje)}</span>`;
     container.appendChild(toast);
+    if (window.lucide) lucide.createIcons({ nodes:[toast] });
     setTimeout(() => { toast.classList.add('out'); setTimeout(() => toast.remove(), 350); }, 4000);
 }
 
@@ -569,18 +665,19 @@ function _renderizarPedidos(nuevoId = null) {
 
     if (filtradas.length === 0) {
         const msgs = {
-            all:        { icon:'🍽️', title:'Cocina despejada',     sub:'No hay comandas activas.' },
-            pending:    { icon:'⏳', title:'Sin pendientes',        sub:'Todos los pedidos han sido tomados.' },
-            in_kitchen: { icon:'🔥', title:'Nada en preparación',  sub:'No hay órdenes siendo preparadas.' },
-            confirmed:  { icon:'✅', title:'Sin confirmados',       sub:'Los pedidos confirmados aparecerán aquí.' },
+            all:        { icon:'layout-grid', title:'Cocina despejada',     sub:'No hay comandas activas.' },
+            pending:    { icon:'clock-3', title:'Sin pendientes',        sub:'Todos los pedidos han sido tomados.' },
+            in_kitchen: { icon:'flame', title:'Nada en preparación',  sub:'No hay órdenes siendo preparadas.' },
+            confirmed:  { icon:'circle-check', title:'Sin confirmados',       sub:'Los pedidos confirmados aparecerán aquí.' },
         };
         const m = msgs[_activeFilter] || msgs.all;
         grid.innerHTML = `
             <div class="empty-state">
-                <div class="empty-icon">${m.icon}</div>
+                <div class="empty-icon"><i data-lucide="${m.icon}"></i></div>
                 <div class="empty-title">${m.title}</div>
                 <div class="empty-sub">${m.sub}</div>
             </div>`;
+        if (window.lucide) lucide.createIcons({ nodes:[grid] });
         return;
     }
 
@@ -591,6 +688,7 @@ function _renderizarPedidos(nuevoId = null) {
     });
 
     grid.innerHTML = ordenadas.map(o => _crearCardHTML(o, o.id === nuevoId)).join('');
+    if (window.lucide) lucide.createIcons({ nodes:[grid] });
     _actualizarTimers();
 }
 
@@ -640,16 +738,16 @@ function _crearCardHTML(order, esNuevo = false) {
     let   modalidad   = '';
     let   modalidadCls = '';
     if (notasOrden.includes('[PARA LLEVAR]')) {
-        modalidad    = '🛍️ Para Llevar / Retiro';
+        modalidad    = 'Para llevar / Retiro';
         modalidadCls = 'modalidad-llevar';
     } else if (notasOrden.includes('[DOMICILIO]')) {
         const matchDir = notasOrden.match(/Dirección:\s*(.+)$/);
         const dir = matchDir ? matchDir[1].trim() : '';
-        modalidad    = `🛵 Domicilio${dir ? ` — ${dir}` : ''}`;
+        modalidad    = `Domicilio${dir ? ` — ${dir}` : ''}`;
         modalidadCls = 'modalidad-domicilio';
     } else if (notasOrden.includes('[MESA]')) {
         // [FIX-MESA v3.3] Usar identificadorMesa que ya viene de notes
-        modalidad    = `🍽️ En mesa — ${identificadorMesa}`;
+        modalidad    = `En mesa — ${identificadorMesa}`;
         modalidadCls = 'modalidad-mesa';
     }
 
@@ -700,20 +798,12 @@ function _crearCardHTML(order, esNuevo = false) {
                     <span class="item-qty">${item.quantity}×</span>
                     <span class="item-name">${_esc(nombrePlato)}</span>
                 </div>
-                ${notaCliente ? `<div class="item-nota">✏️ ${_esc(notaCliente)}</div>` : ''}
+                ${notaCliente ? `<div class="item-nota">${_esc(notaCliente)}</div>` : ''}
             </div>`;
         }).join('');
     }
 
-    let botonesHTML = '';
-    if (order.status === 'pending' || order.status === 'confirmed') {
-        botonesHTML = `
-            <button class="btn-kitchen en-cocina"
-                    onclick="La26.cambiarEstado('${order.id}', 'in_kitchen')">
-                👨‍🍳 En cocina
-            </button>`;
-    }
-    botonesHTML += `
+    const botonesHTML = `
         <button class="btn-kitchen despachar"
                 onclick="La26.despacharPedido('${order.id}')">
             <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
@@ -738,8 +828,8 @@ function _crearCardHTML(order, esNuevo = false) {
             </div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
                 <span class="status-badge ${cfg.cls}">${cfg.label}</span>
-                <span class="mesa-tag">📍 ${_esc(identificadorMesa)}</span>
-                <span style="font-size:11px;color:#6b7280;">🕐 ${fechaStr}</span>
+                <span class="mesa-tag">${_esc(identificadorMesa)}</span>
+                <span class="order-time"><i data-lucide="clock-3"></i>${fechaStr}</span>
                 <span class="card-timer" data-created="${order.created_at || ''}" id="timer-${order.id}"
                       style="font-size:12px;font-weight:500;color:#9ca3af;">—</span>
             </div>
@@ -778,7 +868,7 @@ function _actualizarTimers() {
         const mins = Math.floor((ahora - new Date(raw).getTime()) / 60000);
         if (mins < 1)       { el.textContent = 'Ahora mismo';         el.style.color = '#4ade80'; }
         else if (mins < 10) { el.textContent = `Hace ${mins} min`;    el.style.color = '#9ca3af'; }
-        else if (mins < 20) { el.textContent = `⚠ ${mins} min`;      el.style.color = '#fbbf24'; }
+        else if (mins < 20) { el.textContent = `${mins} min`;        el.style.color = '#fbbf24'; }
         else                { el.textContent = `🔴 ${mins} min`;      el.style.color = '#f87171'; }
     });
 }
@@ -790,8 +880,57 @@ function _actualizarContadores() {
     }, {});
     const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val || 0; };
     set('count-pending',   counts.pending);
-    set('count-preparing', (counts.in_kitchen || 0) + (counts.confirmed || 0));
     set('count-delivered', counts.delivered);
+}
+
+async function _cargarContadorEntregados() {
+    const countEl = document.getElementById('count-delivered');
+    if (!countEl) return;
+
+    const periodo = window.menuPeriodActivo === 'night' ? 'night' : 'day';
+    const restaurantId = await resolverRestaurantId();
+    if (!restaurantId) return;
+
+    const { inicio, fin } = CocinaHist._hoy();
+    const consultar = (incluirPeriodo) => {
+        let query = supabaseClient
+            .from('orders')
+            .select('id', { count: 'exact', head: true })
+            .eq('restaurant_id', restaurantId)
+            .eq('status', 'delivered')
+            .gte('created_at', inicio)
+            .lt('created_at', fin);
+        if (incluirPeriodo) query = query.eq('service_period', periodo);
+        return query;
+    };
+    let { count, error } = await consultar(true);
+    // Compatibilidad con bases antiguas que aún no separan servicios.
+    if (error?.code === '42703' && periodo === 'day') {
+        ({ count, error } = await consultar(false));
+    }
+
+    if (window.menuPeriodActivo !== periodo) return;
+    if (error) {
+        console.warn('[La 26] No se pudo actualizar el contador de entregados:', error.message);
+        countEl.textContent = '0';
+        return;
+    }
+    countEl.textContent = count || 0;
+}
+
+function _consultaHistorialEntregados(restaurantId, inicio, fin, periodo, incluirPeriodo = true) {
+    let query = supabaseClient
+        .from('orders')
+        .select(`id, order_number, status, customer_name, total_amount, created_at, notes,
+                 ${incluirPeriodo ? 'service_period,' : ''}
+                 order_items ( id, quantity, unit_price, notes, item_status, menu_items ( name ) )`)
+        .eq('restaurant_id', restaurantId)
+        .eq('status', 'delivered')
+        .gte('created_at', inicio)
+        .lt('created_at', fin)
+        .order('created_at', { ascending: false });
+    if (incluirPeriodo) query = query.eq('service_period', periodo);
+    return query;
 }
 
 function _mostrarMsgLogin(texto, tipo) {
@@ -876,7 +1015,7 @@ if (btnSimular) btnSimular.addEventListener('click', ejecutarSimulador);
 
 async function ejecutarSimulador() {
     if (!btnSimular) return;
-    btnSimular.disabled = true; btnSimular.textContent = '⏳ Generando comanda...';
+    btnSimular.disabled = true; btnSimular.textContent = 'Generando comanda...';
     try {
         const restaurantId = await resolverRestaurantId();
         if (!restaurantId) { alert('No se pudo resolver el ID del restaurante.'); return; }
@@ -928,7 +1067,7 @@ async function ejecutarSimulador() {
 
         const { error: errItems } = await supabaseClient.from('order_items').insert(orderItems);
         if (errItems) console.error('[La 26] Error en order_items del simulador:', errItems);
-        else console.log(`[La 26] ✅ Pedido simulado ${orderNo} con ${orderItems.length} plato(s).`);
+        else console.log(`[La 26] Pedido simulado ${orderNo} con ${orderItems.length} plato(s).`);
 
         setTimeout(() => La26.cargarPedidos(), 1800);
 
@@ -948,6 +1087,7 @@ const CocinaHist = {
     _pedidos: [],
     _cargado: false,
     _canal: null,
+    _loadVersion: 0,
 
     _hoy() {
         // Día de operación: inicia a las 05:00 UTC (medianoche Bogotá)
@@ -963,23 +1103,24 @@ const CocinaHist = {
     async cargar() {
         const grid = document.getElementById('hist-cocina-grid');
         if (!grid) return;
+        const version = ++this._loadVersion;
+        const periodo = window.menuPeriodActivo === 'night' ? 'night' : 'day';
+        const title = document.getElementById('hist-cocina-title');
+        if (title) title.textContent = `Pedidos despachados hoy · ${periodo === 'night' ? 'Noche' : 'Día'}`;
         grid.innerHTML = `<div class="loading-state"><div class="spinner"></div><span>Cargando historial…</span></div>`;
 
         const { inicio, fin } = this._hoy();
         const restaurantId = await resolverRestaurantId();
+        if (version !== this._loadVersion) return;
         if (!restaurantId) {
             grid.innerHTML = `<div class="empty-state"><div class="empty-title">No se pudo identificar el restaurante</div></div>`;
             return;
         }
-        const { data, error } = await supabaseClient
-            .from('orders')
-            .select(`id, order_number, status, customer_name, total_amount, created_at, notes,
-                     order_items ( id, quantity, unit_price, notes, item_status, menu_items ( name ) )`)
-            .eq('restaurant_id', restaurantId)
-            .eq('status', 'delivered')
-            .gte('created_at', inicio)
-            .lt('created_at', fin)
-            .order('created_at', { ascending: false });
+        let { data, error } = await _consultaHistorialEntregados(restaurantId, inicio, fin, periodo);
+        if (error?.code === '42703' && periodo === 'day') {
+            ({ data, error } = await _consultaHistorialEntregados(restaurantId, inicio, fin, periodo, false));
+        }
+        if (version !== this._loadVersion || window.menuPeriodActivo !== periodo) return;
 
         if (error) {
             grid.innerHTML = `<div class="empty-state"><div class="empty-title">Error al cargar historial</div><div class="empty-sub">${error.message}</div></div>`;
@@ -999,7 +1140,8 @@ const CocinaHist = {
         if (countEl) countEl.textContent = this._pedidos.length;
 
         if (this._pedidos.length === 0) {
-            grid.innerHTML = `<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-title">Sin despachos aún hoy</div><div class="empty-sub">Los pedidos marcados como despachados aparecerán aquí.</div></div>`;
+            grid.innerHTML = `<div class="empty-state"><div class="empty-icon"><i data-lucide="circle-check"></i></div><div class="empty-title">Sin despachos aún hoy</div><div class="empty-sub">Los pedidos marcados como despachados aparecerán aquí.</div></div>`;
+            if (window.lucide) lucide.createIcons({ nodes:[grid] });
             return;
         }
 
@@ -1022,16 +1164,17 @@ const CocinaHist = {
                 <div class="hist-card-head">
                     <div>
                         <div class="hist-card-num">${_esc(p.order_number || '—')}</div>
-                        <div class="hist-card-mesa">📍 ${_esc(mesa)}</div>
+                        <div class="hist-card-mesa">${_esc(mesa)}</div>
                     </div>
                     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-                        <span class="hist-hora">🕐 ${hora}</span>
+                        <span class="hist-hora">${hora}</span>
                         <button class="btn-reactivar" onclick="CocinaHist.reactivar('${p.id}')">↩ Reactivar</button>
                     </div>
                 </div>
                 <div class="hist-card-items">${items || '<span style="color:#9ca3af;font-size:12px;">Sin ítems</span>'}</div>
             </div>`;
         }).join('');
+        if (window.lucide) lucide.createIcons({ nodes:[grid] });
     },
 
     async reactivar(pedidoId) {
@@ -1091,6 +1234,8 @@ const CocinaHist = {
     },
 };
 
+window._cargarHistorialCocina = () => CocinaHist.cargar();
+
 function _mostrarSeccionHistCocina() {
     document.getElementById('cocina-main-section').style.display  = 'none';
     document.getElementById('hist-cocina-section').style.display  = 'block';
@@ -1104,10 +1249,18 @@ function _mostrarSeccionActiva() {
     document.getElementById('cocina-main-section').style.display  = 'block';
 }
 
+function _actualizarCocinaVisible() {
+    if (document.getElementById('hist-cocina-section')?.style.display !== 'none') {
+        return CocinaHist.cargar();
+    }
+    return La26.cargarPedidos();
+}
+
 // ============================================================
 // INICIALIZACIÓN
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
+    aplicarTemaServicioCompartido();
     const savedRole = sessionStorage.getItem('user_role');
     const savedUser = sessionStorage.getItem('user_name');
     const sesionValida = savedRole && savedUser && LA26_USERS[savedUser]?.role === savedRole;

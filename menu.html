@@ -3,18 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#ffffff">
-    <title>Restaurante la 26 — Carta</title>
+    <meta name="theme-color" content="#173f2b">
+    <title>Restaurante la 26 — Pedidos del mesero</title>
 
-    <link rel="icon" type="image/png" href="logo.png">
-    <link rel="shortcut icon" href="logo.png">
-    <link rel="apple-touch-icon" href="logo.png">
+    <link rel="icon" type="image/svg+xml" href="favicon-la26.svg?v=12">
+    <link rel="shortcut icon" type="image/svg+xml" href="favicon-la26.svg?v=12">
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
 
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 
@@ -23,13 +22,13 @@
            VARIABLES
         ═══════════════════════════════════════════ */
         :root {
-            --oliva:        #4a5a28;
-            --oliva-lt:     #5c7032;
-            --oliva-pale:   #f0f3e8;
-            --oliva-pale2:  #e6ecda;
-            --oliva-bd:     #c2d09c;
-            --crema-bg:     #fafaf8;
-            --crema-dk:     #f2f2ee;
+            --oliva:        #096b3a;
+            --oliva-lt:     #0b7d45;
+            --oliva-pale:   #eaf4ed;
+            --oliva-pale2:  #dceee1;
+            --oliva-bd:     #b8d8c1;
+            --crema-bg:     #fbfaf7;
+            --crema-dk:     #f3f2ec;
             --ink:          #18180f;
             --ink-mid:      #3a3a30;
             --ink-muted:    #78786e;
@@ -112,7 +111,7 @@
         .sesion-icon { font-size: 42px; margin-bottom: 14px; display:flex; align-items:center; justify-content:center; }
         .sesion-icon svg { width:42px; height:42px; color:var(--oliva); }
         .sesion-card h2 {
-            font-family: 'Cormorant Garamond', serif;
+            font-family: 'DM Sans', sans-serif;
             font-size: 1.65rem; font-weight: 400; color: var(--ink);
             margin-bottom: 6px; line-height: 1.2;
         }
@@ -167,15 +166,14 @@
 
         .logo-lockup { display: flex; align-items: center; gap: 10px; }
         .logo-lockup img {
-            width: 40px; height: 40px;
-            object-fit: contain; border-radius: 8px; flex-shrink: 0;
+            width: 40px; height: 48px;
+            object-fit: contain; border-radius: 0; background: transparent; box-shadow: none; flex-shrink: 0;
         }
         .logo-wordmark h1 {
-            font-family: 'Cormorant Garamond', serif;
-            font-size: 1.35rem; font-weight: 400; color: var(--ink);
-            letter-spacing: -0.015em; line-height: 1.1;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 1.1rem; font-weight: 700; color: var(--ink);
+            letter-spacing: 0; line-height: 1.1;
         }
-        .logo-wordmark h1 em { font-style: italic; color: var(--oliva); }
         .logo-wordmark p {
             font-size: 10px; color: var(--ink-ghost);
             letter-spacing: 0.10em; text-transform: uppercase;
@@ -276,7 +274,7 @@
             padding: 0 18px; margin: 26px 0 10px;
         }
         .section-label h2 {
-            font-family: 'Cormorant Garamond', serif;
+            font-family: 'DM Sans', sans-serif;
             font-size: 1.25rem; font-weight: 400; color: var(--ink);
             white-space: nowrap; line-height: 1.2;
         }
@@ -297,14 +295,10 @@
         }
         .plate-card:active { transform: scale(0.987); }
         .plate-info { flex: 1; min-width: 0; }
-        .plate-name { font-size: 14px; font-weight: 500; color: var(--ink); line-height: 1.35; margin-bottom: 3px; }
-        .plate-desc {
-            font-size: 11.5px; color: var(--ink-muted); line-height: 1.55; margin-bottom: 7px;
-            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-        }
+        .plate-name { font-size: 1.1rem; font-weight: 500; color: var(--ink); line-height: 1.35; margin-bottom: 3px; }
         .plate-price {
-            font-family: 'Cormorant Garamond', serif;
-            font-size: 1.1rem; font-weight: 500; color: var(--oliva);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 14px; font-weight: 500; color: var(--oliva);
         }
         .plate-price.incluido {
             font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 500;
@@ -313,6 +307,14 @@
         }
         .plate-card.agotado { opacity: 0.50; pointer-events: none; background: var(--crema-dk); }
         .plate-card.agotado .plate-name { text-decoration: line-through; color: var(--ink-muted); }
+        .plate-card.night-card { padding:10px; gap:14px; min-height:116px; border-radius:18px; }
+        .plate-image, .plate-image-placeholder { width:104px; height:96px; flex:0 0 104px; border-radius:12px; object-fit:cover; background:#e9e2d7; }
+        .plate-image-placeholder { display:flex; align-items:center; justify-content:center; color:#096b3a; }
+        .plate-image-placeholder svg { width:28px; height:28px; }
+        .night-card .plate-info { display:flex; align-self:stretch; flex-direction:column; justify-content:center; gap:8px; }
+        .night-card .plate-name { font-size:1.1rem; font-weight:700; }
+        .night-card .plate-price { display:inline-flex; align-items:center; gap:6px; font-family:'DM Sans',sans-serif; font-size:14px; font-weight:700; }
+        .night-card .plate-price svg { width:17px; height:17px; }
 
         .badge-agotado {
             display: inline-block; font-size: 10px; font-weight: 500;
@@ -379,7 +381,7 @@
         }
         .cart-bar-label { font-size: 13.5px; font-weight: 500; color: #fff; letter-spacing: 0.02em; }
         .cart-bar-total {
-            font-family: 'Cormorant Garamond', serif;
+            font-family: 'DM Sans', sans-serif;
             font-size: 1.2rem; font-weight: 500; color: rgba(255,255,255,0.92);
         }
 
@@ -437,7 +439,7 @@
         }
         .stat-chip:last-child { border-right: none; }
         .stat-num {
-            font-family: 'Cormorant Garamond', serif;
+            font-family: 'DM Sans', sans-serif;
             font-size: 1.45rem; font-weight: 500; color: var(--oliva); line-height: 1;
         }
         .stat-lbl {
@@ -574,7 +576,7 @@
         }
         .item-name { flex: 1; font-size: 13px; color: var(--ink); line-height: 1.35; }
         .item-price {
-            font-family: 'Cormorant Garamond', serif;
+            font-family: 'DM Sans', sans-serif;
             font-size: 1rem; font-weight: 500; color: var(--oliva);
             white-space: nowrap; flex-shrink: 0;
         }
@@ -588,7 +590,7 @@
             text-transform: uppercase; letter-spacing: 0.07em;
         }
         .card-total-monto {
-            font-family: 'Cormorant Garamond', serif;
+            font-family: 'DM Sans', sans-serif;
             font-size: 1.25rem; font-weight: 500; color: var(--oliva);
         }
         .card-order-no {
@@ -700,7 +702,7 @@
             font-size: 14px; font-weight: 600; color: var(--ink);
         }
         .edit-item-subtotal {
-            font-family: 'Cormorant Garamond', serif;
+            font-family: 'DM Sans', sans-serif;
             font-size: 1rem; font-weight: 500; color: var(--oliva);
             min-width: 48px; text-align: right;
         }
@@ -745,7 +747,7 @@
             text-transform: uppercase; letter-spacing: 0.07em;
         }
         .edit-total-monto {
-            font-family: 'Cormorant Garamond', serif;
+            font-family: 'DM Sans', sans-serif;
             font-size: 1.3rem; font-weight: 500; color: var(--oliva);
         }
 
@@ -784,7 +786,7 @@
 
         .modal-header { padding: 4px 20px 14px; border-bottom: 1px solid var(--border-lt); flex-shrink: 0; }
         .modal-header h3 {
-            font-family: 'Cormorant Garamond', serif;
+            font-family: 'DM Sans', sans-serif;
             font-size: 1.5rem; font-weight: 400; color: var(--ink); margin-bottom: 2px;
         }
         .modal-header p { font-size: 12px; color: var(--ink-ghost); }
@@ -866,7 +868,7 @@
             color: #92400e;
         }
         .summary-price {
-            font-family: 'Cormorant Garamond', serif;
+            font-family: 'DM Sans', sans-serif;
             font-size: 1.05rem; font-weight: 500; color: var(--oliva); white-space: nowrap; flex-shrink: 0;
         }
 
@@ -876,7 +878,7 @@
             flex-shrink: 0; background: var(--oliva-pale);
         }
         .modal-total-label { font-size: 12px; font-weight: 500; color: var(--oliva); text-transform: uppercase; letter-spacing: 0.06em; }
-        .modal-total-monto { font-family: 'Cormorant Garamond', serif; font-size: 1.45rem; font-weight: 500; color: var(--oliva); }
+        .modal-total-monto { font-family: 'DM Sans', sans-serif; font-size: 1.45rem; font-weight: 500; color: var(--oliva); }
 
         .modal-form-section {
             padding: 16px 20px; border-top: 1px solid var(--border-lt);
@@ -964,6 +966,21 @@
 
         .z-content { position: relative; z-index: 1; }
 
+        /* Entrada suave al turno y acabado actualizado acorde al logo. */
+        @keyframes la26-arrive { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes la26-overlay { from { opacity:0; } to { opacity:1; } }
+        #sesion-overlay { animation: la26-overlay .2s ease both; }
+        .sesion-card { border-color:rgba(9,107,58,.13); box-shadow:0 28px 80px rgba(8,38,23,.2); }
+        .sesion-icon svg { color:var(--oliva); filter:drop-shadow(0 5px 10px rgba(237,91,42,.18)); }
+        #sesion-btn { background:#087845; color:#fff; border:1px solid #087845; box-shadow:0 6px 16px rgba(8,75,45,.18); }
+        #sesion-btn:hover { background:#06653a; border-color:#06653a; }
+        .app-header { box-shadow:0 8px 28px rgba(26,26,23,.045); }
+        .logo-lockup img { filter:drop-shadow(0 3px 6px rgba(9,107,58,.12)); }
+        .z-content { animation:la26-arrive .42s cubic-bezier(.2,.75,.25,1) both; }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { scroll-behavior:auto !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
+        }
+
         /* Toast */
         #toast-wrap {
             position: fixed; top: 20px; left: 50%;
@@ -973,9 +990,69 @@
             pointer-events: none; width: max-content;
             max-width: calc(100vw - 32px);
         }
+        body.theme-night { --crema-bg:#171c19; --crema-dk:#222925; --ink:#f1efe7; --ink-mid:#d0d0c5; --ink-muted:#a3a99f; --ink-ghost:#a3a99f; --border:#3b463e; --border-lt:#303833; --oliva-pale:#29372d; --oliva-pale2:#344638; --oliva-bd:#435c49; background:var(--crema-bg) !important; color:var(--ink); }
+        body.theme-night #vista-carta, body.theme-night #vista-historial, body.theme-night #menu-sections { background:#171c19 !important; color:#f1efe7; }
+        body.theme-night .plate-card, body.theme-night .modal-card, body.theme-night .modal-panel, body.theme-night .sesion-card, body.theme-night .app-header, body.theme-night .panel, body.theme-night .card, body.theme-night .modal-header, body.theme-night .modal-body, body.theme-night .modal-form-section, body.theme-night .modal-total-row { background-color:#202622; color:var(--ink); border-color:var(--border); }
+        body.theme-night .app-header, body.theme-night .main-tabs, body.theme-night .cats-bar { background:#202622 !important; }
+        body.theme-night .cat-btn:not(.active) { background:#29312b; color:#d5d9d1; border-color:#465248; }
+        body.theme-night .plate-card { background:#202622 !important; border-color:#3b463e; box-shadow:0 4px 16px rgba(0,0,0,.18); }
+        body.theme-night .plate-card.night-card { background:#202622 !important; }
+        body.theme-night .plate-image, body.theme-night .plate-image-placeholder { background:#29312b; }
+        body.theme-night .plate-image-placeholder { color:#f0642e; }
+        body.theme-night .plate-name { color:#f1efe7; }
+        body.theme-night .plate-price { color:#f2bc79; }
+        body.theme-night .btn-add { background:#293b2f; border-color:#58735d; color:#e4eee3; }
+        body.theme-night input, body.theme-night select, body.theme-night textarea, body.theme-night .modal-content, body.theme-night .form-input { background-color:#292f2b !important; color:var(--ink); border-color:#465149; }
+        body.theme-night #adicional-modal > div { background:#202622 !important; color:var(--ink); border-color:var(--border); }
+        body.theme-night #cart-bar { background:#456442; }
+        body.theme-night .bottom-nav, body.theme-night .app-nav { background:#202622; border-color:var(--border); }
+
+        /* Historial nocturno: superficies oscuras y texto con contraste cómodo. */
+        body.theme-night .main-tabs { background:#202622; border-color:#39443c; }
+        body.theme-night .main-tab { color:#b8c0b7; }
+        body.theme-night .main-tab.active { color:#f2bc79; border-bottom-color:#e77b35; }
+        body.theme-night .stats-row { background:#202622; border-color:#39443c; }
+        body.theme-night .stat-chip { border-color:#39443c; }
+        body.theme-night .stat-num { color:#f2bc79; }
+        body.theme-night .stat-lbl, body.theme-night .hist-fecha { color:#bdc4ba; }
+        body.theme-night .hfilt-btn { background:#252d28; border-color:#47534a; color:#e0e4dc; }
+        body.theme-night .hfilt-btn.active { background:#31563f; border-color:#64846b; color:#fff; box-shadow:none; }
+        body.theme-night .order-card { background:#222a25; color:#f1efe7; border-color:#465249; box-shadow:0 5px 16px rgba(0,0,0,.18); }
+        body.theme-night .card-head { background:#222a25; }
+        body.theme-night .card-destino, body.theme-night .item-name { color:#f4f1e9; }
+        body.theme-night .card-cliente { color:#d0d5ce; }
+        body.theme-night .card-hora, body.theme-night .card-chevron, body.theme-night .card-order-no { color:#aeb8ad; }
+        body.theme-night .card-body { background:#1c231f; border-color:#3b463e; }
+        body.theme-night .card-total-label { color:#c2c9c0; }
+        body.theme-night .card-total-monto, body.theme-night .item-price { color:#f2bc79; }
+        body.theme-night .item-row { border-color:#39443c; }
+        body.theme-night .card-direccion { background:#202f38; border-color:#3b5963; }
+        body.theme-night .card-direccion-text { color:#c3e0ea; }
+        body.theme-night .card-nota { background:#382d20; border-color:#695033; }
+        body.theme-night .card-nota-text { color:#f4d2a2; }
+        body.theme-night .status-badge.pending { background:#3b3023; color:#ffd49b; border-color:#765d3e; }
+        body.theme-night .status-badge.confirmed, body.theme-night .status-badge.preparing { background:#202f3e; color:#c5ddf8; border-color:#3e5d7b; }
+        body.theme-night .status-badge.ready, body.theme-night .status-badge.delivered { background:#24392c; color:#c9e4c8; border-color:#4d7054; }
+        body.theme-night .status-badge.cancelled { background:#3b2727; color:#f2c4c0; border-color:#704646; }
+        body.theme-night .btn-editar-pedido { background:#293b2f; color:#d8ead9; border-color:#58735d; }
+        body.theme-night #btn-refresh-hist { background:#315d42; color:#fff; }
+        body.theme-night .hist-loader p { color:#c1c9c0; }
     </style>
 </head>
 <body>
+<script>
+// Restaurar el tema guardado antes de pintar la carta; menu.js lo confirma
+// después con el servicio vigente de Supabase.
+(() => {
+    try {
+        const periodoInicial = localStorage.getItem('la26_active_menu_period');
+        if (periodoInicial === 'day' || periodoInicial === 'night') {
+            document.body.classList.toggle('theme-night', periodoInicial === 'night');
+            document.documentElement.style.colorScheme = periodoInicial === 'night' ? 'dark' : 'light';
+        }
+    } catch (_) {}
+})();
+</script>
 
 <!-- ══════════════════════════════════════════
      OVERLAY DE SESIÓN DE MESERO
@@ -998,9 +1075,9 @@
 <header class="app-header z-content">
     <div class="header-top">
         <div class="logo-lockup">
-            <img src="logo.png" alt="Logo la 26">
+            <img src="pez-mascota.svg?v=10" alt="Pez cocinero de Restaurante la 26">
             <div class="logo-wordmark">
-                <h1>Restaurante <em>la 26</em></h1>
+                <h1>Restaurante la 26</h1>
                 <p id="header-subtitle">Carta del día</p>
             </div>
         </div>
@@ -1177,7 +1254,7 @@
                     stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
         </div>
-        <h3 style="font-family:'Cormorant Garamond',serif;font-size:1.75rem;font-weight:400;color:var(--ink);margin-bottom:8px;line-height:1.18;">
+        <h3 style="font-family:'DM Sans',sans-serif;font-size:1.75rem;font-weight:400;color:var(--ink);margin-bottom:8px;line-height:1.18;">
             ¡Pedido<br>en cocina!
         </h3>
         <p style="font-size:12.5px;color:var(--ink-muted);line-height:1.65;margin-bottom:6px;">La cocina ya recibió el pedido.</p>
@@ -1240,7 +1317,8 @@
 <div id="toast-wrap"></div>
 
 <script src="la26-core.js"></script>
-<script src="menu.js"></script>
+<script src="menu.js?v=8.1.0-nightcards"></script>
+<script src="service-period-switcher.js"></script>
 
 <script>
 // ══════════════════════════════════════════
@@ -1263,7 +1341,8 @@ const Tabs = {
         document.getElementById('tab-historial').classList.toggle('active', !esCarta);
 
         const sub = document.getElementById('header-subtitle');
-        if (sub) sub.textContent = esCarta ? 'Carta del día' : 'Historial del día';
+        const periodo = window.menuPeriodActivo === 'night' ? 'nocturno' : 'diurno';
+        if (sub) sub.textContent = `${esCarta ? 'Carta' : 'Historial'} ${periodo}`;
 
         if (!esCarta) {
             Hist.cargarSiNecesario();
