@@ -907,6 +907,7 @@
             .mesa-historial-btn.is-home-delivery span { color:var(--blue); }
             .mesa-historial-btn__cliente { max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
             .mesa-historial-btn[hidden] { display:none !important; }
+            #grid-historial-pedidos [hidden] { display:none !important; }
             #pedidos-individuales-historial { display:flex; flex-direction:column; gap:14px; }
             .pedidos-individuales-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
             .pedidos-individuales-toolbar input { width:min(260px,100%); min-height:36px; padding:7px 11px; border:1.5px solid var(--border); border-radius:9px; background:var(--surface); color:var(--text-1); font:500 12px 'DM Sans',sans-serif; }
@@ -1193,7 +1194,7 @@
                 </div>
 
                 <!-- Filtros rápidos de mesa -->
-                <div id="filtros-mesa-historial" role="region" aria-label="Pedidos individuales del turno"></div>
+                <div id="filtros-mesa-historial" role="region" aria-label="Buscar pedidos del turno"></div>
 
                 <!-- Grid tarjetas -->
                 <div id="grid-historial-pedidos"

@@ -3751,7 +3751,6 @@ async function reactivarProducto(idItem, nombreItem) {
 let _vistaHistorialPedidos = 'pendientes'; // 'pendientes' | 'pagados'
 let _historialPedidosFetchVersion = 0;
 let _busquedaMesaHistorial = '';
-let _pedidoSeleccionadoHistorial = null;
 let _historialPedidosAutoRefreshTimer = null;
 let _historialPedidosVisibilityHandlerStarted = false;
 
@@ -3779,7 +3778,6 @@ function _iniciarActualizacionHistorialAlVolver() {
 
 function filtrarHistorialPedidos(vista) {
     _vistaHistorialPedidos = vista;
-    _pedidoSeleccionadoHistorial = null;
     // Estilos botones filtro
     const btnP = document.getElementById('btn-hp-pendientes');
     const btnPg = document.getElementById('btn-hp-pagados');
@@ -3841,78 +3839,28 @@ function _renderFiltrosMesaHistorialAdmin(ordersConMesa) {
         <div id="mesas-historial-toolbar">
             <div>
                 <p style="font-size:12px;font-weight:700;color:var(--text-1);margin:0;">Pedidos del turno</p>
-                <p style="font-size:10.5px;color:var(--text-3);margin:3px 0 0;">${ordersConMesa.length} ${ordersConMesa.length === 1 ? 'pedido' : 'pedidos'} · selecciona uno para ver sus detalles</p>
+                <p style="font-size:10.5px;color:var(--text-3);margin:3px 0 0;">${ordersConMesa.length} ${ordersConMesa.length === 1 ? 'pedido' : 'pedidos'} · todas las mesas a la vista</p>
             </div>
             <input id="buscar-mesa-historial" type="search" value="${_htmlSeguroAdmin(_busquedaMesaHistorial)}"
                 placeholder="Buscar pedido, mesa o cliente…" aria-label="Buscar pedido, mesa o cliente">
-        </div>
-        <div id="pedidos-individuales-historial" role="region" aria-label="Pedidos individuales"></div>`;
-    if (!ordersConMesa.length) {
-        contenedor.querySelector('#buscar-mesa-historial')?.addEventListener('input', event => {
-            _busquedaMesaHistorial = event.currentTarget.value;
-        });
-    }
-}
-
-function filtrarPedidoHistorialAdmin(orderId) {
-    _pedidoSeleccionadoHistorial = String(orderId || '');
-    cargarHistorialPedidos();
-}
-
-function _renderPedidosIndividualesHistorialAdmin(orders) {
-    const contenedor = document.getElementById('pedidos-individuales-historial');
-    if (!contenedor) return;
-    if (!orders?.length) {
-        contenedor.innerHTML = '';
-        return;
-    }
-
-    const botonPedido = ord => {
-        const id = String(ord.id ?? '');
-        const identificador = String(ord._mesaFiltroEtiqueta || 'Pedido');
-        const cliente = _nombreCliente(ord) || 'Cliente sin registrar';
-        const tipo = ord._mesaFiltroTipo;
-        const tipoClase = tipo === 'domicilio' ? 'is-domicilio' : tipo === 'llevar' ? 'is-llevar' : '';
-        const seleccionado = String(_pedidoSeleccionadoHistorial || '') === id;
-        const terminos = _normalizarTextoMesaHistorialAdmin(`${identificador} ${cliente}`);
-        return `<button type="button" class="pedido-selector-btn ${tipoClase} ${seleccionado ? 'is-selected' : ''}"
-                data-pedido-filter="${_htmlSeguroAdmin(id)}" data-pedido-search="${_htmlSeguroAdmin(terminos)}"
-                aria-pressed="${seleccionado}" aria-label="Abrir ${_htmlSeguroAdmin(identificador)}, cliente ${_htmlSeguroAdmin(cliente)}">
-                <span class="pedido-selector-btn__numero">${_htmlSeguroAdmin(identificador)}</span>
-                <span class="pedido-selector-btn__cliente">${_htmlSeguroAdmin(cliente)}</span>
-                <span class="pedido-selector-btn__total">${_htmlSeguroAdmin(formatCOP(ord.total_amount))}</span>
-            </button>`;
-    };
-
-    contenedor.innerHTML = `
-        <div class="pedido-selector-grid">${orders.map(botonPedido).join('')}</div>
-        <p data-pedido-no-encontrado hidden style="margin:4px 0;color:var(--text-3);font-size:11px;">No hay pedidos que coincidan con la búsqueda.</p>`;
-
-    contenedor.querySelectorAll('[data-pedido-filter]').forEach(boton => {
-        boton.addEventListener('click', () => filtrarPedidoHistorialAdmin(boton.dataset.pedidoFilter));
-    });
-    const aplicarBusqueda = () => {
-        const texto = _normalizarTextoMesaHistorialAdmin(_busquedaMesaHistorial);
-        contenedor.querySelectorAll('[data-pedido-filter]').forEach(boton => {
-            boton.hidden = !!texto && !(boton.dataset.pedidoSearch || '').includes(texto);
-        });
-        const pedidosVisibles = contenedor.querySelectorAll('[data-pedido-filter]:not([hidden])').length;
-        const mensajeSinCoincidencias = contenedor.querySelector('[data-pedido-no-encontrado]');
-        if (mensajeSinCoincidencias) mensajeSinCoincidencias.hidden = !texto || pedidosVisibles > 0;
-        const pedidoActivo = [...contenedor.querySelectorAll('[data-pedido-filter]')]
-            .find(boton => boton.dataset.pedidoFilter === String(_pedidoSeleccionadoHistorial || ''));
-        if (pedidoActivo?.hidden) {
-            _pedidoSeleccionadoHistorial = null;
-            const gridDetalle = document.getElementById('grid-historial-pedidos');
-            if (gridDetalle) gridDetalle.innerHTML = `<p style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">Selecciona un pedido para ver su información completa.</p>`;
-        }
-    };
-    const buscador = document.getElementById('buscar-mesa-historial');
+        </div>`;
+    const buscador = contenedor.querySelector('#buscar-mesa-historial');
     buscador?.addEventListener('input', () => {
         _busquedaMesaHistorial = buscador.value;
-        aplicarBusqueda();
+        _aplicarBusquedaHistorialAdmin();
     });
-    aplicarBusqueda();
+}
+
+function _aplicarBusquedaHistorialAdmin() {
+    const texto = _normalizarTextoMesaHistorialAdmin(_busquedaMesaHistorial);
+    const grid = document.getElementById('grid-historial-pedidos');
+    if (!grid) return;
+    const tarjetas = [...grid.querySelectorAll('[data-pedido-search]')];
+    tarjetas.forEach(tarjeta => {
+        tarjeta.hidden = !!texto && !tarjeta.dataset.pedidoSearch.includes(texto);
+    });
+    const mensaje = grid.querySelector('[data-pedido-no-encontrado]');
+    if (mensaje) mensaje.hidden = !tarjetas.length || tarjetas.some(tarjeta => !tarjeta.hidden);
 }
 
 async function cargarHistorialPedidos() {
@@ -3990,27 +3938,13 @@ async function cargarHistorialPedidos() {
         grid.innerHTML = '';
 
         if (!ordersGrupo || ordersGrupo.length === 0) {
-            _pedidoSeleccionadoHistorial = null;
-            _renderPedidosIndividualesHistorialAdmin([]);
             const mensajeVacio = `Sin pedidos ${_vistaHistorialPedidos === 'pagados' ? 'pagados' : 'pendientes'} hoy.`;
             grid.innerHTML = `<p style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">
                 ${mensajeVacio}</p>`;
             return;
         }
 
-        _renderPedidosIndividualesHistorialAdmin(ordersGrupo);
-        let ordenSeleccionada = _pedidoSeleccionadoHistorial
-            ? ordersGrupo.find(ord => String(ord.id) === String(_pedidoSeleccionadoHistorial))
-            : null;
-        if (_pedidoSeleccionadoHistorial && !ordenSeleccionada) _pedidoSeleccionadoHistorial = null;
-
-        if (!ordenSeleccionada) {
-            grid.innerHTML = `<p style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">
-                Selecciona un pedido para ver su información completa.</p>`;
-            return;
-        }
-
-        const orders = [ordenSeleccionada];
+        const orders = ordersGrupo;
         orders.forEach(ord => {
 
             const metodo = ord.payment_method || _extraerMetodoDeNotes(ord.notes || '');
@@ -4066,7 +4000,7 @@ async function cargarHistorialPedidos() {
                     ? 'display:flex;flex-direction:column;gap:12px;border-radius:14px;background:var(--blue-lt);border:1.5px solid rgba(37,99,168,.38);box-shadow:inset 4px 0 0 var(--blue),0 4px 14px rgba(37,99,168,.08);'
                     : 'display:flex;flex-direction:column;gap:12px;border-radius:14px;';
             grid.insertAdjacentHTML('beforeend', `
-                <div class="card${claseCardEntregaAdmin}" style="${styleCardAdmin}">
+                <div class="card${claseCardEntregaAdmin}" data-pedido-search="${_htmlSeguroAdmin(_normalizarTextoMesaHistorialAdmin(`${mesaLabel} ${_nombreCliente(ord)} ${ord.order_number || ''}`))}" style="${styleCardAdmin}">
                     <!-- Cabecera -->
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span class="mono" style="font-size:13px;font-weight:700;color:${colorIdentificadorAdmin};">${_htmlSeguroAdmin(mesaLabel)}</span>
@@ -4124,6 +4058,9 @@ async function cargarHistorialPedidos() {
                     </div>
                 </div>`);
         });
+
+        grid.insertAdjacentHTML('beforeend', '<p data-pedido-no-encontrado hidden style="color:var(--text-3);font-size:12.5px;padding:28px 0;grid-column:1/-1;text-align:center;">No hay pedidos que coincidan con la búsqueda.</p>');
+        _aplicarBusquedaHistorialAdmin();
 
         if (window.lucide) lucide.createIcons();
 
