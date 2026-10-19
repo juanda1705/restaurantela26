@@ -5,7 +5,6 @@
     const URL = 'https://hxmodeduckuhvvspnkxd.supabase.co';
     const KEY = 'sb_publishable_ESxhljLgqWkGvrnKhvbeEg_iBqaGciv';
     const ACTIVE_KEY = 'active_menu_period';
-    const START_KEYS = { day: 'day_service_started_at', night: 'night_service_started_at' };
     const client = window.supabase?.createClient(URL, KEY);
     if (!client) return;
 
@@ -173,11 +172,8 @@
                 const ok = await window.activarPeriodoMenu(period, { mostrarToast: false });
                 if (!ok) return;
             } else {
-                const startKey = START_KEYS[period];
-                const startResult = await client.from('system_settings').upsert(
-                    [{ key: startKey, value: new Date().toISOString() }], { onConflict: 'key' }
-                );
-                if (startResult.error) throw startResult.error;
+                // Solo Administración conoce los límites contables del turno.
+                // Cambiar el servicio no debe sobrescribir su hora de inicio.
                 const activeResult = await client.from('system_settings').upsert(
                     [{ key: ACTIVE_KEY, value: period }], { onConflict: 'key' }
                 );

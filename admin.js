@@ -256,15 +256,14 @@ async function _buildTableMap() {
 // arranque limpia sin arrastrar el corte viejo.
 // ============================================================
 function _resolverInicioDiaEfectivo(inicioDiaISO, periodo = _periodoServicioActivo()) {
-    if (periodo === 'night' && _nightServiceStartAt && Number.isFinite(Date.parse(_nightServiceStartAt))) {
-        return _nightServiceStartAt;
-    }
+    const inicio = periodo === 'night' && Number.isFinite(Date.parse(_nightServiceStartAt))
+        ? _nightServiceStartAt : inicioDiaISO;
     const cierreDesde = localStorage.getItem(`cierre_desde_${periodo}`)
                      || (periodo === 'day' && (localStorage.getItem('cierre_desde') || sessionStorage.getItem('cierre_desde')));
-    if (!cierreDesde) return inicioDiaISO;
+    if (!cierreDesde) return inicio;
     const tsCierre = new Date(cierreDesde).getTime();
-    const tsInicio = new Date(inicioDiaISO).getTime();
-    return (isFinite(tsCierre) && tsCierre > tsInicio) ? cierreDesde : inicioDiaISO;
+    const tsInicio = new Date(inicio).getTime();
+    return (isFinite(tsCierre) && tsCierre > tsInicio) ? cierreDesde : inicio;
 }
 // ============================================================
 // 1. DASHBOARD — CONTABILIDAD Y COMANDAS
@@ -2641,7 +2640,7 @@ async function _leerSettingSistema(key) {
 }
 
 async function _asegurarInicioServicioNoche() {
-    if (_nightServiceStartAt && Number.isFinite(Date.parse(_nightServiceStartAt))) return _nightServiceStartAt;
+    // Volver a leer el inicio compartido: otra pestaña puede haber cerrado el turno.
     _nightServiceStartAt = await _leerSettingSistema(NIGHT_STARTED_KEY);
     if (_nightServiceStartAt && Number.isFinite(Date.parse(_nightServiceStartAt))) return _nightServiceStartAt;
     // Compatibilidad con una noche que ya estaba activa al aplicar la migración:
@@ -2722,14 +2721,9 @@ async function activarPeriodoMenu(periodo, opciones = {}) {
     _mostrarCargandoServicioAdmin(true);
     _renderPeriodoMenu(periodo);
     try {
-        if (anterior !== periodo) {
-            const inicioKey = periodo === 'night' ? NIGHT_STARTED_KEY : 'day_service_started_at';
-            const inicioValue = new Date().toISOString();
-            const inicioResult = await supabaseClient.from('system_settings')
-                .upsert([{ key: inicioKey, value: inicioValue }], { onConflict: 'key' });
-            if (inicioResult.error) throw inicioResult.error;
-            if (periodo === 'night') _nightServiceStartAt = inicioValue;
-        } else if (periodo === 'night') {
+        // Cambiar la vista no abre una caja nueva ni descarta movimientos previos.
+        // El inicio nocturno solo avanza cuando se archiva el cierre automático.
+        if (periodo === 'night') {
             await _asegurarInicioServicioNoche();
         }
         const { error } = await supabaseClient.from('system_settings')
@@ -2825,11 +2819,12 @@ async function _cerrarNocheSiVencida() {
         localStorage.setItem('cierre_desde_night', ahora);
         localStorage.setItem('night_service_closed_at', ahora);
         const { error: cambiarDia } = await supabaseClient.from('system_settings')
-            .upsert([{ key: MENU_PERIOD_KEY, value: 'day' }], { onConflict: 'key' });
+            .upsert([
+                { key: MENU_PERIOD_KEY, value: 'day' },
+                { key: 'day_service_started_at', value: ahora },
+                { key: NIGHT_STARTED_KEY, value: ahora }
+            ], { onConflict: 'key' });
         if (cambiarDia) throw cambiarDia;
-        const nuevoInicioDia = await supabaseClient.from('system_settings')
-            .upsert([{ key: 'day_service_started_at', value: ahora }], { onConflict: 'key' });
-        if (nuevoInicioDia.error) console.warn('No se pudo guardar la apertura del día:', nuevoInicioDia.error);
         _nightServiceStartAt = '';
         ['pm_efectivo','pm_transferencia','pm_fiado','base_caja_hoy'].forEach(k => sessionStorage.removeItem(_claveCajaPeriodo(k, 'night')));
         totalEfectivo = 0; totalTransferencia = 0; totalFiado = 0; baseInicial = 0;
