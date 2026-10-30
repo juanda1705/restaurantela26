@@ -801,8 +801,11 @@
         body.role-cocina .status-badge.pending { background:#fff0e9; border-color:#f2c2af; color:#a6401e; }
         body.role-cocina .status-badge.confirmed { background:#edf3ee; border-color:#d5e1d7; color:#385744; }
         body.role-cocina .status-badge.in_kitchen { background:#edf3ee; border-color:#d5e1d7; color:#385744; }
-        body.role-cocina .order-card.es-llevar { background:#fffaf7; border-color:#f0d7ca; box-shadow:0 5px 18px rgba(237,91,42,.045); }
-        body.role-cocina .order-card.es-llevar:hover { border-color:#e9b49e; box-shadow:0 10px 28px rgba(237,91,42,.09); }
+        body.role-cocina .order-card.es-llevar { background:#fff7e6; border-color:#d97706; border-left:5px solid #f59e0b; box-shadow:0 5px 18px rgba(217,119,6,.12); }
+        body.role-cocina .order-card.es-llevar:hover { border-color:#b45309; box-shadow:0 10px 28px rgba(217,119,6,.2); }
+        body.role-cocina .order-card.es-llevar .card-header { background:#ffedc2; border-color:#edce94; }
+        body.role-cocina .order-card.es-llevar .mesa-tag { background:#ffdf91; border-color:#d97706; color:#78350f; }
+        body.role-cocina .order-card.es-llevar .comanda-modalidad { color:#92400e; font-weight:800; }
         body.role-cocina .empty-state { min-height:300px; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:44px 22px; border:1px dashed #d5dfd6; border-radius:20px; background:linear-gradient(145deg,#fff,#f8faf7); }
         body.role-cocina .empty-icon { width:54px; height:54px; display:grid; place-items:center; margin:0 0 16px; border:1px solid #f2c2af; border-radius:16px; background:#fff0e9; color:#b84a25; opacity:1; }
         body.role-cocina .empty-icon svg { width:24px; height:24px; stroke-width:1.8; }
@@ -816,6 +819,16 @@
         body.theme-night.role-cocina .order-card .card-header { background:#242d27; }
         body.theme-night.role-cocina .order-card .order-item { background:#29312b !important; border-color:#465149 !important; }
         body.theme-night.role-cocina .order-card .item-name { color:#f1efe7 !important; }
+        /* Mantener visible la modalidad para llevar/domicilio en el servicio nocturno. */
+        body.theme-night.role-cocina .order-card.es-llevar { background:#35291c !important; border-color:#d99a3d !important; box-shadow:0 5px 18px rgba(0,0,0,.24) !important; }
+        body.theme-night.role-cocina .order-card.es-llevar:hover { border-color:#ffc66d !important; }
+        body.theme-night.role-cocina .order-card.es-llevar .card-header { background:#49331d; border-color:#805d32 !important; }
+        body.theme-night.role-cocina .order-card.es-llevar .card-body { border-color:#805d32 !important; }
+        body.theme-night.role-cocina .order-card.es-llevar .mesa-tag { background:#ffd48a; border-color:#ffc66d; color:#542c0b; }
+        body.theme-night.role-cocina .order-card.es-llevar .comanda-modalidad { color:#ffd48a; }
+        body.theme-night.role-cocina .order-card.es-llevar .order-number,
+        body.theme-night.role-cocina .order-card.es-llevar .order-time,
+        body.theme-night.role-cocina .order-card.es-llevar .card-timer { color:#e6c69c !important; }
         body.theme-night.role-cocina .empty-state { border-color:#3c4b40; background:linear-gradient(145deg,#202923,#19211b); }
         body.theme-night.role-cocina .empty-title { color:#f0f0e8; }
         body.theme-night.role-cocina .empty-sub { color:#a4afa5; }
